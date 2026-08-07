@@ -13,8 +13,13 @@ import type { ScrubFinding } from "./finding.js";
 //   mpfs.json       { "CODE": { work, pe, mp } }  (RVUs)
 //   cpt.csv         user-licensed CPT: CODE,DESCRIPTION[,FEE]
 
-function dataDir(): string {
+export function dataDir(): string {
   return path.join(configDir(), "data");
+}
+
+/** Read an optional dataset file. Missing or malformed files degrade to null. */
+export function loadDataJson<T>(name: string): T | null {
+  return loadJson<T>(name);
 }
 
 function loadJson<T>(name: string): T | null {

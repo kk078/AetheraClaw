@@ -124,3 +124,34 @@ CREATE TABLE IF NOT EXISTS credit_balances (
 );
 
 CREATE INDEX IF NOT EXISTS idx_credit_balances_status ON credit_balances(status, identified_date);
+
+-- Which edition of each code set is installed locally, so staleness is a fact
+-- rather than a guess. One row per code set; re-registering replaces it.
+CREATE TABLE IF NOT EXISTS code_set_versions (
+  code_set TEXT PRIMARY KEY,          -- 'icd10cm' | 'icd10pcs' | 'hcpcs' | 'hcpcs_drug' | 'ncci' | 'cpt' | 'mpfs'
+  effective_date TEXT NOT NULL,       -- YYYYMMDD the installed edition took effect
+  label TEXT NOT NULL DEFAULT '',
+  code_count INTEGER NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT '',
+  installed_at INTEGER NOT NULL
+);
+
+-- Coverage policy changes already surfaced to the user. The UNIQUE constraint is
+-- what makes policy_watch a watch rather than a report: a document version is
+-- announced once, so re-running it shows only what has moved since.
+CREATE TABLE IF NOT EXISTS policy_alerts (
+  id TEXT PRIMARY KEY,
+  scope TEXT NOT NULL,                -- 'national' | 'local'
+  document_id TEXT NOT NULL,
+  document_version TEXT NOT NULL DEFAULT '',
+  display_id TEXT NOT NULL DEFAULT '',
+  document_type TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',
+  change_note TEXT NOT NULL DEFAULT '',
+  contractor TEXT NOT NULL DEFAULT '',
+  updated_on TEXT NOT NULL DEFAULT '',
+  effective_date TEXT NOT NULL DEFAULT '',
+  url TEXT NOT NULL DEFAULT '',
+  seen_at INTEGER NOT NULL,
+  UNIQUE (scope, document_id, document_version)
+);

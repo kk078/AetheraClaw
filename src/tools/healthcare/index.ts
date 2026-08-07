@@ -30,6 +30,12 @@ import {
 } from "./audit/audit-tracker.js";
 import { emBenchmarkTool } from "./audit/em-benchmark.js";
 import {
+  codeSetRegisterTool,
+  codeUpdateCalendarTool,
+  codeUpdateDiffTool,
+  policyWatchTool,
+} from "./updates/tools.js";
+import {
   creditBalanceAddTool,
   creditBalanceDetectTool,
   creditBalanceListTool,
@@ -91,6 +97,11 @@ export function registerHealthcareTools(
     creditBalanceAddTool,
     creditBalanceListTool,
     creditBalanceResolveTool,
+    // Code & policy currency
+    codeUpdateCalendarTool,
+    codeSetRegisterTool,
+    codeUpdateDiffTool,
+    policyWatchTool,
     // Analytics & prediction
     analyticsQueryTool,
     denialRiskTool,
