@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AetheraClaw</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <header>
+      <h1>🦞 AetheraClaw</h1>
+      <button id="new-session">New session</button>
+    </header>
+    <ul id="session-list"></ul>
+    <footer><span id="status">disconnected</span></footer>
+  </aside>
+  <main id="chat">
+    <div id="messages"></div>
+    <form id="composer">
+      <textarea id="input" rows="2" placeholder="Ask about codes, coverage, claims… (Enter to send, Shift+Enter for newline)"></textarea>
+      <button type="submit">Send</button>
+    </form>
+  </main>
+</div>
+<div id="approval-modal" class="hidden">
+  <div class="modal-card">
+    <h2>⚠ Approval required</h2>
+    <p id="approval-desc"></p>
+    <pre id="approval-input"></pre>
+    <div class="modal-actions">
+      <button id="approve-btn" class="approve">Approve</button>
+      <button id="deny-btn" class="deny">Deny</button>
+    </div>
+  </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+{
+  "name": "aetheraclaw",
+  "version": "0.1.0",
+  "description": "Self-hosted AI assistant for US healthcare Revenue Cycle Management and medical billing & coding — inspired by OpenClaw",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "aetheraclaw": "dist/cli/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && cp src/memory/schema.sql dist/memory/",
+    "dev": "tsx src/cli/index.ts serve",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
+    "@fastify/static": "^8.0.0",
+    "@fastify/websocket": "^11.0.0",
+    "@google/genai": "^2.16.0",
+    "better-sqlite3": "^13.0.0",
+    "commander": "^15.0.0",
+    "fastify": "^5.0.0",
+    "json5": "^2.2.3",
+    "openai": "^7.4.0",
+    "ws": "^8.18.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
