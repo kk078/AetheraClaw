@@ -29,6 +29,7 @@
     "mailparser": "^3.9.15",
     "nodemailer": "^9.0.5",
     "openai": "^7.4.0",
+    "playwright": "^1.62.1",
     "ws": "^8.18.0",
     "zod": "^3.25.0"
   },

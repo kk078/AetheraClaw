@@ -46,6 +46,29 @@ export const DEFAULT_CONFIG_JSON5 = `{
     sessionId: '',            // session new correspondence is delivered into
   },
 
+  // Payer portal automation. Navigation is confined to the origins listed here,
+  // and credentials are named by ENVIRONMENT VARIABLE only — no secret in this file.
+  browser: {
+    portals: [
+      // {
+      //   key: 'availity',
+      //   label: 'Availity Essentials',
+      //   origins: ['https://apps.availity.com'],   // include any SSO host it redirects through
+      //   loginUrl: 'https://apps.availity.com/web/onboarding/availity-fr-ui/',
+      //   usernameSelector: '#userId',
+      //   passwordSelector: '#password',
+      //   submitSelector: 'button[type=submit]',
+      //   signedInSelector: '#dashboard',           // exists only once signed in
+      //   usernameEnv: 'AETHERACLAW_PORTAL_AVAILITY_USER',
+      //   passwordEnv: 'AETHERACLAW_PORTAL_AVAILITY_PASSWORD',
+      // },
+    ],
+    headless: true,
+    navigationTimeoutMs: 30000,
+    executablePath: '',   // set when the host ships its own Chromium
+    redactPhi: true,
+  },
+
   swarm: { mode: "off" }, // "off" | "assist" | "autopilot-with-checkpoints"
 }
 `;

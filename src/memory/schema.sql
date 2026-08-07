@@ -125,6 +125,21 @@ CREATE TABLE IF NOT EXISTS credit_balances (
 
 CREATE INDEX IF NOT EXISTS idx_credit_balances_status ON credit_balances(status, identified_date);
 
+-- Everything the portal browser did, append-only. Automation signed in as the
+-- practice should leave a record that does not depend on a chat transcript
+-- surviving. Credentials are never written here.
+CREATE TABLE IF NOT EXISTS portal_actions (
+  id TEXT PRIMARY KEY,
+  portal_key TEXT NOT NULL DEFAULT '',
+  action TEXT NOT NULL,               -- navigate | read | screenshot | click | fill | login | close
+  target TEXT NOT NULL DEFAULT '',
+  outcome TEXT NOT NULL DEFAULT '',
+  session_id TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_portal_actions_time ON portal_actions(created_at);
+
 -- Payer correspondence pulled from the mailbox. A billing inbox is an unsorted
 -- work queue with clocks already running inside it, so each message is stored
 -- with what it was classified as and the dates it imposes. Bodies flagged as

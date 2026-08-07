@@ -18,6 +18,18 @@ import {
 } from "../channels/email/tools.js";
 import { EmailChannel } from "../channels/email/channel.js";
 import { reportGenerateTool } from "../reports/tools.js";
+import {
+  portalAuditTool,
+  portalClickTool,
+  portalCloseTool,
+  portalFieldsTool,
+  portalFillTool,
+  portalListTool,
+  portalLoginTool,
+  portalNavigateTool,
+  portalReadTool,
+  portalScreenshotTool,
+} from "../tools/browser/tools.js";
 import { SessionManager } from "../gateway/session-manager.js";
 import { buildServer } from "../gateway/server.js";
 import { startChat } from "./chat.js";
@@ -39,6 +51,16 @@ export function buildRegistry(config: ReturnType<typeof loadConfig>, store: Memo
     emailSendTool,
     emailIngestTool,
     reportGenerateTool,
+    portalListTool,
+    portalLoginTool,
+    portalNavigateTool,
+    portalReadTool,
+    portalFieldsTool,
+    portalFillTool,
+    portalClickTool,
+    portalScreenshotTool,
+    portalCloseTool,
+    portalAuditTool,
   ]);
   return registry;
 }

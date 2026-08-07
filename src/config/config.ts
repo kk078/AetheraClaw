@@ -73,6 +73,32 @@ export const ConfigSchema = z.object({
       sessionId: z.string().default(""),
     })
     .default({}),
+  browser: z
+    .object({
+      // Navigation is confined to these origins. Credentials are named here by
+      // ENVIRONMENT VARIABLE only — no secret belongs in a config file.
+      portals: z
+        .array(
+          z.object({
+            key: z.string(),
+            label: z.string(),
+            origins: z.array(z.string()).min(1),
+            loginUrl: z.string().default(""),
+            usernameSelector: z.string().default(""),
+            passwordSelector: z.string().default(""),
+            submitSelector: z.string().default(""),
+            usernameEnv: z.string().default(""),
+            passwordEnv: z.string().default(""),
+            signedInSelector: z.string().default(""),
+          }),
+        )
+        .default([]),
+      headless: z.boolean().default(true),
+      navigationTimeoutMs: z.number().int().positive().default(30000),
+      executablePath: z.string().default(""),
+      redactPhi: z.boolean().default(true),
+    })
+    .default({}),
   swarm: z
     .object({ mode: z.enum(["off", "assist", "autopilot-with-checkpoints"]).default("off") })
     .default({}),
