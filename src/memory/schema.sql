@@ -81,3 +81,46 @@ CREATE TABLE IF NOT EXISTS procedure_history (
 );
 
 CREATE INDEX IF NOT EXISTS idx_procedure_history_patient ON procedure_history(patient_ref, service_date);
+
+-- Payer/contractor audits (RAC, MAC ADR, TPE, UPIC, SMRC, CERT, commercial).
+-- Response and appeal windows are short and unforgiving, so the dates that drive
+-- them are first-class columns rather than buried in a JSON blob.
+CREATE TABLE IF NOT EXISTS audit_requests (
+  id TEXT PRIMARY KEY,
+  audit_type TEXT NOT NULL,           -- 'RAC' | 'MAC_ADR' | 'TPE' | 'UPIC' | 'SMRC' | 'CERT' | 'commercial' | 'OIG'
+  contractor TEXT NOT NULL DEFAULT '',
+  received_date TEXT NOT NULL,        -- YYYYMMDD
+  response_due_date TEXT NOT NULL,    -- YYYYMMDD
+  claim_refs_json TEXT NOT NULL DEFAULT '[]',
+  amount_at_risk_cents INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'received',
+  determination_date TEXT,            -- YYYYMMDD, set when the decision arrives
+  demand_letter_date TEXT,            -- YYYYMMDD, starts the recoupment clock
+  appeal_level INTEGER NOT NULL DEFAULT 0,
+  outcome TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_requests_status ON audit_requests(status, response_due_date);
+
+-- Overpayment / credit balance ledger. Amounts are integer CENTS: this is money
+-- of record with a statutory 60-day return deadline, so no float drift.
+CREATE TABLE IF NOT EXISTS credit_balances (
+  id TEXT PRIMARY KEY,
+  payer TEXT NOT NULL DEFAULT '',
+  claim_id TEXT NOT NULL DEFAULT '',
+  patient_ref TEXT NOT NULL DEFAULT '',
+  amount_cents INTEGER NOT NULL,
+  identified_date TEXT NOT NULL,      -- YYYYMMDD — starts the ACA 60-day clock
+  reason TEXT NOT NULL,               -- 'duplicate_payment' | 'cob_primary_paid' | 'retroactive_termination' | 'billing_error' | 'payer_error' | 'patient_overpayment' | 'other'
+  status TEXT NOT NULL DEFAULT 'identified',
+  resolved_date TEXT,
+  resolution TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_credit_balances_status ON credit_balances(status, identified_date);

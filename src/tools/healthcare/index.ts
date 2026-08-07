@@ -18,6 +18,20 @@ import { claimGauntletTool, payerTwinTool, twinCalibrateTool } from "./twin.js";
 import { telehealthCheckTool, telehealthPolicySetTool } from "./compliance/telehealth.js";
 import { globalPeriodCheckTool, globalPeriodRecordTool } from "./compliance/global-period.js";
 import { incidentToCheckTool } from "./compliance/incident-to.js";
+import {
+  auditListTool,
+  auditResponseDraftTool,
+  auditTrackTool,
+  auditUpdateTool,
+  deadlineCalculatorTool,
+} from "./audit/audit-tracker.js";
+import { emBenchmarkTool } from "./audit/em-benchmark.js";
+import {
+  creditBalanceAddTool,
+  creditBalanceDetectTool,
+  creditBalanceListTool,
+  creditBalanceResolveTool,
+} from "./audit/credit-balance.js";
 
 export function registerHealthcareTools(
   registry: ToolRegistry,
@@ -58,6 +72,17 @@ export function registerHealthcareTools(
     emCalculateTool,
     appealDraftTool,
     abnGenerateTool,
+    // Audit & integrity
+    auditTrackTool,
+    auditListTool,
+    auditUpdateTool,
+    auditResponseDraftTool,
+    deadlineCalculatorTool,
+    emBenchmarkTool,
+    creditBalanceDetectTool,
+    creditBalanceAddTool,
+    creditBalanceListTool,
+    creditBalanceResolveTool,
     // Analytics & prediction
     analyticsQueryTool,
     denialRiskTool,

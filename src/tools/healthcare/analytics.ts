@@ -4,7 +4,7 @@ import type { MemoryStore } from "../../memory/store.js";
 import type { Era } from "./x12/835.js";
 import { CARC } from "./denial-codes.js";
 
-function loadEras(store: MemoryStore): Array<{ payer: string; era: Era; receivedAt: number }> {
+export function loadEras(store: MemoryStore): Array<{ payer: string; era: Era; receivedAt: number }> {
   const rows = store.db.prepare("SELECT payer, era_json, received_at FROM remittances ORDER BY received_at ASC").all() as Array<{
     payer: string;
     era_json: string;

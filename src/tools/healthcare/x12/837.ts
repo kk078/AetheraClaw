@@ -2,6 +2,7 @@ import { z } from "zod";
 import { defineTool } from "../../registry.js";
 import { npiLuhnValid } from "../npi.js";
 import { ComplianceContextSchema } from "../compliance/context.js";
+import { newId } from "../../../shared/ids.js";
 import { envelope, seg, serializeX12, type Segment } from "./segments.js";
 
 export const ServiceLineSchema = z.object({
@@ -102,11 +103,30 @@ export const claimBuild837Tool = defineTool({
     "Generate an X12 837P professional claim file from structured claim JSON (de-identified/test data only). Validates NPIs before emitting. Run claim_scrub first.",
   schema: ClaimSchema,
   assessRisk: () => ({ level: "confirm", reason: "generate an 837P claim file" }),
-  execute: async (input) => {
+  execute: async (input, ctx) => {
     if (!npiLuhnValid(input.billing_provider_npi))
       return { content: `billing_provider_npi ${input.billing_provider_npi} fails NPI validation`, isError: true };
     if (input.rendering_provider_npi && !npiLuhnValid(input.rendering_provider_npi))
       return { content: `rendering_provider_npi fails NPI validation`, isError: true };
+
+    // Record the submitted claim so utilization analysis (E/M benchmarking) and
+    // submitted-vs-paid comparison have the levels billed, with provider
+    // attribution and service dates that the 835 never carries. Best-effort:
+    // never fail claim generation because persistence did.
+    const store = ctx.services.store as { db?: { prepare: (s: string) => { run: (...a: unknown[]) => unknown } } } | undefined;
+    if (store?.db) {
+      try {
+        const now = Date.now();
+        store.db
+          .prepare(
+            "INSERT INTO claims (id, payer, claim_json, status, created_at, updated_at) VALUES (?, ?, ?, 'submitted', ?, ?)",
+          )
+          .run(newId("clm"), input.payer_name, JSON.stringify(input), now, now);
+      } catch {
+        // Persistence is not worth failing the build over.
+      }
+    }
+
     return { content: build837p(input) };
   },
 });
