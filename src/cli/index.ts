@@ -37,6 +37,26 @@ import {
   ratePositionTool,
 } from "../transparency/tools.js";
 import {
+  dtrAnswerTool,
+  dtrPrefillTool,
+  dtrQuestionnaireAddTool,
+  paRequirementCheckTool,
+  paResponseRecordTool,
+  paRuleSetTool,
+  paRulesLearnTool,
+  paStatusTool,
+  paSubmitTool,
+} from "../fhir/tools.js";
+import {
+  a2aAttestTool,
+  a2aKeySetupTool,
+  a2aOpenTool,
+  a2aReconcileTool,
+  a2aSendTool,
+  a2aShowTool,
+  a2aVerifyTool,
+} from "../a2a/tools.js";
+import {
   hccRecaptureTool,
   qualityMeasuresTool,
   rafCalculateTool,
@@ -170,6 +190,22 @@ export function buildRegistry(config: ReturnType<typeof loadConfig>, store: Memo
     negotiationBriefTool,
     idrEvaluateTool,
     idrTrackTool,
+    paRequirementCheckTool,
+    paRuleSetTool,
+    paRulesLearnTool,
+    dtrQuestionnaireAddTool,
+    dtrPrefillTool,
+    dtrAnswerTool,
+    paSubmitTool,
+    paStatusTool,
+    paResponseRecordTool,
+    a2aKeySetupTool,
+    a2aAttestTool,
+    a2aVerifyTool,
+    a2aOpenTool,
+    a2aSendTool,
+    a2aShowTool,
+    a2aReconcileTool,
   ]);
   return registry;
 }

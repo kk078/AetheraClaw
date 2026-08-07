@@ -622,3 +622,93 @@ CREATE TABLE IF NOT EXISTS idr_disputes (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
+
+-- ── Prior authorization (Da Vinci CRD / DTR / PAS) ───────────────────────────
+-- The local PA rule table. Most of the value in coverage-requirements discovery
+-- is knowing which codes a payer requires authorization for, and a practice can
+-- build that list from its own denials without any payer endpoint at all.
+CREATE TABLE IF NOT EXISTS pa_rules (
+  id TEXT PRIMARY KEY,
+  payer TEXT NOT NULL DEFAULT '',
+  code TEXT NOT NULL,
+  requirement TEXT NOT NULL DEFAULT 'unknown',
+  condition TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT '',
+  updated_at INTEGER NOT NULL,
+  UNIQUE (payer, code)
+);
+
+CREATE TABLE IF NOT EXISTS pa_questionnaires (
+  id TEXT PRIMARY KEY,
+  payer TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',
+  items_json TEXT NOT NULL DEFAULT '[]',
+  created_at INTEGER NOT NULL
+);
+
+-- A prefill is stored unsubmitted on purpose. The whole hazard of DTR is a form
+-- whose answers appeared on their own and were signed unread, so the reviewed
+-- state is a distinct row rather than a flag on the request.
+CREATE TABLE IF NOT EXISTS pa_prefills (
+  id TEXT PRIMARY KEY,
+  questionnaire_id TEXT NOT NULL,
+  patient_ref TEXT NOT NULL DEFAULT '',
+  result_json TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- received_at is the payer's receipt, not our submission: the CMS-0057-F
+-- decision clock runs from receipt, and treating the two as the same quietly
+-- gives away however long the transport took.
+CREATE TABLE IF NOT EXISTS pa_requests (
+  id TEXT PRIMARY KEY,
+  payer TEXT NOT NULL DEFAULT '',
+  patient_ref TEXT NOT NULL DEFAULT '',
+  urgency TEXT NOT NULL DEFAULT 'standard',
+  codes TEXT NOT NULL DEFAULT '',
+  request_json TEXT NOT NULL DEFAULT '{}',
+  bundle_json TEXT NOT NULL DEFAULT '{}',
+  submitted_at INTEGER NOT NULL DEFAULT 0,
+  received_at INTEGER NOT NULL DEFAULT 0,
+  outcome TEXT NOT NULL DEFAULT 'pending',
+  auth_number TEXT NOT NULL DEFAULT '',
+  response_json TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- ── Agent-to-agent ───────────────────────────────────────────────────────────
+-- The private key sits in this file unencrypted, and that is worth saying out
+-- loud rather than burying: the key is exactly as protected as the database
+-- file's permissions. It signs assertions about claims, not payments, so the
+-- blast radius of a stolen key is forged statements rather than moved money —
+-- but forged statements attributed to this practice are not a small thing.
+CREATE TABLE IF NOT EXISTS a2a_keys (
+  signer_id TEXT PRIMARY KEY,
+  key_id TEXT NOT NULL,
+  public_key_pem TEXT NOT NULL,
+  private_key_pem TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS a2a_attestations (
+  id TEXT PRIMARY KEY,
+  signer_id TEXT NOT NULL DEFAULT '',
+  key_id TEXT NOT NULL DEFAULT '',
+  claim_id TEXT NOT NULL DEFAULT '',
+  audit_seq INTEGER NOT NULL DEFAULT 0,
+  attestation_json TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS a2a_negotiations (
+  id TEXT PRIMARY KEY,
+  claim_id TEXT NOT NULL DEFAULT '',
+  payer TEXT NOT NULL DEFAULT '',
+  billed_cents INTEGER NOT NULL DEFAULT 0,
+  state TEXT NOT NULL DEFAULT 'presented',
+  negotiation_json TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
