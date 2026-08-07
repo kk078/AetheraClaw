@@ -125,6 +125,27 @@ CREATE TABLE IF NOT EXISTS credit_balances (
 
 CREATE INDEX IF NOT EXISTS idx_credit_balances_status ON credit_balances(status, identified_date);
 
+-- Provider enrollment per payer. A lapsed credential is not fixable afterwards —
+-- claims for services furnished while unenrolled deny as provider-not-eligible
+-- and no appeal recovers them — so the dates that drive it are columns.
+CREATE TABLE IF NOT EXISTS credentialing (
+  id TEXT PRIMARY KEY,
+  provider_npi TEXT NOT NULL,
+  provider_name TEXT NOT NULL DEFAULT '',
+  payer TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'commercial',  -- 'medicare' | 'medicare_dmepos' | 'medicaid' | 'commercial'
+  status TEXT NOT NULL DEFAULT 'not_started',
+  effective_date TEXT NOT NULL DEFAULT '',  -- YYYYMMDD
+  revalidation_due TEXT NOT NULL DEFAULT '',
+  caqh_attested_on TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE (provider_npi, payer)
+);
+
+CREATE INDEX IF NOT EXISTS idx_credentialing_due ON credentialing(status, revalidation_due);
+
 -- Evidence that a claim was received by the payer, banked when acknowledgments
 -- are parsed rather than hunted for months later. A timely-filing denial is
 -- winnable only with an ACCEPTANCE report — a submission log shows you sent a

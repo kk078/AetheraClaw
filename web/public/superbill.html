@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AetheraClaw — Charge capture</title>
+<link rel="stylesheet" href="style.css" />
+<style>
+  body { padding: 1.5rem; overflow: auto; }
+  .sb { max-width: 60rem; margin: 0 auto; }
+  .sb h1 { font-size: 1.1rem; margin: 0 0 .25rem; }
+  .warn { border-left: 3px solid #b45309; padding: .5rem .75rem; margin: .75rem 0; font-size: .85rem; }
+  fieldset { border: 1px solid #333; border-radius: 4px; margin: 0 0 1rem; padding: .75rem; }
+  legend { font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; opacity: .75; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: .5rem; }
+  label { display: flex; flex-direction: column; font-size: .75rem; gap: .2rem; }
+  input { padding: .35rem; font: inherit; font-size: .85rem; }
+  table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+  th { text-align: left; font-weight: 600; padding: .25rem; opacity: .8; }
+  td { padding: .15rem; }
+  td input { width: 100%; box-sizing: border-box; }
+  .row-actions { display: flex; gap: .5rem; margin-top: .5rem; }
+  button { padding: .4rem .8rem; font: inherit; font-size: .85rem; cursor: pointer; }
+  pre { overflow: auto; padding: .75rem; font-size: .75rem; max-height: 24rem; }
+  .hint { font-size: .75rem; opacity: .7; margin: .35rem 0 0; }
+</style>
+</head>
+<body>
+<div class="sb">
+  <h1>🦞 Charge capture</h1>
+  <p class="hint">Builds a clean claim from an encounter. Each line names the diagnosis <em>codes</em> that support it; the 1-based pointers the 837 needs are derived for you. Paste the result into chat and run <code>claim_scrub</code>.</p>
+
+  <div class="warn">
+    <strong>Test data only.</strong> This build is not for real PHI. Use synthetic patient names, dates of birth, and member IDs.
+  </div>
+
+  <form id="sb-form">
+    <fieldset>
+      <legend>Claim</legend>
+      <div class="grid">
+        <label>Claim ID<input name="claim_id" value="SB-1001" required /></label>
+        <label>Payer name<input name="payer_name" required /></label>
+        <label>Payer ID<input name="payer_id" required /></label>
+        <label>Billing NPI<input name="billing_provider_npi" required /></label>
+        <label>Billing provider<input name="billing_provider_name" required /></label>
+        <label>Rendering NPI<input name="rendering_provider_npi" /></label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Patient (synthetic)</legend>
+      <div class="grid">
+        <label>Last name<input name="patient_last" required /></label>
+        <label>First name<input name="patient_first" required /></label>
+        <label>DOB (YYYYMMDD)<input name="patient_dob" pattern="\d{8}" required /></label>
+        <label>Sex<input name="patient_sex" value="U" maxlength="1" /></label>
+        <label>Member ID<input name="subscriber_id" required /></label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Encounter diagnoses</legend>
+      <label>ICD-10 codes, comma separated, primary first
+        <input name="encounter_diagnoses" placeholder="M17.11, E11.65" />
+      </label>
+      <p class="hint">Optional. Sets the order they are reported in. Codes named on a line but missing here are appended.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Service lines</legend>
+      <table>
+        <thead>
+          <tr><th>CPT/HCPCS</th><th>Modifiers</th><th>Charge</th><th>Units</th><th>DOS</th><th>POS</th><th>Diagnoses</th><th></th></tr>
+        </thead>
+        <tbody id="lines"></tbody>
+      </table>
+      <div class="row-actions">
+        <button type="button" id="add-line">Add line</button>
+      </div>
+    </fieldset>
+
+    <div class="row-actions">
+      <button type="submit">Build claim JSON</button>
+      <button type="button" id="copy" hidden>Copy</button>
+    </div>
+  </form>
+
+  <pre id="out" hidden></pre>
+</div>
+
+<script>
+const lines = document.getElementById("lines");
+const out = document.getElementById("out");
+const copyBtn = document.getElementById("copy");
+
+function addLine() {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td><input name="code" required /></td>
+    <td><input name="modifiers" placeholder="25" /></td>
+    <td><input name="charge" type="number" step="0.01" min="0" required /></td>
+    <td><input name="units" type="number" min="1" value="1" /></td>
+    <td><input name="service_date" pattern="\\d{8}" required /></td>
+    <td><input name="place_of_service" value="11" /></td>
+    <td><input name="diagnoses" placeholder="E11.65, M17.11" required /></td>
+    <td><button type="button" class="remove">×</button></td>`;
+  tr.querySelector(".remove").addEventListener("click", () => tr.remove());
+  lines.appendChild(tr);
+}
+document.getElementById("add-line").addEventListener("click", addLine);
+addLine();
+
+const csv = (value) => value.split(",").map((s) => s.trim()).filter(Boolean);
+
+document.getElementById("sb-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  const claim = {
+    claim_id: form.get("claim_id"),
+    payer_name: form.get("payer_name"),
+    payer_id: form.get("payer_id"),
+    billing_provider_npi: form.get("billing_provider_npi"),
+    billing_provider_name: form.get("billing_provider_name"),
+    subscriber_id: form.get("subscriber_id"),
+    patient_last: form.get("patient_last"),
+    patient_first: form.get("patient_first"),
+    patient_dob: form.get("patient_dob"),
+    patient_sex: (form.get("patient_sex") || "U").toUpperCase(),
+    encounter_diagnoses: csv(form.get("encounter_diagnoses") || ""),
+    lines: [...lines.querySelectorAll("tr")].map((tr) => {
+      const get = (name) => tr.querySelector(`[name="${name}"]`).value;
+      const line = {
+        code: get("code").toUpperCase(),
+        charge: Number(get("charge")),
+        units: Number(get("units") || 1),
+        service_date: get("service_date"),
+        place_of_service: get("place_of_service") || "11",
+        diagnoses: csv(get("diagnoses")),
+      };
+      const modifiers = csv(get("modifiers"));
+      if (modifiers.length) line.modifiers = modifiers;
+      return line;
+    }),
+  };
+  const rendering = form.get("rendering_provider_npi");
+  if (rendering) claim.rendering_provider_npi = rendering;
+
+  out.textContent =
+    "Paste this into chat and ask for superbill_build, then claim_scrub:\n\n" + JSON.stringify(claim, null, 2);
+  out.hidden = false;
+  copyBtn.hidden = false;
+});
+
+copyBtn.addEventListener("click", () => {
+  navigator.clipboard.writeText(out.textContent.split("\n\n").slice(1).join("\n\n"));
+  copyBtn.textContent = "Copied";
+  setTimeout(() => (copyBtn.textContent = "Copy"), 1500);
+});
+</script>
+</body>
+</html>

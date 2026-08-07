@@ -30,6 +30,16 @@ import {
 } from "./audit/audit-tracker.js";
 import { emBenchmarkTool } from "./audit/em-benchmark.js";
 import {
+  credentialingCheckTool,
+  credentialingListTool,
+  credentialingTrackTool,
+  eraExportTool,
+  gfeDeadlineTool,
+  gfeGenerateTool,
+  gfeVarianceTool,
+  superbillBuildTool,
+} from "./operations/tools.js";
+import {
   denialRiskTool,
   filingProofRecordTool,
   filingSweepTool,
@@ -100,6 +110,15 @@ export function registerHealthcareTools(
     timelyFilingExceptionTool,
     filingProofRecordTool,
     filingSweepTool,
+    // Practice operations
+    credentialingTrackTool,
+    credentialingListTool,
+    credentialingCheckTool,
+    superbillBuildTool,
+    eraExportTool,
+    gfeDeadlineTool,
+    gfeGenerateTool,
+    gfeVarianceTool,
     // Compliance rule pack
     telehealthCheckTool,
     telehealthPolicySetTool,
