@@ -19,6 +19,18 @@ import {
 import { EmailChannel } from "../channels/email/channel.js";
 import { reportGenerateTool } from "../reports/tools.js";
 import {
+  policyCompileTool,
+  policyRuleAddTool,
+  policyRuleListTool,
+  policyRuleReviewTool,
+  policyRuleTestTool,
+  sentinelHistoryTool,
+  sentinelRunTool,
+} from "../compliance/tools.js";
+import { auditAnchorTool, auditLogTool, auditRecordTool, auditVerifyTool } from "../audit/tools.js";
+import { renderVerify, verifyChain } from "../audit/chain.js";
+import { loadAnchors, loadChain } from "../audit/store.js";
+import {
   swarmAdvanceTool,
   swarmBoardTool,
   swarmFailTool,
@@ -77,6 +89,17 @@ export function buildRegistry(config: ReturnType<typeof loadConfig>, store: Memo
     swarmFailTool,
     swarmHistoryTool,
     swarmPipelineTool,
+    policyCompileTool,
+    policyRuleAddTool,
+    policyRuleListTool,
+    policyRuleReviewTool,
+    policyRuleTestTool,
+    sentinelRunTool,
+    sentinelHistoryTool,
+    auditRecordTool,
+    auditVerifyTool,
+    auditAnchorTool,
+    auditLogTool,
   ]);
   return registry;
 }
@@ -135,6 +158,24 @@ program
     for (const row of rows) {
       console.log(`${row.id}  ${new Date(row.updated_at).toISOString()}  ${row.title || "(untitled)"}`);
     }
+  });
+
+program
+  .command("audit")
+  .description("Verify the tamper-evident audit log")
+  .argument("<action>", "verify")
+  .action((action: string) => {
+    if (action !== "verify") {
+      console.error(`Unknown audit action "${action}". The only action is: verify`);
+      process.exit(2);
+    }
+    const store = new MemoryStore(path.join(configDir(), "aetheraclaw.db"));
+    const anchors = loadAnchors(store);
+    const result = verifyChain(loadChain(store), anchors);
+    console.log(renderVerify(result, anchors.length));
+    // Exit non-zero on failure so this can run in a cron job or a pre-commit
+    // hook and actually stop something.
+    process.exit(result.ok ? 0 : 1);
   });
 
 program.parseAsync().catch((err) => {

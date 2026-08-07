@@ -381,3 +381,74 @@ CREATE TABLE IF NOT EXISTS policy_alerts (
   seen_at INTEGER NOT NULL,
   UNIQUE (scope, document_id, document_version)
 );
+
+-- ── Regulation as code ──────────────────────────────────────────────────────
+-- Scrub rules drafted from policy documents. A rule carries the paragraph it
+-- came from: without it the rule cannot be re-checked when the policy is
+-- revised, and cannot be defended when a payer asks why you billed this way.
+-- Rules are inert until a person moves them to 'active'.
+CREATE TABLE IF NOT EXISTS policy_rules (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  codes_json TEXT NOT NULL DEFAULT '[]',
+  diagnoses_json TEXT NOT NULL DEFAULT '[]',
+  modifiers_json TEXT NOT NULL DEFAULT '[]',
+  pos_json TEXT NOT NULL DEFAULT '[]',
+  max_units INTEGER NOT NULL DEFAULT 0,
+  period TEXT NOT NULL DEFAULT 'claim',
+  severity TEXT NOT NULL DEFAULT 'warning',
+  message TEXT NOT NULL DEFAULT '',
+  payer TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'draft',  -- 'draft' | 'active' | 'rejected' | 'retired'
+  source_document TEXT NOT NULL DEFAULT '',
+  source_citation TEXT NOT NULL DEFAULT '',
+  source_quote TEXT NOT NULL DEFAULT '',
+  source_effective TEXT NOT NULL DEFAULT '',
+  source_url TEXT NOT NULL DEFAULT '',
+  reviewer TEXT NOT NULL DEFAULT '',
+  review_reason TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_policy_rules_status ON policy_rules(status);
+
+-- Self-audit runs. The seed is stored because a sample nobody can redraw is not
+-- a defensible audit — a contractor asks how the sample was drawn.
+CREATE TABLE IF NOT EXISTS sentinel_runs (
+  id TEXT PRIMARY KEY,
+  seed INTEGER NOT NULL,
+  population_size INTEGER NOT NULL,
+  sample_size INTEGER NOT NULL,
+  claims_in_error INTEGER NOT NULL,
+  error_rate REAL NOT NULL,
+  lower_bound REAL NOT NULL,
+  upper_bound REAL NOT NULL,
+  conservative_bound REAL NOT NULL,
+  report TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+
+-- ── Tamper-evident audit log ────────────────────────────────────────────────
+-- Append-only, each entry carrying the hash of the one before it. Tamper-EVIDENT
+-- and not tamper-proof: anyone who can write to this file can rewrite the chain
+-- consistently. The anchors table is what closes that gap.
+CREATE TABLE IF NOT EXISTS audit_chain (
+  seq INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL,
+  actor TEXT NOT NULL DEFAULT '',
+  summary TEXT NOT NULL DEFAULT '',
+  payload_hash TEXT NOT NULL,
+  prev_hash TEXT NOT NULL,
+  hash TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+-- Head hashes published somewhere outside this database. Verification checks the
+-- recomputed chain against these, which is what catches a consistent rewrite.
+CREATE TABLE IF NOT EXISTS audit_anchors (
+  seq INTEGER PRIMARY KEY,
+  hash TEXT NOT NULL,
+  published_to TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);

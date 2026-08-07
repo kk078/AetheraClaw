@@ -8,6 +8,8 @@ import { checkGlobalPeriod } from "./compliance/global-period.js";
 import { checkIncidentTo } from "./compliance/incident-to.js";
 import { checkTelehealthLine, loadTelehealthPolicy, type TelehealthPolicy } from "./compliance/telehealth.js";
 import type { MemoryStore } from "../../memory/store.js";
+import { evaluateRules, type PolicyRule } from "../../compliance/rule-dsl.js";
+import { loadActiveRules } from "../../compliance/rule-store.js";
 
 export type { ScrubFinding } from "./finding.js";
 
@@ -17,6 +19,11 @@ export interface ScrubOptions {
   /** Payer telehealth policy; omitted means "assume Medicare rules and say so". */
   telehealthPolicy?: TelehealthPolicy;
   telehealthPolicyWasStored?: boolean;
+  /**
+   * Accepted policy rules compiled from coverage documents. Only rules a person
+   * has moved to 'active' reach here — a draft never affects a claim.
+   */
+  policyRules?: PolicyRule[];
 }
 
 export function scrubClaim(claim: ClaimInput, options: ScrubOptions = {}): ScrubFinding[] {
@@ -76,6 +83,9 @@ export function scrubClaim(claim: ClaimInput, options: ScrubOptions = {}): Scrub
     findings.push(...ncci);
   }
 
+  // Accepted policy rules, compiled from coverage documents.
+  if (options.policyRules?.length) findings.push(...evaluateRules(claim, options.policyRules));
+
   // Duplicate-line check
   const seen = new Set<string>();
   for (const line of claim.service_lines) {
@@ -91,7 +101,7 @@ export function scrubClaim(claim: ClaimInput, options: ScrubOptions = {}): Scrub
 export const claimScrubTool = defineTool({
   name: "claim_scrub",
   description:
-    "Scrub a claim (structured JSON) before submission: code format, dx-pointer linkage, NPI validity, modifier/POS consistency, NCCI bundling & MUE unit checks, duplicates, plus the compliance rule pack — telehealth (payer-specific POS/modifier rules), global surgical periods (modifier 24/25/57/58/78/79), and incident-to / split-shared billing. Supply the optional `compliance` block for the compliance rules to fire. Returns findings with severity.",
+    "Scrub a claim (structured JSON) before submission: code format, dx-pointer linkage, NPI validity, modifier/POS consistency, NCCI bundling & MUE unit checks, duplicates, any accepted policy rules compiled from coverage documents, plus the compliance rule pack — telehealth (payer-specific POS/modifier rules), global surgical periods (modifier 24/25/57/58/78/79), and incident-to / split-shared billing. Supply the optional `compliance` block for the compliance rules to fire. Returns findings with severity.",
   schema: ClaimSchema,
   execute: async (input, ctx) => {
     const store = ctx.services.store as MemoryStore | undefined;
@@ -118,6 +128,7 @@ export const claimScrubTool = defineTool({
     const findings = scrubClaim(claim, {
       telehealthPolicy: loadTelehealthPolicy(store, input.payer_name),
       telehealthPolicyWasStored: Boolean(stored),
+      policyRules: store ? loadActiveRules(store) : [],
     });
     const lines = findings.map((f) => `[${f.severity.toUpperCase()}] ${f.rule}: ${f.message}`);
     const errors = findings.filter((f) => f.severity === "error").length;
