@@ -70,7 +70,7 @@ export function wilsonInterval(successes: number, n: number, z: number = TWO_SID
 }
 
 /** Deterministic PRNG. A sample nobody can redraw is not a defensible audit. */
-function mulberry32(seed: number): () => number {
+export function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) >>> 0;

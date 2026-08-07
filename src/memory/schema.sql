@@ -452,3 +452,44 @@ CREATE TABLE IF NOT EXISTS audit_anchors (
   published_to TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
+
+-- ── Practice revenue digital twin ───────────────────────────────────────────
+-- Patient balances, for propensity scoring and outreach planning.
+--
+-- The columns are deliberately limited to what an ACCOUNT has done: payments
+-- made, plans kept or broken, how old the balance is, how large. There is no
+-- column for age, sex, race, ZIP, language or credit data, and none should be
+-- added — scoring people on those is a discrimination engine wearing a revenue
+-- cycle hat, and a schema that cannot hold them cannot be talked into it.
+CREATE TABLE IF NOT EXISTS patient_accounts (
+  patient_ref TEXT PRIMARY KEY,       -- de-identified; never a name or member ID
+  balance_cents INTEGER NOT NULL DEFAULT 0,
+  balance_since TEXT NOT NULL DEFAULT '',   -- YYYYMMDD the balance became the patient's
+  insurance_adjudicated INTEGER NOT NULL DEFAULT 1,
+  prior_payments INTEGER NOT NULL DEFAULT 0,
+  prior_paid_cents INTEGER NOT NULL DEFAULT 0,
+  broken_plans INTEGER NOT NULL DEFAULT 0,
+  on_payment_plan INTEGER NOT NULL DEFAULT 0,
+  financial_assistance_screened INTEGER NOT NULL DEFAULT 0,
+  statements_sent INTEGER NOT NULL DEFAULT 0,
+  note TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- Forecast runs, so a projection can be compared against what actually arrived.
+-- The seed is stored for the same reason the sentinel stores one: a simulation
+-- nobody can reproduce is an anecdote.
+CREATE TABLE IF NOT EXISTS forecast_runs (
+  id TEXT PRIMARY KEY,
+  scenario TEXT NOT NULL DEFAULT 'baseline',
+  scenario_json TEXT NOT NULL DEFAULT '{}',
+  horizon_days INTEGER NOT NULL,
+  paths INTEGER NOT NULL,
+  seed INTEGER NOT NULL,
+  p10_cents INTEGER NOT NULL DEFAULT 0,
+  p50_cents INTEGER NOT NULL DEFAULT 0,
+  p90_cents INTEGER NOT NULL DEFAULT 0,
+  report TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+);

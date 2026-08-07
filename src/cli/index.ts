@@ -28,6 +28,16 @@ import {
   sentinelRunTool,
 } from "../compliance/tools.js";
 import { auditAnchorTool, auditLogTool, auditRecordTool, auditVerifyTool } from "../audit/tools.js";
+import {
+  cashForecastTool,
+  forecastChartTool,
+  forecastHistoryTool,
+  patientBalanceAddTool,
+  patientLetterTool,
+  patientOutreachTool,
+  revenueModelFitTool,
+  simulateScenarioTool,
+} from "../simulation/tools.js";
 import { renderVerify, verifyChain } from "../audit/chain.js";
 import { loadAnchors, loadChain } from "../audit/store.js";
 import {
@@ -100,6 +110,14 @@ export function buildRegistry(config: ReturnType<typeof loadConfig>, store: Memo
     auditVerifyTool,
     auditAnchorTool,
     auditLogTool,
+    revenueModelFitTool,
+    cashForecastTool,
+    simulateScenarioTool,
+    forecastChartTool,
+    forecastHistoryTool,
+    patientBalanceAddTool,
+    patientOutreachTool,
+    patientLetterTool,
   ]);
   return registry;
 }
