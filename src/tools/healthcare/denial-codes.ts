@@ -19,6 +19,7 @@ export const CARC: Record<string, { desc: string; category: string; action: stri
   "29": { desc: "Time limit for filing has expired", category: "timely-filing", action: "Appeal with proof of timely submission if available" },
   "31": { desc: "Patient cannot be identified as our insured", category: "registration", action: "Verify member ID and demographics; correct and resubmit" },
   "45": { desc: "Charge exceeds fee schedule/maximum allowable", category: "contractual", action: "Contractual write-off; verify against expected allowed amount" },
+  "253": { desc: "Sequestration — reduction in federal payment", category: "regulatory", action: "Not a denial and not a write-off to chase: a 2% cut to the Medicare payment, applied after the allowed amount is set. It does not reduce the allowed amount or the patient's coinsurance, so add it back when deriving what the payer allowed." },
   "50": { desc: "Not deemed a medical necessity by the payer", category: "medical-necessity", action: "Check NCD/LCD criteria; appeal with documentation" },
   "96": { desc: "Non-covered charge(s)", category: "coverage", action: "Check policy/exclusions; ABN may shift liability to patient (Medicare)" },
   "97": { desc: "Payment included in allowance for another service (bundled)", category: "bundling", action: "Check NCCI edits; modifier may be appropriate if distinct service" },

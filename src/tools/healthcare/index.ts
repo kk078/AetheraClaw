@@ -11,7 +11,7 @@ import { ackParse277caTool } from "./x12/277ca.js";
 import { claimBuildSecondaryTool, cobBalanceCheckTool } from "./x12/837-cob.js";
 import { cobDeterminePrimaryTool } from "./cob.js";
 import { claimScrubTool } from "./claim-scrub.js";
-import { hcpcsLookupTool, reimbursementEstimateTool } from "./datasets.js";
+import { hcpcsLookupTool } from "./datasets.js";
 import { eligibilityCheckTool } from "./eligibility.js";
 import { timelyFilingTool, worklistAddTool, worklistListTool, worklistUpdateTool } from "./worklist.js";
 import { emCalculateTool } from "./em-calculator.js";
@@ -29,6 +29,11 @@ import {
   deadlineCalculatorTool,
 } from "./audit/audit-tracker.js";
 import { emBenchmarkTool } from "./audit/em-benchmark.js";
+import {
+  feeScheduleDriftTool,
+  paymentVarianceTool,
+  reimbursementEstimateTool,
+} from "./intelligence/tools.js";
 import {
   codeSetRegisterTool,
   codeUpdateCalendarTool,
@@ -66,6 +71,9 @@ export function registerHealthcareTools(
     ackParse277caTool,
     denialExplainTool,
     reimbursementEstimateTool,
+    // Claim intelligence
+    paymentVarianceTool,
+    feeScheduleDriftTool,
     // Secondary claims & coordination of benefits
     cobDeterminePrimaryTool,
     cobBalanceCheckTool,

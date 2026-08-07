@@ -41,9 +41,21 @@ export function composite(element: string | undefined): string[] {
  * keeps the code-plus-modifier tail ("99214:25") — both reduce to "99214".
  */
 export function baseProcedureCode(procedure: string): string {
+  return (procedureParts(procedure).code ?? "").trim().toUpperCase();
+}
+
+/** The modifiers trailing a procedure composite, with the qualifier and code removed. */
+export function procedureModifiers(procedure: string): string[] {
+  return procedureParts(procedure).modifiers;
+}
+
+function procedureParts(procedure: string): { code: string; modifiers: string[] } {
   const parts = composite(procedure).filter((p) => p.length > 0);
   const withoutQualifier = parts[0] === "HC" || parts[0] === "AD" || parts[0] === "ER" ? parts.slice(1) : parts;
-  return (withoutQualifier[0] ?? "").trim().toUpperCase();
+  return {
+    code: withoutQualifier[0] ?? "",
+    modifiers: withoutQualifier.slice(1).map((m) => m.trim().toUpperCase()),
+  };
 }
 
 export function envelope(opts: {
