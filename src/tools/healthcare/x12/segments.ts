@@ -30,6 +30,22 @@ export function seg(id: string, ...elements: string[]): Segment {
   return { id, elements };
 }
 
+/** Split an X12 composite element on its component separator. */
+export function composite(element: string | undefined): string[] {
+  return (element ?? "").split(":");
+}
+
+/**
+ * Base procedure code from an X12 procedure composite. SVC/SVD store the
+ * qualifier and modifiers alongside the code ("HC:99214:25"), and 835 parsing
+ * keeps the code-plus-modifier tail ("99214:25") — both reduce to "99214".
+ */
+export function baseProcedureCode(procedure: string): string {
+  const parts = composite(procedure).filter((p) => p.length > 0);
+  const withoutQualifier = parts[0] === "HC" || parts[0] === "AD" || parts[0] === "ER" ? parts.slice(1) : parts;
+  return (withoutQualifier[0] ?? "").trim().toUpperCase();
+}
+
 export function envelope(opts: {
   senderId: string;
   receiverId: string;

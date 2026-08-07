@@ -6,6 +6,7 @@ import { defineTool } from "../../registry.js";
 import { loadEras } from "../analytics.js";
 import type { MemoryStore } from "../../../memory/store.js";
 import type { Era } from "../x12/835.js";
+import { baseProcedureCode } from "../x12/segments.js";
 
 // ── E/M utilization benchmarking ─────────────────────────────────────────────
 // Payers and the OIG both look at how a practice's E/M levels are distributed
@@ -57,9 +58,7 @@ export interface EmDistribution {
 }
 
 /** Base procedure code: ERA lines store the SVC composite with modifiers ("99214:25"). */
-export function baseCode(procedure: string): string {
-  return procedure.split(":")[0].trim().toUpperCase();
-}
+export const baseCode = baseProcedureCode;
 
 export function emLevel(code: string): number {
   return Number(code.slice(-1));

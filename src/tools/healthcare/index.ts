@@ -7,6 +7,9 @@ import { coverageSearchLocalTool, coverageSearchNationalTool, macLookupTool, sad
 import { denialExplainTool } from "./denial-codes.js";
 import { claimBuild837Tool } from "./x12/837.js";
 import { eraParse835Tool } from "./x12/835.js";
+import { ackParse277caTool } from "./x12/277ca.js";
+import { claimBuildSecondaryTool, cobBalanceCheckTool } from "./x12/837-cob.js";
+import { cobDeterminePrimaryTool } from "./cob.js";
 import { claimScrubTool } from "./claim-scrub.js";
 import { hcpcsLookupTool, reimbursementEstimateTool } from "./datasets.js";
 import { eligibilityCheckTool } from "./eligibility.js";
@@ -54,8 +57,13 @@ export function registerHealthcareTools(
     claimScrubTool,
     claimBuild837Tool,
     eraParse835Tool,
+    ackParse277caTool,
     denialExplainTool,
     reimbursementEstimateTool,
+    // Secondary claims & coordination of benefits
+    cobDeterminePrimaryTool,
+    cobBalanceCheckTool,
+    claimBuildSecondaryTool,
     // Eligibility & worklists
     eligibilityCheckTool,
     worklistAddTool,
