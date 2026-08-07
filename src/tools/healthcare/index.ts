@@ -1,0 +1,60 @@
+import type { Config } from "../../config/config.js";
+import type { MemoryStore } from "../../memory/store.js";
+import type { ToolRegistry } from "../registry.js";
+import { icd10SearchTool, icd10ValidateTool } from "./icd10.js";
+import { npiLookupTool, npiSearchTool, npiValidateTool } from "./npi.js";
+import { coverageSearchLocalTool, coverageSearchNationalTool, macLookupTool, sadExclusionTool } from "./coverage.js";
+import { denialExplainTool } from "./denial-codes.js";
+import { claimBuild837Tool } from "./x12/837.js";
+import { eraParse835Tool } from "./x12/835.js";
+import { claimScrubTool } from "./claim-scrub.js";
+import { hcpcsLookupTool, reimbursementEstimateTool } from "./datasets.js";
+import { eligibilityCheckTool } from "./eligibility.js";
+import { timelyFilingTool, worklistAddTool, worklistListTool, worklistUpdateTool } from "./worklist.js";
+import { emCalculateTool } from "./em-calculator.js";
+import { abnGenerateTool, appealDraftTool } from "./appeals.js";
+import { analyticsQueryTool, denialRiskTool } from "./analytics.js";
+import { claimGauntletTool, payerTwinTool, twinCalibrateTool } from "./twin.js";
+
+export function registerHealthcareTools(
+  registry: ToolRegistry,
+  _services: { config: Config; store: MemoryStore },
+): void {
+  registry.registerAll([
+    // Coding & validation
+    icd10SearchTool,
+    icd10ValidateTool,
+    hcpcsLookupTool,
+    npiValidateTool,
+    npiLookupTool,
+    npiSearchTool,
+    // Coverage & medical necessity
+    coverageSearchNationalTool,
+    coverageSearchLocalTool,
+    macLookupTool,
+    sadExclusionTool,
+    // Claims lifecycle
+    claimScrubTool,
+    claimBuild837Tool,
+    eraParse835Tool,
+    denialExplainTool,
+    reimbursementEstimateTool,
+    // Eligibility & worklists
+    eligibilityCheckTool,
+    worklistAddTool,
+    worklistListTool,
+    worklistUpdateTool,
+    timelyFilingTool,
+    // Assistants
+    emCalculateTool,
+    appealDraftTool,
+    abnGenerateTool,
+    // Analytics & prediction
+    analyticsQueryTool,
+    denialRiskTool,
+    // Flagship: adversarial payer twin
+    payerTwinTool,
+    claimGauntletTool,
+    twinCalibrateTool,
+  ]);
+}
