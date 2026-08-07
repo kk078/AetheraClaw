@@ -15,6 +15,9 @@ import { emCalculateTool } from "./em-calculator.js";
 import { abnGenerateTool, appealDraftTool } from "./appeals.js";
 import { analyticsQueryTool, denialRiskTool } from "./analytics.js";
 import { claimGauntletTool, payerTwinTool, twinCalibrateTool } from "./twin.js";
+import { telehealthCheckTool, telehealthPolicySetTool } from "./compliance/telehealth.js";
+import { globalPeriodCheckTool, globalPeriodRecordTool } from "./compliance/global-period.js";
+import { incidentToCheckTool } from "./compliance/incident-to.js";
 
 export function registerHealthcareTools(
   registry: ToolRegistry,
@@ -45,6 +48,12 @@ export function registerHealthcareTools(
     worklistListTool,
     worklistUpdateTool,
     timelyFilingTool,
+    // Compliance rule pack
+    telehealthCheckTool,
+    telehealthPolicySetTool,
+    globalPeriodCheckTool,
+    globalPeriodRecordTool,
+    incidentToCheckTool,
     // Assistants
     emCalculateTool,
     appealDraftTool,

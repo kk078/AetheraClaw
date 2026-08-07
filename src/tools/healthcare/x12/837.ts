@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { defineTool } from "../../registry.js";
 import { npiLuhnValid } from "../npi.js";
+import { ComplianceContextSchema } from "../compliance/context.js";
 import { envelope, seg, serializeX12, type Segment } from "./segments.js";
 
 export const ServiceLineSchema = z.object({
@@ -27,6 +28,9 @@ export const ClaimSchema = z.object({
   patient_sex: z.enum(["M", "F", "U"]).default("U"),
   diagnoses: z.array(z.string()).min(1).max(12).describe("ICD-10-CM codes, pointer order"),
   service_lines: z.array(ServiceLineSchema).min(1),
+  compliance: ComplianceContextSchema.optional().describe(
+    "How the service was delivered and supervised — drives telehealth, global-period, incident-to and split/shared checks in claim_scrub. Not emitted on the 837.",
+  ),
 });
 
 export type ClaimInput = z.infer<typeof ClaimSchema>;

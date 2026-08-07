@@ -58,3 +58,26 @@ CREATE TABLE IF NOT EXISTS remittances (
   era_json TEXT NOT NULL,
   received_at INTEGER NOT NULL
 );
+
+-- Per-payer policy overrides (kind='telehealth' today). Payers diverge from
+-- Medicare conventions, so the rules they are checked against are data, not code.
+CREATE TABLE IF NOT EXISTS payer_policies (
+  payer_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  policy_json TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (payer_key, kind)
+);
+
+-- Procedures performed, so later claims can be checked against open global periods.
+CREATE TABLE IF NOT EXISTS procedure_history (
+  id TEXT PRIMARY KEY,
+  patient_ref TEXT NOT NULL,
+  code TEXT NOT NULL,
+  service_date TEXT NOT NULL,
+  global_days INTEGER,
+  surgeon_npi TEXT,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_procedure_history_patient ON procedure_history(patient_ref, service_date);

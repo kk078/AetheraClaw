@@ -55,13 +55,14 @@ All tool input is treated as untrusted model output:
 
 **Coding & validation** — `icd10_search`, `icd10_validate` (NLM Clinical Tables), `hcpcs_lookup`, `npi_validate`/`npi_lookup`/`npi_search` (NPPES).
 **Coverage & medical necessity** — `coverage_search_national` (NCD), `coverage_search_local` (LCD), `mac_lookup`, `sad_exclusion_check` (CMS Coverage API).
-**Claims lifecycle** — `claim_scrub` (code/dx-pointer/NPI/modifier/POS/NCCI/MUE rules), `claim_build_837p`, `era_parse_835`, `denial_explain` (CARC/RARC), `reimbursement_estimate` (MPFS RVU).
+**Claims lifecycle** — `claim_scrub` (code/dx-pointer/NPI/modifier/POS/NCCI/MUE rules + the compliance pack below), `claim_build_837p`, `era_parse_835`, `denial_explain` (CARC/RARC), `reimbursement_estimate` (MPFS RVU).
+**Compliance rule pack** — `telehealth_check` / `telehealth_policy_set` (POS 02/10/11 and modifier 95/93/GT/GQ rules, with an editable **per-payer policy table** because payers diverge from Medicare), `global_period_check` / `global_period_record` (global surgical periods with modifier 24/25/57/58/78/79 logic against recorded procedure history), `incident_to_check` (incident-to in the office vs split/shared in a facility, including the modifier FS and substantive-portion rules). All three also run automatically inside `claim_scrub` when a claim carries the optional `compliance` block.
 **Eligibility & worklists** — `eligibility_check` (pluggable clearinghouse; mock connector in v1), `worklist_add`/`list`/`update`, `timely_filing_check`.
 **Assistants** — `em_calculate` (2021 MDM E/M leveling), `appeal_draft`, `abn_generate`.
 **Analytics & prediction** — `analytics_query` (denial rate, top CARCs, per-payer KPIs from parsed 835s), `denial_risk_score`.
 **🚩 Flagship — Adversarial Payer Twin** — `payer_twin_adjudicate` role-plays the payer and tries to deny your claim before submission, grounded in a per-payer playbook built from your own 835 history; `claim_gauntlet` runs it in rounds until the claim survives; `twin_calibrate` scores past predictions against real remittances so the twin learns your payers.
 
-Several tools use free public APIs (NLM, NPPES, CMS Coverage) — no keys required. Optional bundled datasets (NCCI PTP/MUE, HCPCS, MPFS RVUs) go in `~/.aetheraclaw/data/`; CPT is AMA-licensed and supplied by the user via `healthcare.cptDataPath`.
+Several tools use free public APIs (NLM, NPPES, CMS Coverage) — no keys required. Optional datasets go in `~/.aetheraclaw/data/`: `ncci-ptp.json` and `mue.json` (bundling and unit edits), `hcpcs.json`, `mpfs.json` (RVUs), and `global-periods.json` (`{"CODE": 90}`) for global-period lookup. CPT is AMA-licensed and supplied by the user via `healthcare.cptDataPath`. Every dataset is optional — tools that need one say so instead of guessing.
 
 ## Example
 
@@ -78,7 +79,7 @@ npm test          # unit tests: path-guard, shell risk, registry, truncation,
 
 ## Roadmap
 
-Designed-in extension points, planned but not yet built: claim intelligence (fee-schedule variance), practice operations (credentialing, superbill capture, ERA export, GFE), compliance rule pack (telehealth/global-period/incident-to, audit tracker, code/policy update ingestion), secondary claims & COB (277CA, secondary 837), coding review queue, payer-portal automation (Playwright), email channel + scheduled reporting, autonomous RCM swarm, regulation-as-code + compliance sentinel + hash-chained audit log, practice revenue digital twin (Monte Carlo), voice/telephony agent (Twilio + IVR), value-based care (HCC/RAF), price-transparency mining (MRF/TiC), FHIR ePA (Da Vinci CRD/DTR/PAS) + agent-to-agent negotiation, documentation-native CDI + coder training simulator — plus a real clearinghouse connector, PHI mode (encryption at rest, audit logging, redaction), messenger channels, a plugin SDK, multi-user auth, and Docker packaging.
+Designed-in extension points, planned but not yet built: claim intelligence (fee-schedule variance), practice operations (credentialing, superbill capture, ERA export, GFE), audit & integrity (RAC/MAC audit tracker, E/M bell-curve benchmarking, credit balances), code/policy update ingestion, secondary claims & COB (277CA, secondary 837), coding review queue, payer-portal automation (Playwright), email channel + scheduled reporting, autonomous RCM swarm, regulation-as-code + compliance sentinel + hash-chained audit log, practice revenue digital twin (Monte Carlo), voice/telephony agent (Twilio + IVR), value-based care (HCC/RAF), price-transparency mining (MRF/TiC), FHIR ePA (Da Vinci CRD/DTR/PAS) + agent-to-agent negotiation, documentation-native CDI + coder training simulator — plus a real clearinghouse connector, PHI mode (encryption at rest, audit logging, redaction), messenger channels, a plugin SDK, multi-user auth, and Docker packaging.
 
 ## License
 

@@ -3,7 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 import { configDir } from "../../config/config.js";
 import { defineTool } from "../registry.js";
-import type { ScrubFinding } from "./claim-scrub.js";
+import type { ScrubFinding } from "./finding.js";
 
 // Local dataset directory: ~/.aetheraclaw/data — populated by the user or the
 // (future) data-updates fetcher. Files are optional; tools degrade gracefully.

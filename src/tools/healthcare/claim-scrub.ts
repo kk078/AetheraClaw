@@ -3,16 +3,23 @@ import { defineTool } from "../registry.js";
 import { npiLuhnValid } from "./npi.js";
 import { ClaimSchema, type ClaimInput } from "./x12/837.js";
 import { checkNcci } from "./datasets.js";
+import type { ScrubFinding } from "./finding.js";
+import { checkGlobalPeriod } from "./compliance/global-period.js";
+import { checkIncidentTo } from "./compliance/incident-to.js";
+import { checkTelehealthLine, loadTelehealthPolicy, type TelehealthPolicy } from "./compliance/telehealth.js";
+import type { MemoryStore } from "../../memory/store.js";
 
-export interface ScrubFinding {
-  severity: "error" | "warning" | "info";
-  rule: string;
-  message: string;
-}
+export type { ScrubFinding } from "./finding.js";
 
 const ICD10_FORMAT = /^[A-TV-Z][0-9][0-9A-Z](\.[0-9A-Z]{1,4})?$/;
 
-export function scrubClaim(claim: ClaimInput): ScrubFinding[] {
+export interface ScrubOptions {
+  /** Payer telehealth policy; omitted means "assume Medicare rules and say so". */
+  telehealthPolicy?: TelehealthPolicy;
+  telehealthPolicyWasStored?: boolean;
+}
+
+export function scrubClaim(claim: ClaimInput, options: ScrubOptions = {}): ScrubFinding[] {
   const findings: ScrubFinding[] = [];
   const add = (severity: ScrubFinding["severity"], rule: string, message: string) =>
     findings.push({ severity, rule, message });
@@ -52,10 +59,12 @@ export function scrubClaim(claim: ClaimInput): ScrubFinding[] {
       add("warning", "modifier-25", `Line ${n}: modifier 25 (significant, separate E/M) on non-E/M code ${line.cpt_hcpcs}`);
     if (mods.includes("59"))
       add("info", "modifier-59", `Line ${n}: modifier 59 asserts a distinct procedural service — ensure documentation supports it (consider X{EPSU} subset modifiers)`);
-    if (mods.includes("95") && !["02", "10"].includes(line.place_of_service))
-      add("warning", "telehealth-pos", `Line ${n}: modifier 95 (telehealth) but POS ${line.place_of_service} is not 02 (facility telehealth) or 10 (patient home)`);
-    if (["02", "10"].includes(line.place_of_service) && !mods.includes("95") && !mods.includes("93"))
-      add("warning", "telehealth-modifier", `Line ${n}: telehealth POS ${line.place_of_service} without modifier 95/93 — many payers require it`);
+
+    // Compliance rule pack: telehealth, global surgical period, incident-to/split-shared.
+    const policy = options.telehealthPolicy ?? loadTelehealthPolicy(undefined, claim.payer_name);
+    findings.push(...checkTelehealthLine(line, n, policy, claim.compliance, options.telehealthPolicyWasStored ?? false));
+    findings.push(...checkGlobalPeriod(line, n, claim.compliance?.prior_procedures ?? []));
+    findings.push(...checkIncidentTo(line, n, claim.compliance));
 
     const key = line.service_date;
     procsOnDate.set(key, [...(procsOnDate.get(key) ?? []), line.cpt_hcpcs]);
@@ -82,10 +91,34 @@ export function scrubClaim(claim: ClaimInput): ScrubFinding[] {
 export const claimScrubTool = defineTool({
   name: "claim_scrub",
   description:
-    "Scrub a claim (structured JSON) before submission: code format, dx-pointer linkage, NPI validity, modifier/POS consistency (incl. telehealth), NCCI bundling & MUE unit checks, duplicates. Returns findings with severity.",
+    "Scrub a claim (structured JSON) before submission: code format, dx-pointer linkage, NPI validity, modifier/POS consistency, NCCI bundling & MUE unit checks, duplicates, plus the compliance rule pack — telehealth (payer-specific POS/modifier rules), global surgical periods (modifier 24/25/57/58/78/79), and incident-to / split-shared billing. Supply the optional `compliance` block for the compliance rules to fire. Returns findings with severity.",
   schema: ClaimSchema,
-  execute: async (input) => {
-    const findings = scrubClaim(input);
+  execute: async (input, ctx) => {
+    const store = ctx.services.store as MemoryStore | undefined;
+    const payerKey = input.payer_name.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const stored = store
+      ? (store.db.prepare("SELECT 1 FROM payer_policies WHERE kind = 'telehealth' AND payer_key = ?").get(payerKey) as unknown)
+      : undefined;
+
+    // Merge any recorded procedure history into the global-period check.
+    const claim = { ...input };
+    if (store && claim.compliance?.patient_ref) {
+      const rows = store.db
+        .prepare("SELECT code, service_date, global_days FROM procedure_history WHERE patient_ref = ? ORDER BY service_date DESC LIMIT 50")
+        .all(claim.compliance.patient_ref) as Array<{ code: string; service_date: string; global_days: number | null }>;
+      claim.compliance = {
+        ...claim.compliance,
+        prior_procedures: [
+          ...(claim.compliance.prior_procedures ?? []),
+          ...rows.map((r) => ({ code: r.code, date: r.service_date, global_days: r.global_days ?? undefined })),
+        ],
+      };
+    }
+
+    const findings = scrubClaim(claim, {
+      telehealthPolicy: loadTelehealthPolicy(store, input.payer_name),
+      telehealthPolicyWasStored: Boolean(stored),
+    });
     const lines = findings.map((f) => `[${f.severity.toUpperCase()}] ${f.rule}: ${f.message}`);
     const errors = findings.filter((f) => f.severity === "error").length;
     lines.push(`\nResult: ${errors === 0 ? "PASS (no errors)" : `${errors} error(s) must be fixed before submission`}`);
