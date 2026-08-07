@@ -30,6 +30,14 @@ import {
 } from "./audit/audit-tracker.js";
 import { emBenchmarkTool } from "./audit/em-benchmark.js";
 import {
+  codeSuggestTool,
+  codingCorrectionsTool,
+  reviewAuditTool,
+  reviewDecideTool,
+  reviewExportTool,
+  reviewListTool,
+} from "./review/tools.js";
+import {
   credentialingCheckTool,
   credentialingListTool,
   credentialingTrackTool,
@@ -119,6 +127,13 @@ export function registerHealthcareTools(
     gfeDeadlineTool,
     gfeGenerateTool,
     gfeVarianceTool,
+    // Coding review queue
+    codeSuggestTool,
+    reviewListTool,
+    reviewDecideTool,
+    reviewAuditTool,
+    reviewExportTool,
+    codingCorrectionsTool,
     // Compliance rule pack
     telehealthCheckTool,
     telehealthPolicySetTool,

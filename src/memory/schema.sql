@@ -125,6 +125,67 @@ CREATE TABLE IF NOT EXISTS credit_balances (
 
 CREATE INDEX IF NOT EXISTS idx_credit_balances_status ON credit_balances(status, identified_date);
 
+-- AI-suggested codes awaiting a human decision. Code selection is the coder's
+-- and provider's legal responsibility, so a suggestion is never a claim until
+-- someone accepts it. Current state lives here; the decision history lives in
+-- review_events, because "who approved this and why" is exactly what an auditor
+-- asks and a mutable status column cannot answer it.
+CREATE TABLE IF NOT EXISTS code_suggestions (
+  id TEXT PRIMARY KEY,
+  claim_ref TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL,                  -- 'diagnosis' | 'procedure' | 'modifier'
+  suggested_code TEXT NOT NULL,
+  suggested_description TEXT NOT NULL DEFAULT '',
+  rationale TEXT NOT NULL DEFAULT '',
+  provenance TEXT NOT NULL DEFAULT '', -- the documentation that supports it
+  confidence REAL,
+  source TEXT NOT NULL DEFAULT '',     -- which tool or agent proposed it
+  payer TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'accepted' | 'edited' | 'rejected'
+  final_code TEXT NOT NULL DEFAULT '',
+  reviewer TEXT NOT NULL DEFAULT '',
+  review_reason TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  reviewed_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_code_suggestions_status ON code_suggestions(status, created_at);
+
+-- Append-only decision log. Rows are never updated or deleted.
+CREATE TABLE IF NOT EXISTS review_events (
+  id TEXT PRIMARY KEY,
+  suggestion_id TEXT NOT NULL,
+  action TEXT NOT NULL,                -- 'suggested' | 'accepted' | 'edited' | 'rejected' | 'reopened'
+  from_status TEXT NOT NULL DEFAULT '',
+  to_status TEXT NOT NULL DEFAULT '',
+  code_before TEXT NOT NULL DEFAULT '',
+  code_after TEXT NOT NULL DEFAULT '',
+  reviewer TEXT NOT NULL DEFAULT '',
+  reason TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_review_events_suggestion ON review_events(suggestion_id, created_at);
+
+-- What this practice's coders keep changing. Corrections are recalled before
+-- suggesting codes so the same mistake is not proposed twice; they are surfaced
+-- through a tool rather than folded into the system prompt, which is byte-stable
+-- for prompt caching.
+CREATE TABLE IF NOT EXISTS coding_corrections (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  suggested_code TEXT NOT NULL,
+  corrected_code TEXT NOT NULL DEFAULT '',  -- empty when the suggestion was rejected outright
+  payer_key TEXT NOT NULL DEFAULT '',
+  reason TEXT NOT NULL DEFAULT '',
+  times_seen INTEGER NOT NULL DEFAULT 1,
+  last_seen_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE (kind, suggested_code, corrected_code, payer_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_coding_corrections_lookup ON coding_corrections(kind, suggested_code);
+
 -- Provider enrollment per payer. A lapsed credential is not fixable afterwards —
 -- claims for services furnished while unenrolled deny as provider-not-eligible
 -- and no appeal recovers them — so the dates that drive it are columns.
