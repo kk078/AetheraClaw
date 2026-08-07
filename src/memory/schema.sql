@@ -125,6 +125,24 @@ CREATE TABLE IF NOT EXISTS credit_balances (
 
 CREATE INDEX IF NOT EXISTS idx_credit_balances_status ON credit_balances(status, identified_date);
 
+-- Evidence that a claim was received by the payer, banked when acknowledgments
+-- are parsed rather than hunted for months later. A timely-filing denial is
+-- winnable only with an ACCEPTANCE report — a submission log shows you sent a
+-- claim, an acknowledgment shows the payer received it, and only the second is
+-- proof. The 277CA is the cleanest source.
+CREATE TABLE IF NOT EXISTS filing_proof (
+  id TEXT PRIMARY KEY,
+  claim_id TEXT NOT NULL,
+  accepted_on TEXT NOT NULL,          -- YYYYMMDD the payer acknowledged receipt
+  payer TEXT NOT NULL DEFAULT '',
+  payer_claim_number TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT '',    -- e.g. '277CA acknowledgment'
+  recorded_at INTEGER NOT NULL,
+  UNIQUE (claim_id, accepted_on, source)
+);
+
+CREATE INDEX IF NOT EXISTS idx_filing_proof_claim ON filing_proof(claim_id);
+
 -- Which edition of each code set is installed locally, so staleness is a fact
 -- rather than a guess. One row per code set; re-registering replaces it.
 CREATE TABLE IF NOT EXISTS code_set_versions (

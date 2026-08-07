@@ -13,10 +13,10 @@ import { cobDeterminePrimaryTool } from "./cob.js";
 import { claimScrubTool } from "./claim-scrub.js";
 import { hcpcsLookupTool } from "./datasets.js";
 import { eligibilityCheckTool } from "./eligibility.js";
-import { timelyFilingTool, worklistAddTool, worklistListTool, worklistUpdateTool } from "./worklist.js";
+import { worklistAddTool, worklistListTool, worklistUpdateTool } from "./worklist.js";
 import { emCalculateTool } from "./em-calculator.js";
 import { abnGenerateTool, appealDraftTool } from "./appeals.js";
-import { analyticsQueryTool, denialRiskTool } from "./analytics.js";
+import { analyticsQueryTool } from "./analytics.js";
 import { claimGauntletTool, payerTwinTool, twinCalibrateTool } from "./twin.js";
 import { telehealthCheckTool, telehealthPolicySetTool } from "./compliance/telehealth.js";
 import { globalPeriodCheckTool, globalPeriodRecordTool } from "./compliance/global-period.js";
@@ -29,6 +29,15 @@ import {
   deadlineCalculatorTool,
 } from "./audit/audit-tracker.js";
 import { emBenchmarkTool } from "./audit/em-benchmark.js";
+import {
+  denialRiskTool,
+  filingProofRecordTool,
+  filingSweepTool,
+  timelyFilingExceptionTool,
+  timelyFilingSetTool,
+  timelyFilingTool,
+  worklistPrioritizeTool,
+} from "./prediction/tools.js";
 import {
   feeScheduleDriftTool,
   paymentVarianceTool,
@@ -83,7 +92,14 @@ export function registerHealthcareTools(
     worklistAddTool,
     worklistListTool,
     worklistUpdateTool,
+    worklistPrioritizeTool,
+    // Denial prediction & filing deadlines
+    denialRiskTool,
     timelyFilingTool,
+    timelyFilingSetTool,
+    timelyFilingExceptionTool,
+    filingProofRecordTool,
+    filingSweepTool,
     // Compliance rule pack
     telehealthCheckTool,
     telehealthPolicySetTool,
@@ -110,9 +126,8 @@ export function registerHealthcareTools(
     codeSetRegisterTool,
     codeUpdateDiffTool,
     policyWatchTool,
-    // Analytics & prediction
+    // Analytics
     analyticsQueryTool,
-    denialRiskTool,
     // Flagship: adversarial payer twin
     payerTwinTool,
     claimGauntletTool,

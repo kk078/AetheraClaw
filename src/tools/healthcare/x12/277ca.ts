@@ -136,6 +136,8 @@ export interface AckClaim {
 }
 
 export interface Acknowledgment {
+  /** YYYYMMDD the acknowledgment was produced (BHT04) — the date that proves receipt. */
+  ackDate: string;
   payer: string;
   submitter: string;
   provider: string;
@@ -175,6 +177,7 @@ function statusesFrom(elements: string[]): AckStatus[] {
 export function parse277ca(text: string): Acknowledgment {
   const segments = parseX12(text);
   const ack: Acknowledgment = {
+    ackDate: "",
     payer: "",
     submitter: "",
     provider: "",
@@ -189,6 +192,11 @@ export function parse277ca(text: string): Acknowledgment {
 
   for (const s of segments) {
     switch (s.id) {
+      case "BHT":
+        // BHT04 is the date this acknowledgment was created. Claim-level STC02
+        // dates repeat it, so the header is the single source.
+        if (/^\d{8}$/.test(s.elements[3] ?? "")) ack.ackDate = s.elements[3];
+        break;
       case "NM1": {
         const role = s.elements[0];
         const name = s.elements[2] ?? "";
@@ -337,6 +345,7 @@ export const ackParse277caTool = defineTool({
     const rejected = ack.claims.filter((c) => !c.accepted);
     let worklisted = 0;
     let statusUpdated = 0;
+    let proofBanked = 0;
 
     if (store) {
       const now = Date.now();
@@ -346,6 +355,19 @@ export const ackParse277caTool = defineTool({
           .prepare("UPDATE claims SET status = ?, updated_at = ? WHERE json_extract(claim_json, '$.claim_id') = ?")
           .run(c.accepted ? "submitted" : "rejected", now, c.claimId);
         statusUpdated += res.changes;
+
+        // Bank the acceptance as proof of timely filing. A timely-filing denial
+        // can arrive many months later, and by then the acknowledgment that
+        // would have won the appeal is usually long gone.
+        if (c.accepted && ack.ackDate) {
+          store.db
+            .prepare(
+              `INSERT OR IGNORE INTO filing_proof (id, claim_id, accepted_on, payer, payer_claim_number, source, recorded_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            )
+            .run(newId("fp"), c.claimId, ack.ackDate, ack.payer, c.payerClaimNumber, "277CA acknowledgment", now);
+          proofBanked++;
+        }
       }
       if (input.create_worklist_items) {
         for (const c of rejected) {
@@ -376,6 +398,10 @@ export const ackParse277caTool = defineTool({
     const footer: string[] = [];
     if (worklisted) footer.push(`${worklisted} worklist item(s) opened for the rejected claims.`);
     if (statusUpdated) footer.push(`${statusUpdated} recorded claim(s) updated with their acknowledgment status.`);
+    if (proofBanked)
+      footer.push(
+        `${proofBanked} acceptance(s) banked as proof of timely filing (dated ${ack.ackDate}). If any of these later denies for timely filing, that acknowledgment is the evidence the appeal needs.`,
+      );
     return { content: [summarizeAck(ack), ...(footer.length ? ["", ...footer] : [])].join("\n") };
   },
 });
