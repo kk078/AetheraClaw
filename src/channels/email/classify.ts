@@ -222,7 +222,10 @@ export function extractClaimRefs(text: string): string[] {
 const MBI_LETTER = "[ACDEFGHJKMNPQRTUVWXY]";
 const MBI_ALNUM = "[ACDEFGHJKMNPQRTUVWXY0-9]";
 export const MBI_PATTERN = new RegExp(
-  `\\b[1-9]${MBI_LETTER}${MBI_ALNUM}\\d${MBI_LETTER}${MBI_ALNUM}\\d${MBI_LETTER}${MBI_LETTER}\\d\\d\\b`,
+  // Hyphens are optional because the card prints them (1EG4-TE5-MK73) and people
+  // read them out that way. Requiring the unbroken form missed the commonest
+  // written spelling of the identifier this pattern exists to catch.
+  `\\b[1-9]${MBI_LETTER}${MBI_ALNUM}\\d-?${MBI_LETTER}${MBI_ALNUM}\\d-?${MBI_LETTER}${MBI_LETTER}\\d\\d\\b`,
   "g",
 );
 

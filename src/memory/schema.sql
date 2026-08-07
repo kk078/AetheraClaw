@@ -493,3 +493,54 @@ CREATE TABLE IF NOT EXISTS forecast_runs (
   report TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL
 );
+
+-- ── Voice and telephony ─────────────────────────────────────────────────────
+-- Payer calls. The reference number column is the reason this table exists: a
+-- phone call is deniable six months later and "we have no record of that call"
+-- is the standard answer to an appeal that rests on one.
+CREATE TABLE IF NOT EXISTS calls (
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL DEFAULT 'simulator',
+  payer TEXT NOT NULL DEFAULT '',
+  target TEXT NOT NULL DEFAULT 'payer',   -- payer | clearinghouse | provider_office
+  to_number TEXT NOT NULL DEFAULT '',
+  caller_state TEXT NOT NULL DEFAULT '',
+  callee_state TEXT NOT NULL DEFAULT '',
+  recording INTEGER NOT NULL DEFAULT 0,
+  consent_note TEXT NOT NULL DEFAULT '',
+  claim_ref TEXT NOT NULL DEFAULT '',
+  state TEXT NOT NULL DEFAULT 'dialing',
+  reference_number TEXT NOT NULL DEFAULT '',
+  representative TEXT NOT NULL DEFAULT '',
+  disposition TEXT NOT NULL DEFAULT '',
+  outcome_json TEXT NOT NULL DEFAULT '{}',
+  started_at INTEGER NOT NULL,
+  ended_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_calls_claim ON calls(claim_ref);
+
+-- Every segment heard and every action taken, append-only. A call nobody can
+-- replay is a call that happened only in somebody's memory of it.
+CREATE TABLE IF NOT EXISTS call_events (
+  id TEXT PRIMARY KEY,
+  call_id TEXT NOT NULL,
+  at_ms INTEGER NOT NULL,
+  kind TEXT NOT NULL,              -- heard | said | pressed | state | note
+  text TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_call_events_call ON call_events(call_id, at_ms);
+
+-- Learned phone trees. Menus change without notice, so misses are counted and a
+-- map that keeps missing is reported as stale rather than pressed blindly.
+CREATE TABLE IF NOT EXISTS ivr_maps (
+  payer TEXT NOT NULL,
+  level TEXT NOT NULL,
+  options_json TEXT NOT NULL DEFAULT '[]',
+  last_confirmed_at INTEGER NOT NULL DEFAULT 0,
+  misses INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (payer, level)
+);

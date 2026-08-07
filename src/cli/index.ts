@@ -29,6 +29,19 @@ import {
 } from "../compliance/tools.js";
 import { auditAnchorTool, auditLogTool, auditRecordTool, auditVerifyTool } from "../audit/tools.js";
 import {
+  callEndTool,
+  callHistoryTool,
+  callListenTool,
+  callNavigateTool,
+  callPolicyTool,
+  callPressTool,
+  callSayTool,
+  callStartTool,
+  callTranscriptTool,
+  ivrMapListTool,
+  ivrMapSetTool,
+} from "../voice/tools.js";
+import {
   cashForecastTool,
   forecastChartTool,
   forecastHistoryTool,
@@ -118,6 +131,17 @@ export function buildRegistry(config: ReturnType<typeof loadConfig>, store: Memo
     patientBalanceAddTool,
     patientOutreachTool,
     patientLetterTool,
+    callPolicyTool,
+    callStartTool,
+    callListenTool,
+    callSayTool,
+    callPressTool,
+    callNavigateTool,
+    callEndTool,
+    callTranscriptTool,
+    callHistoryTool,
+    ivrMapSetTool,
+    ivrMapListTool,
   ]);
   return registry;
 }

@@ -102,6 +102,21 @@ export const ConfigSchema = z.object({
   swarm: z
     .object({ mode: z.enum(["off", "assist", "autopilot-with-checkpoints"]).default("off") })
     .default({}),
+  voice: z
+    .object({
+      // Defaults to the simulator. Real dialling is opt-in because a payer call
+      // means saying a member ID out loud, and this build is not approved for PHI.
+      provider: z.enum(["simulator", "twilio"]).default("simulator"),
+      fromNumber: z.string().default("").describe("E.164 number calls originate from"),
+      callerState: z.string().default("").describe("Two-letter state the practice calls from — decides the recording rule"),
+      webhookUrl: z.string().default(""),
+      accountSidEnv: z.string().default("TWILIO_ACCOUNT_SID"),
+      authTokenEnv: z.string().default("TWILIO_AUTH_TOKEN"),
+      /** Off by default. Twelve states make recording without consent a crime. */
+      recordCalls: z.boolean().default(false),
+      maxCallMinutes: z.number().int().positive().default(45),
+    })
+    .default({}),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
