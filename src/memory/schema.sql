@@ -544,3 +544,33 @@ CREATE TABLE IF NOT EXISTS ivr_maps (
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (payer, level)
 );
+
+-- ── Value-based care ────────────────────────────────────────────────────────
+-- Suspect conditions awaiting a coder's decision. Deliberately a separate table
+-- from coding_suggestions so a risk-adjustment proposal carries its own extra
+-- burden: the HCC it would add, the documentation quote, and which of
+-- Monitor/Evaluate/Assess/Treat the note actually supports.
+--
+-- The direction column is what keeps this honest. A review that can only ever
+-- propose 'add' is an upcoding engine; 'remove' rows are the ones that prove it
+-- looked both ways.
+CREATE TABLE IF NOT EXISTS vbc_suspects (
+  id TEXT PRIMARY KEY,
+  patient_ref TEXT NOT NULL,
+  year INTEGER NOT NULL,
+  direction TEXT NOT NULL,            -- 'add' | 'remove' | 'mention_only'
+  hcc TEXT NOT NULL,
+  label TEXT NOT NULL DEFAULT '',
+  coefficient REAL NOT NULL DEFAULT 0,
+  suggested_code TEXT NOT NULL DEFAULT '',
+  quote TEXT NOT NULL DEFAULT '',
+  meat TEXT NOT NULL DEFAULT '',      -- comma-separated categories supported
+  source TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending',  -- pending | accepted | rejected
+  reviewer TEXT NOT NULL DEFAULT '',
+  review_reason TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_vbc_suspects_status ON vbc_suspects(status, year);

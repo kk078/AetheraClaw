@@ -102,6 +102,12 @@ export const ConfigSchema = z.object({
   swarm: z
     .object({ mode: z.enum(["off", "assist", "autopilot-with-checkpoints"]).default("off") })
     .default({}),
+  vbc: z
+    .object({
+      /** Dollars of revenue per 1.0 RAF, for sizing a gap. 0 means do not guess. */
+      dollarsPerRaf: z.number().min(0).default(0),
+    })
+    .default({}),
   voice: z
     .object({
       // Defaults to the simulator. Real dialling is opt-in because a payer call

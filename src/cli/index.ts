@@ -29,6 +29,14 @@ import {
 } from "../compliance/tools.js";
 import { auditAnchorTool, auditLogTool, auditRecordTool, auditVerifyTool } from "../audit/tools.js";
 import {
+  hccRecaptureTool,
+  qualityMeasuresTool,
+  rafCalculateTool,
+  suspectConditionsTool,
+  suspectListTool,
+  suspectReviewTool,
+} from "../vbc/tools.js";
+import {
   callEndTool,
   callHistoryTool,
   callListenTool,
@@ -142,6 +150,12 @@ export function buildRegistry(config: ReturnType<typeof loadConfig>, store: Memo
     callHistoryTool,
     ivrMapSetTool,
     ivrMapListTool,
+    rafCalculateTool,
+    hccRecaptureTool,
+    suspectConditionsTool,
+    suspectListTool,
+    suspectReviewTool,
+    qualityMeasuresTool,
   ]);
   return registry;
 }
