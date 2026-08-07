@@ -125,6 +125,40 @@ CREATE TABLE IF NOT EXISTS credit_balances (
 
 CREATE INDEX IF NOT EXISTS idx_credit_balances_status ON credit_balances(status, identified_date);
 
+-- Payer-twin predictions, kept so calibration is automatic. Without this a
+-- prediction has to be re-typed by hand when the remittance arrives, which means
+-- in practice it never is and the twin is never scored at all.
+CREATE TABLE IF NOT EXISTS twin_predictions (
+  id TEXT PRIMARY KEY,
+  claim_id TEXT NOT NULL,
+  payer TEXT NOT NULL DEFAULT '',
+  verdict TEXT NOT NULL,              -- 'PAY' | 'PARTIAL' | 'DENY'
+  confidence TEXT NOT NULL DEFAULT '',
+  predicted_carcs_json TEXT NOT NULL DEFAULT '[]',
+  rationale TEXT NOT NULL DEFAULT '',
+  remediation TEXT NOT NULL DEFAULT '',
+  gauntlet_id TEXT NOT NULL DEFAULT '',
+  round INTEGER NOT NULL DEFAULT 1,
+  claim_fingerprint TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_twin_predictions_claim ON twin_predictions(claim_id, created_at);
+
+-- What calibration learned. Separate from the statistics so it stays visible
+-- which lines are evidence about the payer and which are corrections to the twin.
+CREATE TABLE IF NOT EXISTS twin_playbook_notes (
+  id TEXT PRIMARY KEY,
+  payer_key TEXT NOT NULL,
+  kind TEXT NOT NULL,                 -- 'miss' | 'over_call' | 'wrong_reason' | 'manual'
+  note TEXT NOT NULL,
+  source_claim_id TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  UNIQUE (payer_key, source_claim_id, kind)
+);
+
+CREATE INDEX IF NOT EXISTS idx_twin_notes_payer ON twin_playbook_notes(payer_key, created_at);
+
 -- Everything the portal browser did, append-only. Automation signed in as the
 -- practice should leave a record that does not depend on a chat transcript
 -- surviving. Credentials are never written here.

@@ -17,7 +17,14 @@ import { worklistAddTool, worklistListTool, worklistUpdateTool } from "./worklis
 import { emCalculateTool } from "./em-calculator.js";
 import { abnGenerateTool, appealDraftTool } from "./appeals.js";
 import { analyticsQueryTool } from "./analytics.js";
-import { claimGauntletTool, payerTwinTool, twinCalibrateTool } from "./twin.js";
+import {
+  claimGauntletTool,
+  payerTwinTool,
+  twinCalibrateTool,
+  twinNoteTool,
+  twinPlaybookTool,
+  twinSelfHealTool,
+} from "./twin/index.js";
 import { telehealthCheckTool, telehealthPolicySetTool } from "./compliance/telehealth.js";
 import { globalPeriodCheckTool, globalPeriodRecordTool } from "./compliance/global-period.js";
 import { incidentToCheckTool } from "./compliance/incident-to.js";
@@ -166,5 +173,8 @@ export function registerHealthcareTools(
     payerTwinTool,
     claimGauntletTool,
     twinCalibrateTool,
+    twinPlaybookTool,
+    twinNoteTool,
+    twinSelfHealTool,
   ]);
 }
