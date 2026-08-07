@@ -574,3 +574,51 @@ CREATE TABLE IF NOT EXISTS vbc_suspects (
 );
 
 CREATE INDEX IF NOT EXISTS idx_vbc_suspects_status ON vbc_suspects(status, year);
+
+-- ── Price transparency ──────────────────────────────────────────────────────
+-- Rates mined from payer Transparency in Coverage files and hospital
+-- machine-readable files, filtered during ingest to the codes this practice
+-- actually bills. The source files are tens of gigabytes; these tables hold the
+-- few thousand rows that matter.
+--
+-- negotiated_type is carried rather than normalized away because it decides what
+-- the number MEANS: a rate of 250 is $250 under 'negotiated' and 250% of
+-- Medicare under 'percentage', and a query that averaged them would return
+-- something plausible and wrong.
+CREATE TABLE IF NOT EXISTS market_rates (
+  id TEXT PRIMARY KEY,
+  billing_code TEXT NOT NULL,
+  billing_code_type TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  negotiated_type TEXT NOT NULL DEFAULT 'negotiated',
+  billing_class TEXT NOT NULL DEFAULT 'professional',
+  rate REAL NOT NULL,
+  service_codes TEXT NOT NULL DEFAULT '',
+  expiration_date TEXT NOT NULL DEFAULT '',
+  provider_ref TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT '',
+  ingested_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_market_rates_code ON market_rates(billing_code, negotiated_type, billing_class);
+
+-- Federal IDR disputes. The dates are all business-day computed, which is where
+-- these get missed: a 30-business-day window is six calendar weeks.
+CREATE TABLE IF NOT EXISTS idr_disputes (
+  id TEXT PRIMARY KEY,
+  payer TEXT NOT NULL DEFAULT '',
+  claim_refs TEXT NOT NULL DEFAULT '',
+  line_items INTEGER NOT NULL DEFAULT 1,
+  amount_in_dispute_cents INTEGER NOT NULL DEFAULT 0,
+  offer_cents INTEGER NOT NULL DEFAULT 0,
+  initial_payment_on TEXT NOT NULL DEFAULT '',
+  open_negotiation_ends TEXT NOT NULL DEFAULT '',
+  initiation_opens TEXT NOT NULL DEFAULT '',
+  initiation_closes TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'open_negotiation',
+  outcome TEXT NOT NULL DEFAULT '',
+  determination_on TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);

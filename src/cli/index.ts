@@ -29,6 +29,14 @@ import {
 } from "../compliance/tools.js";
 import { auditAnchorTool, auditLogTool, auditRecordTool, auditVerifyTool } from "../audit/tools.js";
 import {
+  idrEvaluateTool,
+  idrTrackTool,
+  negotiationBriefTool,
+  rateBenchmarkTool,
+  rateIngestTool,
+  ratePositionTool,
+} from "../transparency/tools.js";
+import {
   hccRecaptureTool,
   qualityMeasuresTool,
   rafCalculateTool,
@@ -156,6 +164,12 @@ export function buildRegistry(config: ReturnType<typeof loadConfig>, store: Memo
     suspectListTool,
     suspectReviewTool,
     qualityMeasuresTool,
+    rateIngestTool,
+    rateBenchmarkTool,
+    ratePositionTool,
+    negotiationBriefTool,
+    idrEvaluateTool,
+    idrTrackTool,
   ]);
   return registry;
 }
