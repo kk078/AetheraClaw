@@ -8,6 +8,16 @@ import { createShellTool } from "../tools/shell.js";
 import { listDirTool, readFileTool, writeFileTool } from "../tools/fs.js";
 import { webFetchTool, webSearchFallbackTool } from "../tools/web-fetch.js";
 import { registerHealthcareTools } from "../tools/healthcare/index.js";
+import {
+  emailDraftTool,
+  emailIngestTool,
+  emailListTool,
+  emailPollTool,
+  emailRouteTool,
+  emailSendTool,
+} from "../channels/email/tools.js";
+import { EmailChannel } from "../channels/email/channel.js";
+import { reportGenerateTool } from "../reports/tools.js";
 import { SessionManager } from "../gateway/session-manager.js";
 import { buildServer } from "../gateway/server.js";
 import { startChat } from "./chat.js";
@@ -21,6 +31,15 @@ export function buildRegistry(config: ReturnType<typeof loadConfig>, store: Memo
   registry.registerAll([readFileTool, writeFileTool, listDirTool, webFetchTool]);
   if (config.provider !== "anthropic") registry.register(webSearchFallbackTool);
   registerHealthcareTools(registry, { config, store });
+  registry.registerAll([
+    emailPollTool,
+    emailListTool,
+    emailRouteTool,
+    emailDraftTool,
+    emailSendTool,
+    emailIngestTool,
+    reportGenerateTool,
+  ]);
   return registry;
 }
 
@@ -37,9 +56,21 @@ program
     const registry = buildRegistry(config, store);
     const sessions = new SessionManager(store, registry, config, { store, config });
     const app = await buildServer({ config, store, sessions });
+
+    const email = new EmailChannel({
+      config,
+      store,
+      handleUserMessage: (sessionId, text) => sessions.handleUserMessage(sessionId, text),
+    });
+    await email.start();
+    for (const signal of ["SIGINT", "SIGTERM"] as const) {
+      process.once(signal, () => void email.stop());
+    }
+
     await app.listen({ host: config.gateway.host, port: config.gateway.port });
     console.log(`AetheraClaw gateway: http://${config.gateway.host}:${config.gateway.port}`);
     console.log(`Provider: ${config.provider} · Workspace: ${config.workspaceRoot}`);
+    if (config.email.enabled) console.log(`Email channel: ${config.email.imap.user}@${config.email.imap.host}`);
   });
 
 program

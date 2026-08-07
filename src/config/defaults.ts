@@ -33,6 +33,19 @@ export const DEFAULT_CONFIG_JSON5 = `{
     clearinghouse: "mock",
   },
 
+  // Email channel. Disabled until a mailbox is configured; passwords come from
+  // AETHERACLAW_IMAP_PASSWORD / AETHERACLAW_SMTP_PASSWORD, never from this file.
+  email: {
+    enabled: false,
+    imap: { host: '', port: 993, secure: true, user: '', mailbox: 'INBOX' },
+    smtp: { host: '', port: 587, secure: false, user: '', from: '' },
+    pollSeconds: 300,
+    maxPerPoll: 25,
+    fromFilters: [],          // e.g. ['medicare', 'availity'] to ignore everything else
+    quarantinePhi: true,      // hold mail carrying identifier-shaped text
+    sessionId: '',            // session new correspondence is delivered into
+  },
+
   swarm: { mode: "off" }, // "off" | "assist" | "autopilot-with-checkpoints"
 }
 `;

@@ -42,12 +42,44 @@ export const ConfigSchema = z.object({
       clearinghouse: z.string().default("mock"),
     })
     .default({}),
+  email: z
+    .object({
+      enabled: z.boolean().default(false),
+      imap: z
+        .object({
+          host: z.string().default(""),
+          port: z.number().int().default(993),
+          secure: z.boolean().default(true),
+          user: z.string().default(""),
+          mailbox: z.string().default("INBOX"),
+        })
+        .default({}),
+      smtp: z
+        .object({
+          host: z.string().default(""),
+          port: z.number().int().default(587),
+          secure: z.boolean().default(false),
+          user: z.string().default(""),
+          from: z.string().default(""),
+        })
+        .default({}),
+      pollSeconds: z.number().int().min(30).default(300),
+      maxPerPoll: z.number().int().min(1).max(200).default(25),
+      fromFilters: z.array(z.string()).default([]),
+      // Inbound mail carrying identifier-shaped text is held rather than
+      // delivered into a session: this deployment is not approved for PHI, and
+      // an inbox is where it arrives unasked.
+      quarantinePhi: z.boolean().default(true),
+      sessionId: z.string().default(""),
+    })
+    .default({}),
   swarm: z
     .object({ mode: z.enum(["off", "assist", "autopilot-with-checkpoints"]).default("off") })
     .default({}),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
+export type EmailConfig = Config["email"];
 
 export function expandHome(p: string): string {
   if (p === "~") return os.homedir();

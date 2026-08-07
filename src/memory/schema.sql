@@ -125,6 +125,49 @@ CREATE TABLE IF NOT EXISTS credit_balances (
 
 CREATE INDEX IF NOT EXISTS idx_credit_balances_status ON credit_balances(status, identified_date);
 
+-- Payer correspondence pulled from the mailbox. A billing inbox is an unsorted
+-- work queue with clocks already running inside it, so each message is stored
+-- with what it was classified as and the dates it imposes. Bodies flagged as
+-- possibly carrying PHI are held rather than stored, because this deployment is
+-- not approved for real patient data.
+CREATE TABLE IF NOT EXISTS inbound_mail (
+  id TEXT PRIMARY KEY,
+  uid TEXT NOT NULL,                  -- mailbox UID, for the poll watermark
+  mailbox TEXT NOT NULL DEFAULT 'INBOX',
+  sender TEXT NOT NULL DEFAULT '',
+  subject TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL DEFAULT '',      -- empty when quarantined
+  kind TEXT NOT NULL DEFAULT 'other',
+  confidence REAL NOT NULL DEFAULT 0,
+  route_to TEXT NOT NULL DEFAULT '',
+  deadlines_json TEXT NOT NULL DEFAULT '[]',
+  claim_refs_json TEXT NOT NULL DEFAULT '[]',
+  amounts_json TEXT NOT NULL DEFAULT '[]',
+  phi_json TEXT NOT NULL DEFAULT '[]',
+  quarantined INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'new', -- 'new' | 'routed' | 'dismissed'
+  received_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE (mailbox, uid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_inbound_mail_status ON inbound_mail(status, received_at);
+
+-- Outbound replies are drafted, approved, and only then sent. The draft is kept
+-- so what was sent is recoverable independently of the mail server.
+CREATE TABLE IF NOT EXISTS outbound_mail (
+  id TEXT PRIMARY KEY,
+  recipient TEXT NOT NULL,
+  subject TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL DEFAULT '',
+  in_reply_to TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'draft',  -- 'draft' | 'sent' | 'failed'
+  message_id TEXT NOT NULL DEFAULT '',
+  error TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  sent_at INTEGER
+);
+
 -- AI-suggested codes awaiting a human decision. Code selection is the coder's
 -- and provider's legal responsibility, so a suggestion is never a claim until
 -- someone accepts it. Current state lives here; the decision history lives in
