@@ -125,6 +125,40 @@ CREATE TABLE IF NOT EXISTS credit_balances (
 
 CREATE INDEX IF NOT EXISTS idx_credit_balances_status ON credit_balances(status, identified_date);
 
+-- The swarm blackboard: every claim in flight, what stage it is at, and who owns
+-- it. One row per claim, so there is a single answer to "where is this" rather
+-- than a stage inferred from whichever table was written last.
+CREATE TABLE IF NOT EXISTS blackboard (
+  id TEXT PRIMARY KEY,
+  claim_ref TEXT NOT NULL,
+  payer TEXT NOT NULL DEFAULT '',
+  stage TEXT NOT NULL,
+  amount_cents INTEGER NOT NULL DEFAULT 0,
+  attempts INTEGER NOT NULL DEFAULT 0,   -- attempts at the CURRENT stage; reset on a move
+  last_error TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE (claim_ref)
+);
+
+CREATE INDEX IF NOT EXISTS idx_blackboard_stage ON blackboard(stage, updated_at);
+
+-- Every stage change, append-only. An autonomous pipeline that cannot say what
+-- it did and who authorized it is not one anybody should run.
+CREATE TABLE IF NOT EXISTS blackboard_events (
+  id TEXT PRIMARY KEY,
+  claim_ref TEXT NOT NULL,
+  from_stage TEXT NOT NULL DEFAULT '',
+  to_stage TEXT NOT NULL,
+  actor TEXT NOT NULL,                   -- a role name, or the person who took it
+  automated INTEGER NOT NULL DEFAULT 0,
+  detail TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_blackboard_events_claim ON blackboard_events(claim_ref, created_at);
+
 -- Payer-twin predictions, kept so calibration is automatic. Without this a
 -- prediction has to be re-typed by hand when the remittance arrives, which means
 -- in practice it never is and the twin is never scored at all.

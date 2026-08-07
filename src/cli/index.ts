@@ -19,6 +19,15 @@ import {
 import { EmailChannel } from "../channels/email/channel.js";
 import { reportGenerateTool } from "../reports/tools.js";
 import {
+  swarmAdvanceTool,
+  swarmBoardTool,
+  swarmFailTool,
+  swarmHistoryTool,
+  swarmPipelineTool,
+  swarmPlanTool,
+  swarmTrackTool,
+} from "../swarm/tools.js";
+import {
   portalAuditTool,
   portalClickTool,
   portalCloseTool,
@@ -61,6 +70,13 @@ export function buildRegistry(config: ReturnType<typeof loadConfig>, store: Memo
     portalScreenshotTool,
     portalCloseTool,
     portalAuditTool,
+    swarmTrackTool,
+    swarmBoardTool,
+    swarmPlanTool,
+    swarmAdvanceTool,
+    swarmFailTool,
+    swarmHistoryTool,
+    swarmPipelineTool,
   ]);
   return registry;
 }
