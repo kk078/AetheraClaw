@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import path from "node:path";
-import { loadConfig, configDir, apiKeyFor, envVarFor, resolveProvider } from "../config/config.js";
+import fs from "node:fs";
+import { loadConfig, configDir, apiKeyFor, envVarFor, expandHome, resolveProvider } from "../config/config.js";
 import { PROFILES, PROVIDER_TOOL_LIMITS, renderProfiles, selectTools } from "../tools/profiles.js";
 import { resolveOllamaTarget } from "../providers/openai.js";
 import { createProvider } from "../providers/index.js";
@@ -153,11 +154,29 @@ program
   .option("--provider <name>", "anthropic | openai | gemini | ollama")
   .option("--profile <name>", "tool profile — see `aetheraclaw providers`")
   .option("--tenant <slug>", "tenant to serve (multi-tenant installs only)")
-  .action(async (opts: { port?: string; host?: string; provider?: string; profile?: string; tenant?: string }) => {
+  .option("--workspace <path>", "where files are written this run — overrides workspaceRoot in config.json5")
+  .action(async (opts: { port?: string; host?: string; provider?: string; profile?: string; tenant?: string; workspace?: string }) => {
     const config = loadConfig();
     if (opts.port) config.gateway.port = Number(opts.port);
     if (opts.host) config.gateway.host = opts.host;
     if (opts.profile) config.toolProfile = opts.profile;
+    // The workspace is WHERE THE USER SAYS, not a fixed ~/aetheraclaw-workspace.
+    // Point it at the practice's real folder and generated appeals, superbills
+    // and posting files land where somebody will actually look for them.
+    //
+    // What does NOT move is the confinement. Everything the model writes still
+    // has to resolve inside this root — path-guard.ts blocks ../, absolute
+    // paths and symlink escapes. Choosing the root is the user's; escaping it
+    // is nobody's, because "write wherever the prompt says" is one injected
+    // instruction away from writing anywhere on the disk.
+    if (opts.workspace) {
+      // Resolved to an absolute path before anything uses it. A relative root
+      // is a confinement root that moves with the working directory, and it
+      // also makes the console footer read "./practice-folder", which tells
+      // nobody where their appeals actually landed.
+      config.workspaceRoot = path.resolve(expandHome(opts.workspace));
+      fs.mkdirSync(config.workspaceRoot, { recursive: true });
+    }
 
     const choice = resolveProvider(config, { explicit: opts.provider });
     if (choice.error) {

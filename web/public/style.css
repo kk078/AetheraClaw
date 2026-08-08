@@ -637,13 +637,51 @@ text.ring-txt { fill: var(--ink); font-size: 15px; font-family: var(--mono); fon
 .wfhead h3 { margin: 0; font-size: 13.5px; font-weight: 600; color: var(--ink); }
 .wftime { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); flex: none; }
 
+/* Status badges. The palette is the one specified as Tailwind classes, written
+   as the literal values those classes compile to — emerald-950/40 is
+   rgb(2 44 34 / .4), emerald-400 is #34d399, emerald-800/50 is rgb(6 95 70 / .5).
+   Same pixels, no build step. */
 .vbadge {
   flex: none; border-radius: 999px; padding: 3px 9px;
   font-size: 10px; font-weight: 700; letter-spacing: .06em;
 }
-.vbadge.clear  { background: color-mix(in srgb, var(--good) 14%, transparent); color: var(--good); }
-.vbadge.review { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
-.vbadge.hold   { background: color-mix(in srgb, var(--bad) 14%, transparent);  color: var(--bad); }
+.vbadge.clear   { background: rgb(2 44 34 / .40);   color: #34d399; border: 1px solid rgb(6 95 70 / .50); }
+.vbadge.review  { background: rgb(69 26 3 / .40);   color: #fbbf24; border: 1px solid rgb(146 64 14 / .50); }
+.vbadge.hold    { background: rgb(76 5 25 / .40);   color: #fb7185; border: 1px solid rgb(159 18 57 / .50); }
+/* Dry run / preview: computed, shown, NOT applied. Its own colour because green
+   reads as "done" and a database preview shown green says the change went in. */
+.vbadge.preview { background: rgb(8 51 68 / .40);   color: #22d3ee; border: 1px solid rgb(21 94 117 / .50); }
+.vbadge.running { background: rgb(30 41 59 / .60);  color: #94a3b8; border: 1px solid rgb(51 65 85 / .60); }
+
+/* ── Run group: one card per turn ─────────────────────────────────────────── */
+.wfgroup > .group-head { padding-bottom: 8px; border-bottom: 1px solid rgb(30 41 59 / .8); }
+.wfdetail { font-size: 11px; color: #64748b; margin: 4px 0 10px; }
+.wfsections { display: flex; flex-direction: column; gap: 10px; }
+.wfsection > .wfcard { margin: 0; }
+.wflive:empty { display: none; }
+.wfdrawer { margin-top: 12px; border-top: 1px solid rgb(30 41 59 / .6); padding-top: 8px; }
+.wfdrawer > summary {
+  cursor: pointer; font-family: var(--mono); font-size: 11px; color: #64748b; list-style: none;
+}
+.wfdrawer > summary::-webkit-details-marker { display: none; }
+.wfdrawer > summary:hover { color: #cbd5e1; }
+.wfdrawer[open] > summary { color: #94a3b8; }
+.wfdrawer-body { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+
+/* ── CMS-1500 contextual fix panel ────────────────────────────────────────── */
+.form-box.clickable, table.form-lines td.cell.clickable { cursor: pointer; }
+.form-box.clickable:hover, table.form-lines td.cell.clickable:hover { outline: 1px solid rgb(148 163 184 / .5); }
+.fixpop {
+  position: absolute; z-index: 40; max-width: 380px; padding: 11px 13px;
+  border-radius: 10px; border: 1px solid rgb(51 65 85 / .9); background: #0f172a;
+  box-shadow: 0 18px 40px rgb(0 0 0 / .55);
+}
+.fixpop .fp-box { font-family: var(--mono); font-size: 10px; letter-spacing: .05em; color: #64748b; text-transform: uppercase; }
+.fixpop .fp-val { font-family: var(--mono); font-size: 14px; color: #f1f5f9; margin: 3px 0 8px; }
+.fixpop .fp-msg { font-size: 12.5px; line-height: 1.5; color: #cbd5e1; margin: 0 0 6px; }
+.fixpop .fp-close { position: absolute; top: 6px; right: 9px; cursor: pointer; color: #64748b; font-size: 13px; }
+.fixpop .fp-close:hover { color: #f1f5f9; }
+.fixpop .fp-ask { margin-top: 8px; }
 
 .wffacts {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -717,3 +755,29 @@ text.ring-txt { fill: var(--ink); font-size: 15px; font-family: var(--mono); fon
   .canvas-head button { display: none; }
   .canvas-body { overflow: visible; max-height: none; }
 }
+
+/* ── batch_heal: the capacity bar ─────────────────────────────────────────── */
+/* Three colours, matched to the badges: green goes out, cyan is a dry-run
+   repair not yet made, amber is work. Widths are proportional, so the shape of
+   the bar IS the answer before any number is read. */
+.view-batch .bh-bar { display: flex; height: 34px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); }
+.view-batch .bh-seg { display: grid; place-items: center; font: 600 12px var(--mono); min-width: 34px; }
+.view-batch .bh-seg.clean  { background: rgb(2 44 34 / .55);  color: #34d399; }
+.view-batch .bh-seg.repair { background: rgb(8 51 68 / .55);  color: #22d3ee; }
+.view-batch .bh-seg.human  { background: rgb(69 26 3 / .55);  color: #fbbf24; }
+.view-batch .bh-legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 9px 0 4px; font-size: 11.5px; }
+.view-batch .bh-key::before { content: "●"; margin-right: 5px; }
+.view-batch .bh-key.clean::before  { color: #34d399; }
+.view-batch .bh-key.repair::before { color: #22d3ee; }
+.view-batch .bh-key.human::before  { color: #fbbf24; }
+.view-batch .bh-key { color: var(--ink-2); }
+.view-batch .bh-head { margin: 16px 0 7px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: #64748b; font-weight: 600; }
+.view-batch .bh-rules { display: flex; flex-direction: column; gap: 5px; }
+.view-batch .bh-rule { display: grid; grid-template-columns: minmax(120px, max-content) max-content 1fr; gap: 10px; align-items: baseline;
+  padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; background: rgb(15 23 42 / .35); }
+.view-batch .bh-rule code { font-size: 11.5px; color: #e2e8f0; }
+.view-batch .bh-count { font: 11px var(--mono); color: #94a3b8; }
+.view-batch .bh-q { font-size: 12px; line-height: 1.5; color: var(--ink-2); }
+.view-batch .bh-foot { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 10px; }
+.view-batch .bh-foot p { margin: 0 0 7px; font-size: 12px; line-height: 1.55; color: #94a3b8; }
+.view-batch .bh-foot p:last-child { color: #22d3ee; margin-bottom: 0; }

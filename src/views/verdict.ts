@@ -1,6 +1,7 @@
 import type { ClaimScrubView, EmMeterView, MoneyWaterfallView, ToolView } from "./types.js";
 import type { Cms1500View } from "./cms1500.js";
 import type { AppealLetterView } from "./appeal.js";
+import type { BatchHealView } from "./batch-heal.js";
 
 // ── Card summaries ───────────────────────────────────────────────────────────
 // The console showed a vertical stack of `tool_invoke` boxes tagged done/error.
@@ -24,7 +25,12 @@ import type { AppealLetterView } from "./appeal.js";
 // they get facts and no badge, because there is no gate for a badge to describe
 // and inventing one would make "CLEAR" mean two different things in two places.
 
-export type VerdictLevel = "clear" | "review" | "hold";
+/**
+ * `preview` is a computed result that has NOT been applied — a dry run, a
+ * suggestion, a forecast. It is its own level because green reads as "done":
+ * showing a database preview as CLEAR tells somebody the change went through.
+ */
+export type VerdictLevel = "clear" | "preview" | "review" | "hold";
 
 export interface CardFact {
   label: string;
@@ -34,6 +40,16 @@ export interface CardFact {
 export interface CardSummary {
   /** Human-readable, claim-identified where the view knows the claim. */
   title: string;
+  /**
+   * What this card is ABOUT — a claim id, where the view has one.
+   *
+   * Carried as its own field rather than recovered from the title, because the
+   * only way to recover it is a regular expression over prose and prose is full
+   * of things shaped like claim ids. Run one over "CMS-1500 — CLM-88213" and it
+   * answers CMS-1500, which is a form number. A run group that titles itself
+   * with the wrong claim is worse than one that titles itself with none.
+   */
+  subject?: string;
   /** Absent on reports — see the header. */
   verdict?: VerdictLevel;
   verdictLabel?: string;
@@ -44,6 +60,7 @@ export interface CardSummary {
 
 export const VERDICT_LABELS: Record<VerdictLevel, string> = {
   clear: "CLEAR",
+  preview: "DRY RUN",
   review: "REVIEW NEEDED",
   hold: "HOLD",
 };
@@ -72,6 +89,7 @@ function scrubCard(v: ClaimScrubView): CardSummary {
 
   return {
     title: `Claim scrub — ${v.claimId || "(no claim id)"}`,
+    ...(v.claimId ? { subject: v.claimId } : {}),
     verdict,
     verdictLabel: VERDICT_LABELS[verdict],
     because,
@@ -126,6 +144,7 @@ function cms1500Card(v: Cms1500View): CardSummary {
 
   return {
     title: `CMS-1500 — ${v.claimId || "(no claim id)"}`,
+    ...(v.claimId ? { subject: v.claimId } : {}),
     verdict,
     verdictLabel: VERDICT_LABELS[verdict],
     because:
@@ -158,6 +177,7 @@ function appealCard(v: AppealLetterView): CardSummary {
 
   return {
     title: `Appeal — claim ${v.claimId}`,
+    ...(v.claimId ? { subject: v.claimId } : {}),
     verdict,
     verdictLabel: VERDICT_LABELS[verdict],
     because:
@@ -167,6 +187,34 @@ function appealCard(v: AppealLetterView): CardSummary {
       { label: "Payer", value: v.payer || "not stated" },
       { label: "Denial", value: v.carcDescription ? `CARC ${v.carc} — ${v.carcDescription}` : `CARC ${v.carc}` },
       { label: "Editable file", value: v.filePath },
+    ],
+  };
+}
+
+function batchHealCard(v: BatchHealView): CardSummary {
+  // REVIEW when a claim needs a person, CLEAR otherwise — and CLEAR is then
+  // promoted to DRY RUN by previewCard, because this tool applies nothing. The
+  // promotion is not done here: whether a result was applied is a fact about
+  // the tool, and this function only ever sees the view.
+  const verdict: VerdictLevel = v.needsHuman > 0 ? "review" : "clear";
+  const goesOut = v.clean + v.repairable;
+
+  return {
+    title: `Batch heal preview — ${v.scope}`,
+    verdict,
+    verdictLabel: VERDICT_LABELS[verdict],
+    because:
+      v.needsHuman > 0
+        ? `${v.needsHuman} claim(s) need a person. The rest are a repair away, and no repair has been made.`
+        : v.total === 0
+          ? "No claims in scope, so this is not a statement that the batch is clean."
+          : "No claim in this batch needs a decision a person has to make.",
+    facts: [
+      { label: "In scope", value: v.truncated ? `${v.total} (limit hit — the batch may be larger)` : String(v.total) },
+      { label: "Would go out", value: `${goesOut} — ${v.clean} clean, ${v.repairable} after a safe repair` },
+      // Excluded rows are shown even at zero. Their absence is the thing that
+      // would quietly inflate every other number here.
+      { label: "Needs a person", value: v.excluded > 0 ? `${v.needsHuman} (${v.excluded} row(s) unreadable)` : String(v.needsHuman) },
     ],
   };
 }
@@ -204,6 +252,8 @@ export function summarize(view: ToolView): CardSummary | null {
       return cms1500Card(view.data as Cms1500View);
     case "appeal_letter":
       return appealCard(view.data as AppealLetterView);
+    case "batch_heal":
+      return batchHealCard(view.data as BatchHealView);
     case "kpi_tiles":
       // The tiles ARE the summary; a card above them would restate them.
       return null;

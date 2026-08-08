@@ -191,7 +191,11 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
   }
   const merged = { ...(raw as Record<string, unknown>), ...overrides };
   const cfg = ConfigSchema.parse(merged);
-  cfg.workspaceRoot = expandHome(cfg.workspaceRoot);
+  // Absolute, always. This is the confinement root every file tool resolves
+  // against, and a relative one moves with the process's working directory —
+  // so the same config would confine to two different folders depending on
+  // where the gateway happened to be started.
+  cfg.workspaceRoot = path.resolve(expandHome(cfg.workspaceRoot));
   fs.mkdirSync(cfg.workspaceRoot, { recursive: true });
   return cfg;
 }

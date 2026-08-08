@@ -5,6 +5,7 @@ import { selectTools } from "../tools/profiles.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolContext } from "../tools/types.js";
 import { withCard } from "../views/verdict.js";
+import { isPlumbing, previewCard } from "../views/workflow.js";
 import type { AgentEvent } from "../shared/events.js";
 import { buildSystemPrompt, catalogueBlock } from "./system-prompt.js";
 import { truncateToBudget } from "./context-window.js";
@@ -114,16 +115,31 @@ export async function runTurn(deps: RunnerDeps, sessionId: string, userText: str
       const results: NormalizedBlock[] = [];
       for (const call of toolUses) {
         const result = await registry.execute(call.name, call.input, ctx);
+        // tool_invoke is a wrapper: its card would say "tool_invoke" above a
+        // result produced by something else. Report the INNER tool, which is
+        // what actually ran and what the reader needs named.
+        const inner =
+          call.name === "tool_invoke" ? String((call.input as { name?: unknown } | null)?.name ?? "").trim() : "";
+        const toolName = inner || call.name;
         // One place, so the stored view and the streamed view cannot disagree
-        // about the verdict.
-        const view = result.view ? withCard(result.view) : undefined;
+        // about the verdict. The preview re-badge happens HERE rather than in
+        // summarize(), because whether a result was applied is a fact about the
+        // TOOL and the view has no idea which one produced it.
+        const carded = result.view ? withCard(result.view) : undefined;
+        const view =
+          carded?.card ? { ...carded, card: previewCard(carded.card, toolName) } : carded;
         if (view) store.saveToolView(sessionId, call.id, view);
         emit({
           type: "tool_result",
           sessionId,
           toolUseId: call.id,
+          toolName,
           summary: result.content.slice(0, 400),
           isError: result.isError ?? false,
+          // A tool_invoke that named a real tool is NOT plumbing — the inner
+          // tool did the work, and hiding it would lose exactly the call the
+          // user cares about on a deferred-tool provider like Ollama.
+          plumbing: isPlumbing(call.name) && !inner,
           view,
         });
         // `result.view` is deliberately NOT carried into the block pushed here:

@@ -31,13 +31,29 @@ function show(view) {
  * that already works from the console, and a nav item opening an empty screen
  * headed "Denial Management" would be worse than one that does the thing.
  */
+// Every nav item loads a starter prompt rather than opening a page. They are
+// not pages and do not pretend to be: each of these is a tool that already
+// works from the console, and a nav item opening an empty screen headed
+// "Denial Management" would be worse than one that does the thing.
 const DOMAIN_PROMPTS = {
-  denials: "Show me the open denial worklist, sorted by what is recoverable and what is closest to a deadline.",
-  money: "Run the KPI dashboard, then show me payment variance for anything underpaid.",
+  // Operations
+  claims: "Show me the claims on file with their status, and flag any that have not been acknowledged.",
+  worklist: "Show the worklist prioritised by what is recoverable and what is closest to a deadline.",
+  mail: "Sweep the inbox by urgency and tell me what is held, what carries a deadline inside a week, and what could not be placed.",
+  // Scrub & compliance
+  presubmit: "Run the pre-submission gate on my most recent claim and tell me whether it is safe to send.",
   em: "Check the E/M levels I have billed against the documentation, in both directions.",
+  ncci: "Check which NCCI and MUE data is installed, then tell me what bundling can and cannot be checked right now.",
+  // Financials
+  money: "Run the KPI dashboard, then reconcile the most recent remittance against what the payer says it sent.",
+  variance: "Show me payment variance for anything underpaid, and say which basis you measured against.",
+  denials: "Show me the open denial worklist, sorted by what is recoverable and what is closest to a deadline.",
+  cob: "Determine payer order for a secondary claim and check that charge = paid + adjustments on every line.",
+  // Ops & support
   trace: "Trace claim ",
   fmea: "Diagnose the tool failures from the last 24 hours and tell me whether this is one incident or several.",
-  telemetry: "Check Ollama telemetry, dataset health, and tenant database integrity.",
+  patch: "Preview a batch auto-heal across the claims on file — show me what would change, and change nothing.",
+  telemetry: "Check Ollama telemetry, dataset health, tenant database integrity, and which reference code sets are attached.",
 };
 
 document.querySelectorAll(".navitem").forEach((n) =>
@@ -54,7 +70,7 @@ document.querySelectorAll(".navitem").forEach((n) =>
 // ── Overview ───────────────────────────────────────────────────────────
 
 const STARTERS = [
-  ["Is E11.65 billable, and what does it mean?", "◈", "Coding", "Checks the NLM code set rather than recalling it — billable status comes from the hierarchy."],
+  ["Is E11.65 billable, and what does it mean?", "◈", "Coding", "Looks the code up rather than recalling it — the installed FY table first, NLM if there is none, and it says which answered."],
   ["I got CARC 197 on a claim. What is it and what do I do?", "▽", "Denials", "Resolves the code rather than recalling it, then gives the remediation path."],
   ["Is a Medicare claim with date of service 20250715 still filable today?", "◷", "Timely filing", "One calendar year by statute, computed so a leap day cannot shift it."],
   ["Scrub this claim and tell me exactly what is wrong with it.", "▣", "Claim scrub", "Severity-ranked findings; a dangling diagnosis pointer is an error, not a warning."],
@@ -140,7 +156,15 @@ async function loadOverview() {
   $("#pill-provider").innerHTML =
     `<span class="dot on"></span><b>${ov.model}</b>` + (ov.endpoint ? ` · ${ov.endpoint}` : "");
   $("#pill-driver").textContent = ov.driver;
+  // The workspace is the one path everything the agent writes lands under, so
+  // the footer says where it is AND how to move it. Not editable from here on
+  // purpose: a browser control that rewrites the confinement root is one
+  // injected instruction away from being the way out of the confinement.
   $("#foot").textContent = ov.workspace;
+  $("#foot").title =
+    `Everything the agent writes lands here.\n\nMove it with:  aetheraclaw serve --workspace /path/to/folder\n` +
+    `Or permanently, workspaceRoot in ~/.aetheraclaw/config.json5.\n\n` +
+    `Writes are confined to this folder wherever it points — ../, absolute paths and symlink escapes are refused.`;
 
   const runtime = [
     ["Provider", ov.provider],
@@ -478,7 +502,7 @@ function addTool(name, input) {
   d.append(el("span", "spin"), el("code", null, name), el("span", "st", "running…"));
   d.dataset.input = JSON.stringify(input ?? {});
   d.dataset.tool = name;
-  $("#stream").append(d);
+  (liveGroup ?? startGroup())._parts.live.append(d);
   scroll();
   liveTool = d;
   return d;
@@ -503,46 +527,141 @@ function toCanvas(rendered, title) {
   return rendered;
 }
 
-function finishTool(summary, isError, view) {
+// ── Run groups ───────────────────────────────────────────────────────────────
+// A turn is one thing the user asked for, so a turn is one card. Sections
+// accumulate into it as tools finish; catalogue calls collapse into the
+// telemetry drawer instead of earning a box each.
+//
+// The RULES are not here — `plumbing` arrives already decided on the event, and
+// the verdict on each section was computed server-side. This file arranges what
+// it is told, which is the same line the renderers hold.
+
+let liveGroup = null;
+
+function startGroup() {
+  const g = el("div", "wfgroup");
+  g.dataset.plumbing = "0";
+  const head = el("div", "wfhead group-head");
+  const left = el("div", "wfhead-l");
+  left.append(el("span", "vbadge running", "RUNNING"), el("h3", null, "Working…"));
+  head.append(left, el("span", "wftime", clock()));
+  const detail = el("div", "wfdetail");
+  const sections = el("div", "wfsections");
+  const live = el("div", "wflive");
+  const drawer = el("details", "wfdrawer");
+  drawer.append(el("summary", null, "▶ Developer telemetry & log"));
+  const drawerBody = el("div", "wfdrawer-body");
+  drawer.append(drawerBody);
+  g.append(head, detail, live, sections, drawer);
+  g._parts = { head, left, detail, live, sections, drawer, drawerBody, list: [], plumbing: 0 };
+  $("#stream").querySelector(".empty")?.remove();
+  $("#stream").append(g);
+  liveGroup = g;
+  scroll();
+  return g;
+}
+
+/** Worst-of, mirroring VERDICT_RANK in src/views/workflow.ts. */
+const VERDICT_RANK = { clear: 0, preview: 1, review: 2, hold: 3 };
+const VERDICT_LABEL = { clear: "CLEAR", preview: "DRY RUN", review: "REVIEW NEEDED", hold: "HOLD" };
+const REASSURING = new Set(["clear", "preview"]);
+
+function refreshGroupHead(g) {
+  const p = g._parts;
+  const verdicts = p.list.map((x) => x.verdict).filter(Boolean);
+  let worst = verdicts.length
+    ? verdicts.reduce((w, v) => (VERDICT_RANK[v] > VERDICT_RANK[w] ? v : w))
+    : null;
+  // Mirrors groupVerdict() in src/views/workflow.ts, where it is tested. CLEAR
+  // and DRY RUN say nothing is wrong or nothing happened — statements about the
+  // whole group — so a section with no verdict withdraws them. HOLD and REVIEW
+  // propagate from one section, because those under-claim at worst.
+  if (worst && REASSURING.has(worst) && p.list.some((x) => !x.verdict)) worst = null;
+
+  const names = [...new Set(p.list.map((x) => x.title))];
+  const shown = names.slice(0, 3).join(" · ");
+  const more = names.length > 3 ? ` +${names.length - 3} more` : "";
+  const subjects = [...new Set(p.list.map((x) => x.subject).filter(Boolean))];
+  const subject = subjects.length === 1 ? ` — ${subjects[0]}` : "";
+
+  p.left.replaceChildren();
+  if (worst) p.left.append(el("span", `vbadge ${worst}`, VERDICT_LABEL[worst]));
+  else if (p.list.length === 0) p.left.append(el("span", "vbadge running", "RUNNING"));
+  p.left.append(el("h3", null, p.list.length ? `${shown}${more}${subject}` : "Working…"));
+
+  const bits = [];
+  if (p.list.length) bits.push(`${p.list.length} tool${p.list.length === 1 ? "" : "s"}`);
+  if (p.plumbing) bits.push(`${p.plumbing} catalogue call(s) collapsed`);
+  // The node is created once in startGroup and held in _parts. Looking it up
+  // each refresh appended a second line every time a tool finished, so a
+  // three-tool turn carried three contradictory counts stacked under its title.
+  p.detail.textContent = bits.join(", ");
+}
+
+function endGroup() {
+  if (!liveGroup) return;
+  const p = liveGroup._parts;
+  p.live.replaceChildren();
+  if (p.list.length === 0 && p.plumbing === 0) liveGroup.remove();
+  else refreshGroupHead(liveGroup);
+  liveGroup = null;
+}
+
+function finishTool(summary, isError, view, toolName, plumbing) {
   const d = liveTool ?? $("#stream").querySelector(".running:last-of-type");
-  if (!d) return;
-  const name = d.dataset.tool || "tool";
+  const g = liveGroup ?? startGroup();
+  const p = g._parts;
+  const name = toolName || d?.dataset.tool || "tool";
   let input;
   try {
-    input = JSON.parse(d.dataset.input || "{}");
+    input = JSON.parse(d?.dataset.input || "{}");
   } catch {
     input = {};
   }
+  d?.remove();
+
+  // Raw payloads and every intermediate call go in the drawer, always — it is
+  // the record of what the model saw, and dropping it would make the transcript
+  // a worse log than the one it replaced.
+  if (window.toolTelemetry) p.drawerBody.append(window.toolTelemetry(name, input, summary, isError));
+
+  if (plumbing) {
+    // Collapsed, not discarded. It is in the drawer above.
+    p.plumbing++;
+    refreshGroupHead(g);
+    scroll();
+    return;
+  }
 
   const card = view?.card;
-  const replacement = el("div", "wfgroup");
-
+  const section = el("div", "wfsection");
   if (card && window.workflowCard) {
-    replacement.append(window.workflowCard(card, name, clock()));
+    section.append(window.workflowCard(card, name, clock()));
   } else {
-    // No card means the server had no structured verdict for this tool — most
-    // of them. A neutral header, never a green one: an invented CLEAR on a tool
-    // whose output nobody parsed is the failure this whole design is avoiding.
     const bare = el("div", "wfcard plain");
     const head = el("div", "wfhead");
     const left = el("div", "wfhead-l");
     if (isError) left.append(el("span", "vbadge hold", "FAILED"));
     left.append(el("h3", null, name));
     head.append(left, el("span", "wftime", clock()));
-    bare.append(head);
-    bare.append(el("p", "wfbecause", firstLines(String(summary ?? ""))));
-    replacement.append(bare);
+    bare.append(head, el("p", "wfbecause", firstLines(String(summary ?? ""))));
+    section.append(bare);
   }
+  p.sections.append(section);
 
-  if (window.toolTelemetry) replacement.append(window.toolTelemetry(name, input, summary, isError));
-  d.replaceWith(replacement);
+  // The subject comes off the card as its own field. It used to be recovered
+  // from the title with a regular expression, which read "CMS-1500 — CLM-88213"
+  // and answered CMS-1500 — so a two-tool turn on one claim looked like two
+  // claims and the group dropped the id entirely.
+  p.list.push({ title: card?.title?.split(" — ")[0] || name, verdict: card?.verdict, subject: card?.subject });
+  refreshGroupHead(g);
 
   const rendered = view && window.renderView ? window.renderView(view) : null;
   if (rendered) {
     toCanvas(rendered, card?.title || name);
     const chip = el("button", "recall", `↗ ${card?.title || name}`);
     chip.addEventListener("click", () => toCanvas(window.renderView(view), card?.title || name));
-    replacement.append(chip);
+    section.append(chip);
   }
 
   liveTool = null;
@@ -554,6 +673,21 @@ function firstLines(text, max = 240) {
   const t = text.trim().split("\n").slice(0, 2).join(" ").trim();
   return t.length > max ? `${t.slice(0, max)}…` : t || "(no output)";
 }
+
+/**
+ * A flagged CMS-1500 box, handed to the console as a question.
+ *
+ * Not an edit. The claim belongs to the model to change, through the same
+ * approval gate as everything else — a form field that writes to a claim from a
+ * popover would be the one path around the choke point.
+ */
+window.askAboutBox = (box, label, findings) => {
+  show("console");
+  const box$ = $("#input");
+  box$.value = `Box ${box} (${label}) is flagged: ${findings.join(" ")} What is the correct value, and what does it change on the claim?`;
+  box$.dispatchEvent(new Event("input"));
+  box$.focus();
+};
 
 function scroll() {
   const s = $("#stream");
@@ -620,6 +754,7 @@ function connect(sessionId) {
         state.turnRunning = true;
         $("#send").disabled = true;
         liveBubble = null;
+        liveGroup = null;
         break;
       case "text_delta":
         if (!liveBubble) liveBubble = addMessage("assistant", "");
@@ -632,18 +767,20 @@ function connect(sessionId) {
         addTool(e.toolName, e.input);
         break;
       case "tool_result":
-        finishTool(e.summary, e.isError, e.view);
+        finishTool(e.summary, e.isError, e.view, e.toolName, e.plumbing);
         break;
       case "approval_request":
         askApproval(e);
         break;
       case "turn_completed":
+        endGroup();
         state.turnRunning = false;
         $("#send").disabled = false;
         liveBubble = null;
         loadSessions();
         break;
       case "error":
+        endGroup();
         addMessage("assistant", `⚠ ${e.message}`);
         state.turnRunning = false;
         $("#send").disabled = false;

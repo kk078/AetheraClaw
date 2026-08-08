@@ -30,6 +30,7 @@ import { classifyFailure, diagnoseRecord, type Diagnosis } from "../support/fmea
 import { assembleTrace, type TraceResult } from "../support/trace.js";
 import { collectTraceEvents } from "../support/tools.js";
 import { WRAPPER_TOOLS } from "../support/tool-log.js";
+import { buildBatchHealView } from "../views/batch-heal.js";
 
 // Ops tools are read-only by construction. Nothing here writes to a tenant
 // database, restarts a process, or mutates a dataset — a diagnostic tool that
@@ -325,17 +326,29 @@ export const batchHealPreviewTool = defineTool({
       };
     }
 
-    const parts = [renderBatchHeal(batchHeal(claims), input.show)];
+    const summary = batchHeal(claims);
+    const truncated = rows.length === input.limit;
+    const parts = [renderBatchHeal(summary, input.show)];
     if (unreadable > 0) {
       parts.push(
         "",
         `${unreadable} stored row(s) did not parse as a claim and are excluded from every number above — not counted as clean. Trace one with support_trace_claim to see what wrote it.`,
       );
     }
-    if (rows.length === input.limit) {
+    if (truncated) {
       parts.push("", `Hit the ${input.limit}-claim limit, so the batch may be larger than what was previewed.`);
     }
-    return { content: parts.join("\n") };
+    return {
+      content: parts.join("\n"),
+      view: {
+        kind: "batch_heal",
+        data: buildBatchHealView(summary, {
+          scope: input.status ? `status ${input.status}` : "all stored claims",
+          excluded: unreadable,
+          truncated,
+        }),
+      },
+    };
   },
 });
 

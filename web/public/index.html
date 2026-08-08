@@ -32,24 +32,32 @@
 
   <aside class="rail">
     <nav>
-      <div class="navgroup">Core operations</div>
-      <div class="navitem active" data-view="overview"><span class="g">⬡</span> Overview</div>
+      <div class="navgroup">Operations</div>
+      <div class="navitem active" data-view="overview"><span class="g">⬡</span> Dashboard</div>
       <div class="navitem" data-view="console"><span class="g">▶</span> Console</div>
+      <div class="navitem" data-domain="claims"><span class="g">▣</span> Claims queue</div>
+      <div class="navitem" data-domain="worklist"><span class="g">☰</span> Worklist</div>
+      <div class="navitem" data-domain="mail"><span class="g">✉</span> Inbound mail</div>
+
+      <div class="navgroup">Scrub &amp; compliance</div>
+      <div class="navitem" data-domain="presubmit"><span class="g">◫</span> Pre-submit gate</div>
+      <div class="navitem" data-domain="em"><span class="g">◐</span> E/M risk studio</div>
+      <div class="navitem" data-domain="ncci"><span class="g">⛒</span> NCCI / MUE rules</div>
+
+      <div class="navgroup">Financials</div>
+      <div class="navitem" data-domain="money"><span class="g">▤</span> Remittance 835</div>
+      <div class="navitem" data-domain="variance"><span class="g">◊</span> Underpayment variance</div>
+      <div class="navitem" data-domain="denials"><span class="g">▽</span> Denials &amp; appeals</div>
+      <div class="navitem" data-domain="cob"><span class="g">⇉</span> COB engine</div>
+
+      <div class="navgroup">Ops &amp; support</div>
+      <div class="navitem" data-domain="trace"><span class="g">⇢</span> Claim lifecycle trace</div>
+      <div class="navitem" data-domain="fmea"><span class="g">⚙</span> FMEA diagnostics</div>
+      <div class="navitem" data-domain="patch"><span class="g">◔</span> Database patch preview</div>
+      <div class="navitem" data-domain="telemetry"><span class="g">◈</span> System telemetry</div>
+      <div class="navitem" data-view="modules"><span class="g">▦</span> All modules <span class="count" id="c-modules"></span></div>
       <div class="navitem" data-view="workbench"><span class="g">◫</span> Workbench</div>
 
-      <div class="navgroup">Intelligence</div>
-      <div class="navitem" data-view="modules"><span class="g">▦</span> Modules <span class="count" id="c-modules"></span></div>
-      <!-- Domain entry points load a starter prompt into the console rather than
-           pretending to be pages. A nav item that opens an empty screen is worse
-           than one that does the thing. -->
-      <div class="navitem" data-domain="denials"><span class="g">▽</span> Denials</div>
-      <div class="navitem" data-domain="money"><span class="g">▤</span> Remittance &amp; cash</div>
-      <div class="navitem" data-domain="em"><span class="g">◐</span> E/M risk</div>
-
-      <div class="navgroup">Support &amp; ops</div>
-      <div class="navitem" data-domain="trace"><span class="g">⇉</span> Claim trace</div>
-      <div class="navitem" data-domain="fmea"><span class="g">⚙</span> FMEA diagnostics</div>
-      <div class="navitem" data-domain="telemetry"><span class="g">◈</span> Telemetry</div>
     </nav>
     <div class="sectionlabel">Sessions</div>
     <div class="scroll" id="session-list"></div>

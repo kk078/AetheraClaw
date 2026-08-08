@@ -10,8 +10,16 @@ export type AgentEvent =
       type: "tool_result";
       sessionId: string;
       toolUseId: string;
+      /** The tool that ran. For tool_invoke this is the INNER tool, not the wrapper. */
+      toolName: string;
       summary: string;
       isError: boolean;
+      /**
+       * The model finding its way around its own catalogue rather than doing
+       * work. Decided here, not in the browser: whether a call is plumbing is a
+       * judgement, and one made in the UI cannot be tested.
+       */
+      plumbing: boolean;
       /** Structured payload for the UI. Absent for tools that only return text. */
       view?: ToolView;
     }

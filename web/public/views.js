@@ -331,8 +331,10 @@ V.cms1500 = (d) => {
     tr.append(node("td", "num", String(line.index)));
     for (const box of ["24A", "24B", "24D", "24E", "24F", "24G", "24J"]) {
       const c = (line.cells ?? []).find((x) => x.box === box);
-      const td = node("td", c && c.severity !== "clean" ? `cell sev-${c.severity}` : "cell");
+      const flagged = c && c.severity !== "clean";
+      const td = node("td", flagged ? `cell sev-${c.severity} clickable` : "cell");
       td.append(node("span", null, (c && c.value) || "—"));
+      if (flagged) td.addEventListener("click", (ev) => openFixPanel(ev.currentTarget, c));
       tr.append(td);
     }
     tbody.append(tr);
@@ -382,10 +384,61 @@ V.cms1500 = (d) => {
 };
 
 function formBox(c) {
-  const b = node("div", `form-box${c.severity && c.severity !== "clean" ? ` sev-${c.severity}` : ""}`);
+  const flagged = c.severity && c.severity !== "clean";
+  const b = node("div", `form-box${flagged ? ` sev-${c.severity} clickable` : ""}`);
   b.append(node("div", "box-label", `${c.box}  ${c.label}`), node("div", "box-value", c.value || "—"));
-  for (const m of c.findings ?? []) b.append(node("div", "box-finding", m));
+  // Findings move into the popover when the box is clickable — printing them
+  // under every box turns the form back into the list it replaced.
+  if (flagged) b.addEventListener("click", (ev) => openFixPanel(ev.currentTarget, c));
+  else for (const m of c.findings ?? []) b.append(node("div", "box-finding", m));
   return b;
+}
+
+// ── Contextual fix panel ─────────────────────────────────────────────────────
+// Clicking a flagged box opens the finding ON the field rather than sending the
+// reader to a list underneath. It offers a QUESTION and never a fix button:
+// the server decides which repairs are safe to apply (see ClaimFindingView.fix),
+// and nothing in this payload carries that permission — so a one-click "fix"
+// here would be the UI inventing an authority the engine deliberately withheld.
+
+let openPop = null;
+
+function closeFixPanel() {
+  openPop?.remove();
+  openPop = null;
+}
+
+function openFixPanel(anchor, cell) {
+  closeFixPanel();
+  const pop = node("div", "fixpop");
+  const close = node("span", "fp-close", "✕");
+  close.addEventListener("click", (e) => {
+    e.stopPropagation();
+    closeFixPanel();
+  });
+  pop.append(
+    close,
+    node("div", "fp-box", `Box ${cell.box} — ${cell.label}`),
+    node("div", "fp-val", cell.value || "(empty)"),
+  );
+  for (const m of cell.findings ?? []) pop.append(node("p", "fp-msg", m));
+
+  const ask = node("button", "btn ghost sm fp-ask", "Ask about this box");
+  ask.addEventListener("click", (e) => {
+    e.stopPropagation();
+    closeFixPanel();
+    // Hands it to the console rather than editing the claim here. The claim is
+    // the model's to change, through the same approval gate as everything else.
+    window.askAboutBox?.(cell.box, cell.label, cell.findings ?? []);
+  });
+  pop.append(ask);
+
+  document.body.append(pop);
+  const r = anchor.getBoundingClientRect();
+  pop.style.top = `${Math.min(window.innerHeight - pop.offsetHeight - 12, r.bottom + 6)}px`;
+  pop.style.left = `${Math.min(window.innerWidth - pop.offsetWidth - 12, r.left)}px`;
+  openPop = pop;
+  setTimeout(() => document.addEventListener("click", closeFixPanel, { once: true }), 0);
 }
 
 // ── appeal_letter: read and print, never edit ────────────────────────────────
@@ -441,6 +494,68 @@ V.appeal_letter = (d) => {
   const foot = node("div", "appeal-foot");
   foot.append(node("span", "box-label", "Editable file"), node("code", null, d.filePath));
   foot.append(node("span", "muted", "Edit the file, not this panel — this view is for reading and printing."));
+  root.append(foot);
+
+  return root;
+};
+
+// ── batch_heal: the capacity answer, and nothing applied ─────────────────────
+// The four numbers are the point: how many claims go out as they are, how many
+// a safe repair covers, how many need a person, and how many rows could not be
+// read at all. The last is shown even at zero, because its absence is what
+// would quietly inflate the other three.
+
+V.batch_heal = (d) => {
+  const root = node("div", "toolview view-batch");
+
+  const bar = node("div", "bh-bar");
+  const total = Math.max(1, Number(d.total || 0));
+  const seg = (cls, n, label) => {
+    if (!n) return;
+    const s = node("div", `bh-seg ${cls}`);
+    s.style.flexGrow = String(n);
+    s.title = `${n} ${label}`;
+    s.append(node("span", null, String(n)));
+    bar.append(s);
+  };
+  seg("clean", d.clean, "clean as they stand");
+  seg("repair", d.repairable, "a safe repair away");
+  seg("human", d.needsHuman, "need a person");
+  if (d.total) root.append(bar);
+
+  const legend = node("div", "bh-legend");
+  legend.append(
+    node("span", "bh-key clean", `${d.clean || 0} clean`),
+    node("span", "bh-key repair", `${d.repairable || 0} repairable`),
+    node("span", "bh-key human", `${d.needsHuman || 0} need a person`),
+  );
+  root.append(legend);
+
+  const ruleList = (title, rows, withQuestion) => {
+    if (!rows?.length) return;
+    root.append(node("h4", "bh-head", title));
+    const list = node("div", "bh-rules");
+    for (const r of rows) {
+      const row = node("div", "bh-rule");
+      row.append(node("code", null, r.rule), node("span", "bh-count", `${r.count} claim(s)`));
+      if (withQuestion && r.question) row.append(node("span", "bh-q", r.question));
+      list.append(row);
+    }
+    root.append(list);
+  };
+  // Grouped by rule because one rule across many claims is usually one upstream
+  // fault, not many independent ones.
+  ruleList("Safe repairs available, by rule", d.repairsByRule, false);
+  ruleList("Needs a person, by rule", d.reviewsByRule, true);
+
+  const notes = [];
+  if (d.excluded > 0) {
+    notes.push(`${d.excluded} stored row(s) did not parse as a claim. They are excluded from every number above — not counted as clean.`);
+  }
+  if (d.truncated) notes.push("The row limit was reached, so the real batch may be larger than what was measured.");
+  notes.push("Nothing here has been applied. There is deliberately no batch apply — a repair is made one claim at a time, through the same gate as everything else.");
+  const foot = node("div", "bh-foot");
+  for (const n of notes) foot.append(node("p", null, n));
   root.append(foot);
 
   return root;
