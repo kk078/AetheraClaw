@@ -35,9 +35,9 @@ export const MODULES: ModuleDef[] = [
     key: "em",
     label: "E/M Levelling",
     blurb: "2021 MDM-guideline scorer and peer bell-curve benchmarking.",
-    note: "The level is the 2-of-3 middle value across problems, data and risk — shown element by element, never as a bare code.",
+    note: "The level is the 2-of-3 middle value across problems, data and risk — shown element by element, never as a bare code. em_level_risk reports BOTH directions: billed above the note is upcoding, billed below it is revenue left on the table, and reporting only the first teaches defensive downcoding.",
     glyph: "◐",
-    match: ["em_calculate", "em_benchmark"],
+    match: ["em_calculate", "em_benchmark", "em_level_risk"],
   },
   {
     key: "coverage",
@@ -53,7 +53,7 @@ export const MODULES: ModuleDef[] = [
     blurb: "837P generation, rule-engine scrubbing, charge capture.",
     note: "The scrubber reports severity, and a dangling diagnosis pointer is an error rather than a warning — it cannot be adjudicated. claim_autoheal fixes only what has one correct answer; anything needing a fact the claim does not contain comes back as a question.",
     glyph: "▣",
-    match: ["claim_scrub", "claim_autoheal", "claim_build_837p", "superbill_build"],
+    match: ["claim_scrub", "claim_autoheal", "presubmit_check", "claim_build_837p", "superbill_build"],
   },
   {
     key: "remittance",

@@ -38,7 +38,7 @@ export const PROFILES: Profile[] = [
     description: "Look up and validate codes, calculate E/M, run CDI, work the review queue.",
     include: [
       ...BASE,
-      "icd10_", "hcpcs_", "pos_lookup", "npi_", "em_", "cdi_", "code_suggest", "coding_corrections",
+      "icd10_", "hcpcs_", "pos_lookup", "npi_", "em_", "presubmit_check", "cdi_", "code_suggest", "coding_corrections",
       "review_", "training_", "coverage_", "mac_lookup", "sad_exclusion_check",
       "global_period_", "telehealth_", "incident_to_check", "greenlight_check",
     ],

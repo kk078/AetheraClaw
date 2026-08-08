@@ -13,6 +13,7 @@ import { claimBuildSecondaryTool, cobBalanceCheckTool } from "./x12/837-cob.js";
 import { cobDeterminePrimaryTool } from "./cob.js";
 import { claimScrubTool } from "./claim-scrub.js";
 import { claimAutohealTool } from "./autoheal.js";
+import { emLevelRiskTool, presubmitCheckTool } from "./presubmit-tools.js";
 import { dataStatusTool, hcpcsLookupTool } from "./datasets.js";
 import { eligibilityCheckTool } from "./eligibility.js";
 import { worklistAddTool, worklistListTool, worklistUpdateTool } from "./worklist.js";
@@ -105,6 +106,7 @@ export function registerHealthcareTools(
     // Claims lifecycle
     claimScrubTool,
     claimAutohealTool,
+    presubmitCheckTool,
     claimBuild837Tool,
     eraParse835Tool,
     ackParse277caTool,
@@ -154,6 +156,7 @@ export function registerHealthcareTools(
     incidentToCheckTool,
     // Assistants
     emCalculateTool,
+    emLevelRiskTool,
     appealDraftTool,
     abnGenerateTool,
     // Audit & integrity
