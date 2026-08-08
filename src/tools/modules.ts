@@ -240,6 +240,14 @@ export const MODULES: ModuleDef[] = [
     match: ["training_"],
   },
   {
+    key: "opssupport",
+    label: "Ops & Support",
+    blurb: "Diagnostics, incident RCA, batch previews and the isolation boundary itself.",
+    note: "Read-only by construction, apart from one remediation path that requires a token from its own preview. A diagnostic tool that can also change things is one nobody runs reflexively during an incident, which is the only time it matters.",
+    glyph: "⚙",
+    match: ["ops_", "support_"],
+  },
+  {
     key: "comms",
     label: "Channels & Reports",
     blurb: "Email intake and replies, scheduled workbook and PDF exports.",

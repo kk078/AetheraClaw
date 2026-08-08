@@ -16,6 +16,20 @@ import { analyzeTelemetry, parsePs, renderTelemetry, type OllamaSnapshot } from 
 import { collectDenialObservations, detectPolicyDrift, renderDrift, withDenominators } from "./drift.js";
 import type { CodeSetId } from "../tools/healthcare/updates/release-calendar.js";
 import { openDatabase } from "../memory/sqlite.js";
+import { confinePath } from "../tools/path-guard.js";
+import { ClaimSchema, type ClaimInput } from "../tools/healthcare/x12/837.js";
+import { batchHeal, renderBatchHeal } from "./batch-heal.js";
+import {
+  analyzeRejections,
+  renderRejectionAnalysis,
+  type AcceptanceObservation,
+  type RejectionObservation,
+} from "./rejection-analysis.js";
+import { buildRca, diagnoseTrace, renderTicketNote } from "./rca.js";
+import { classifyFailure, diagnoseRecord, type Diagnosis } from "../support/fmea.js";
+import { assembleTrace, type TraceResult } from "../support/trace.js";
+import { collectTraceEvents } from "../support/tools.js";
+import { WRAPPER_TOOLS } from "../support/tool-log.js";
 
 // Ops tools are read-only by construction. Nothing here writes to a tenant
 // database, restarts a process, or mutates a dataset — a diagnostic tool that
@@ -270,4 +284,200 @@ export const policyDriftTool = defineTool({
   },
 });
 
-export const OPS_TOOLS = [tenantIntegrityTool, datasetHealthTool, ollamaTelemetryTool, policyDriftTool];
+export const batchHealPreviewTool = defineTool({
+  name: "ops_batch_heal_preview",
+  description:
+    "Run the auto-heal engine across a whole batch of stored claims and report the capacity answer rather than a list of defects: how many go out as they are, how many a safe repair covers, and how many NEED A HUMAN — the last being the only number that is work. Repairs and review items are grouped by rule, because one rule hitting many claims is usually a single upstream fault rather than many independent ones. Nothing is written; there is deliberately no batch apply.",
+  schema: z.object({
+    status: z.string().optional().describe("Only claims with this stored status (e.g. 'draft', 'ready')"),
+    limit: z.number().int().min(1).max(2000).default(500),
+    show: z.number().int().min(1).max(100).default(15).describe("How many needs-review claim ids to list"),
+  }),
+  execute: async (input, ctx) => {
+    const store = ctx.services.store as MemoryStore | undefined;
+    if (!store) return { content: "No database in this context.", isError: true };
+
+    const rows = (
+      input.status
+        ? store.db.prepare("SELECT id, claim_json FROM claims WHERE status = ? ORDER BY created_at DESC LIMIT ?").all(input.status, input.limit)
+        : store.db.prepare("SELECT id, claim_json FROM claims ORDER BY created_at DESC LIMIT ?").all(input.limit)
+    ) as Array<{ id: string; claim_json: string }>;
+
+    const claims: ClaimInput[] = [];
+    let unreadable = 0;
+    for (const r of rows) {
+      // A claim row that will not parse cannot be healed, and counting it as
+      // clean would put it in the "goes out tonight" number — the one figure
+      // somebody acts on without reading further.
+      const parsed = ClaimSchema.safeParse(safeJson(r.claim_json));
+      if (parsed.success) claims.push(parsed.data);
+      else unreadable++;
+    }
+
+    if (claims.length === 0) {
+      return {
+        content: [
+          input.status ? `No stored claims with status "${input.status}".` : "No stored claims.",
+          unreadable > 0 ? `${unreadable} row(s) did not parse as a claim and were excluded rather than counted as clean.` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      };
+    }
+
+    const parts = [renderBatchHeal(batchHeal(claims), input.show)];
+    if (unreadable > 0) {
+      parts.push(
+        "",
+        `${unreadable} stored row(s) did not parse as a claim and are excluded from every number above — not counted as clean. Trace one with support_trace_claim to see what wrote it.`,
+      );
+    }
+    if (rows.length === input.limit) {
+      parts.push("", `Hit the ${input.limit}-claim limit, so the batch may be larger than what was previewed.`);
+    }
+    return { content: parts.join("\n") };
+  },
+});
+
+function safeJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+export const rejectionAnalysisTool = defineTool({
+  name: "ops_rejection_analysis",
+  description:
+    "Read every 277CA outcome together — acceptances banked to filing proof, rejections opened as worklist items — and detect EMERGING EDITS: a clearinghouse or payer front end that tightened a rule without announcing it. Grouped by payer and status code, tested with a minimum denominator in both halves so a spike below a real sample is not reported as a change. A status code that never appeared and now appears repeatedly is reported on its count alone, because applying a proportion test there would suppress exactly the case this exists for.",
+  schema: z.object({
+    payer: z.string().optional().describe("Substring filter on payer name"),
+    days: z.number().int().min(1).max(1095).default(180).describe("How far back to read acknowledgments"),
+    limit: z.number().int().min(1).max(50).default(12).describe("Rejection groups to list"),
+  }),
+  execute: async (input, ctx) => {
+    const store = ctx.services.store as MemoryStore | undefined;
+    if (!store) return { content: "No database in this context.", isError: true };
+
+    const since = Date.now() - input.days * 86_400_000;
+    const needle = input.payer?.toLowerCase();
+    const rejections: RejectionObservation[] = [];
+    const acceptances: AcceptanceObservation[] = [];
+
+    for (const r of store.db
+      .prepare("SELECT detail_json, created_at FROM worklist_items WHERE kind = 'rejection' AND created_at >= ?")
+      .all(since) as Array<{ detail_json: string; created_at: number }>) {
+      const detail = safeJson(r.detail_json) as { payer?: string; statuses?: string[] } | null;
+      if (!detail) continue;
+      const payer = detail.payer || "(unnamed)";
+      if (needle && !payer.toLowerCase().includes(needle)) continue;
+      // The triplet is "category:statusCode:entity" — the status code is the
+      // edit, the category only says it is a rejection, which we already know.
+      for (const triplet of detail.statuses ?? []) {
+        const [, statusCode = "", entity = ""] = triplet.split(":");
+        if (!statusCode) continue;
+        rejections.push({ payer, statusCode, entity, at: r.created_at });
+      }
+    }
+
+    for (const r of store.db
+      .prepare("SELECT payer, recorded_at FROM filing_proof WHERE source LIKE '%277CA%' AND recorded_at >= ?")
+      .all(since) as Array<{ payer: string; recorded_at: number }>) {
+      const payer = r.payer || "(unnamed)";
+      if (needle && !payer.toLowerCase().includes(needle)) continue;
+      acceptances.push({ payer, at: r.recorded_at });
+    }
+
+    return { content: renderRejectionAnalysis(analyzeRejections(rejections, acceptances), input.limit) };
+  },
+});
+
+export const generateRcaTool = defineTool({
+  name: "ops_generate_rca",
+  description:
+    "Compose a Root Cause Analysis document for an incident: the failing step, the classified root cause with the evidence quoted, the claim's lifecycle timeline including the stages that never happened, a severity derived from whether data is at risk or a filing clock is running, and remediation steps addressed to a named owner rather than a bare tier number. Emits a ticket-ready payload with a fingerprint derived from the CAUSE, so a recurrence updates the existing ticket instead of opening a duplicate. Markdown, optionally written to the workspace.",
+  schema: z.object({
+    claim_id: z.string().optional().describe("Include this claim's lifecycle timeline, and make it the incident subject"),
+    failures: z.array(z.string()).optional().describe("Classify this text instead of reading the tool-call log"),
+    hours: z.number().int().min(1).max(24 * 90).default(24).describe("How far back to read the tool-call log"),
+    tool: z.string().optional().describe("Only this tool's failures"),
+    output_path: z.string().optional().describe("Workspace-relative path to write the Markdown to"),
+  }),
+  assessRisk: (input) => ({
+    level: input.output_path ? "confirm" : "safe",
+    reason: input.output_path ? `write RCA document to ${input.output_path}` : "read-only analysis",
+  }),
+  execute: async (input, ctx) => {
+    const store = ctx.services.store as MemoryStore | undefined;
+    const now = Date.now();
+
+    let diagnoses: Diagnosis[] = [];
+    let affected = 0;
+    if (input.failures && input.failures.length > 0) {
+      diagnoses = input.failures.map(classifyFailure);
+      affected = input.failures.length;
+    } else if (store) {
+      const since = now - input.hours * 3_600_000;
+      const failed = store
+        .loadToolCalls(since, { tool: input.tool, limit: 500 })
+        .filter((r) => !r.ok && !WRAPPER_TOOLS.has(r.toolName));
+      diagnoses = failed.map(diagnoseRecord);
+      affected = failed.length;
+    }
+
+    let trace: TraceResult | undefined;
+    let ambient: Diagnosis[] | undefined;
+    if (input.claim_id && store) {
+      trace = assembleTrace(input.claim_id, collectTraceEvents(store, input.claim_id));
+      const fromClaim = diagnoseTrace(trace, now);
+      if (fromClaim) {
+        // The claim's own record outranks anything in the tool-call log. A claim
+        // that sat ninety days unacknowledged is not a network incident because
+        // Ollama was down that afternoon, and letting the log set the category
+        // sends a billing problem to engineering.
+        ambient = diagnoses;
+        diagnoses = [fromClaim];
+        affected = Math.max(1, trace.events.filter((e) => e.adverse).length);
+      }
+    }
+
+    if (diagnoses.length === 0 && !trace) {
+      return {
+        content: [
+          `Nothing to analyse: no failures in the last ${input.hours}h${input.tool ? ` for ${input.tool}` : ""}, and no claim named.`,
+          "",
+          "That is a real answer rather than an empty document. An RCA assembled from no evidence would read exactly like one assembled from evidence, which is the failure mode worth avoiding here. Pass `claim_id`, pass `failures`, or widen `hours`.",
+        ].join("\n"),
+      };
+    }
+
+    const report = buildRca({
+      incidentRef: input.claim_id ?? `${input.tool ?? "all tools"}, last ${input.hours}h`,
+      diagnoses,
+      ambient,
+      trace,
+      affected,
+      generatedAt: now,
+    });
+
+    const parts = [report.markdown, "", renderTicketNote(report.ticket)];
+    if (input.output_path) {
+      const p = confinePath(ctx.workspaceRoot, input.output_path);
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, report.markdown);
+      parts.push("", `Written to ${input.output_path}.`);
+    }
+    return { content: parts.join("\n") };
+  },
+});
+
+export const OPS_TOOLS = [
+  tenantIntegrityTool,
+  datasetHealthTool,
+  ollamaTelemetryTool,
+  policyDriftTool,
+  batchHealPreviewTool,
+  rejectionAnalysisTool,
+  generateRcaTool,
+];

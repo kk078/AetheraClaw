@@ -15,7 +15,7 @@ import { loadClaims, loadEras } from "./tools.js";
  * are needed — reading only `filing_proof` would produce a 100% acceptance rate
  * by construction, since nothing that failed is in that table.
  */
-function loadAcks(store: MemoryStore): AckRecord[] {
+export function loadAcks(store: MemoryStore): AckRecord[] {
   const accepted = store.db
     .prepare("SELECT claim_id, recorded_at FROM filing_proof WHERE source LIKE '%277CA%' ORDER BY recorded_at ASC")
     .all() as Array<{ claim_id: string; recorded_at: number }>;

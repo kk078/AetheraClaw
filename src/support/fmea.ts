@@ -22,6 +22,15 @@ export type FailureCategory =
   | "database"
   | "disk"
   | "model_capacity"
+  // The two below are never returned by classifyFailure, because there is no
+  // text to classify: they are read off a claim's lifecycle record by
+  // ops_generate_rca, where the evidence is a stage that never happened rather
+  // than an error somebody caught. They live in the same enum so a claim's root
+  // cause and a tool failure's root cause can be counted, owned and rendered by
+  // the same code — a claim stuck for ninety days is an incident with a cause,
+  // and giving it a separate vocabulary would just mean two of everything.
+  | "submission_gap"
+  | "no_payer_response"
   | "unclassified";
 
 export interface Diagnosis {

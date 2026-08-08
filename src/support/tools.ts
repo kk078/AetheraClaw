@@ -20,18 +20,17 @@ import {
 const DAY = 86_400_000;
 const ago = (at: number, now: number) => Math.max(0, Math.floor((now - at) / DAY));
 
-export const traceClaimTool = defineTool({
-  name: "support_trace_claim",
-  description:
-    "Assemble a complete lifecycle timeline for one claim from every table that touched it — build, acknowledgment, filing proof, remittance, worklist, pipeline stage, twin prediction and audit-chain entry — and name the expected stages that NEVER happened, because the gap is usually the answer. Not a distributed trace: this is one process over SQLite, so there are no service hops or queue transitions, and nothing pretends there are.",
-  schema: z.object({
-    claim_id: z.string().describe("Claim id / patient control number. Matched case-insensitively after trimming."),
-  }),
-  execute: async (input, ctx) => {
-    const store = ctx.services.store as MemoryStore | undefined;
-    if (!store) return { content: "No database in this context.", isError: true };
-
-    const id = normalizeClaimId(input.claim_id);
+/**
+ * Every stored event that names this claim, from every table that could hold one.
+ *
+ * Exported because ops_generate_rca needs exactly the same timeline. Two copies
+ * of this query set would drift, and a trace and an RCA that disagree about what
+ * happened to a claim are worse than either alone — the reader has no way to
+ * tell which one is stale.
+ */
+export function collectTraceEvents(store: MemoryStore, claimId: string): TraceEvent[] {
+  {
+    const id = normalizeClaimId(claimId);
     const events: TraceEvent[] = [];
     const like = `%${id}%`;
 
@@ -135,7 +134,21 @@ export const traceClaimTool = defineTool({
       });
     }
 
-    return { content: renderTrace(assembleTrace(input.claim_id, events)) };
+    return events;
+  }
+}
+
+export const traceClaimTool = defineTool({
+  name: "support_trace_claim",
+  description:
+    "Assemble a complete lifecycle timeline for one claim from every table that touched it — build, acknowledgment, filing proof, remittance, worklist, pipeline stage, twin prediction and audit-chain entry — and name the expected stages that NEVER happened, because the gap is usually the answer. Not a distributed trace: this is one process over SQLite, so there are no service hops or queue transitions, and nothing pretends there are.",
+  schema: z.object({
+    claim_id: z.string().describe("Claim id / patient control number. Matched case-insensitively after trimming."),
+  }),
+  execute: async (input, ctx) => {
+    const store = ctx.services.store as MemoryStore | undefined;
+    if (!store) return { content: "No database in this context.", isError: true };
+    return { content: renderTrace(assembleTrace(input.claim_id, collectTraceEvents(store, input.claim_id))) };
   },
 });
 

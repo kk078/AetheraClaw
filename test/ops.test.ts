@@ -20,6 +20,27 @@ import {
   type DenialObservation,
 } from "../src/ops/drift.js";
 import type { Era } from "../src/tools/healthcare/x12/835.js";
+import { batchHeal, renderBatchHeal } from "../src/ops/batch-heal.js";
+import {
+  MIN_ACKS_PER_PERIOD,
+  NEW_CODE_THRESHOLD,
+  analyzeRejections,
+  renderRejectionAnalysis,
+  type AcceptanceObservation,
+  type RejectionObservation,
+} from "../src/ops/rejection-analysis.js";
+import {
+  SYSTEMIC_AFFECTED,
+  buildRca,
+  diagnoseTrace,
+  fingerprint,
+  ownershipFor,
+  renderTicketNote,
+  severityOf,
+} from "../src/ops/rca.js";
+import { classifyFailure } from "../src/support/fmea.js";
+import { assembleTrace } from "../src/support/trace.js";
+import type { ClaimInput } from "../src/tools/healthcare/x12/837.js";
 
 const facts = (over: Partial<TenantDbFacts> = {}): TenantDbFacts => ({
   slug: "acme",
@@ -344,5 +365,343 @@ describe("payer policy drift", () => {
 
   it("warns that behaviour also moves when your own coding changes", () => {
     expect(renderDrift(detectPolicyDrift(series(4, 100, 30, 100)))).toMatch(/your own coding changes/);
+  });
+});
+
+// ── Batch auto-heal preview ──────────────────────────────────────────────────
+
+const bhClaim = (over: Partial<ClaimInput> = {}): ClaimInput => ({
+  claim_id: "C1",
+  payer_name: "Medicare",
+  payer_id: "MCR",
+  billing_provider_npi: "1234567893",
+  billing_provider_name: "Test Clinic",
+  subscriber_id: "TEST123",
+  patient_last: "Test",
+  patient_first: "Pat",
+  patient_dob: "19700101",
+  patient_sex: "U",
+  diagnoses: ["E11.9"],
+  service_lines: [
+    { cpt_hcpcs: "99214", charge: 200, units: 1, dx_pointers: [1], service_date: "20260115", place_of_service: "11" },
+  ],
+  ...over,
+});
+
+const bhLine = (over: Partial<ClaimInput["service_lines"][number]> = {}) => ({
+  cpt_hcpcs: "99214",
+  charge: 200,
+  units: 1,
+  dx_pointers: [1],
+  service_date: "20260115",
+  place_of_service: "11",
+  ...over,
+});
+
+describe("batch auto-heal preview", () => {
+  it("splits three ways, and a repairable claim is NOT counted as needing a human", () => {
+    // The whole point of the tool is the third number. A claim a safe repair
+    // covers must not inflate it, or the ops lead schedules staff against work
+    // that does not exist.
+    const s = batchHeal([
+      bhClaim({ claim_id: "CLEAN" }),
+      bhClaim({ claim_id: "FIXABLE", service_lines: [bhLine({ service_date: "2026-01-15" })] }),
+      bhClaim({ claim_id: "HUMAN", service_lines: [bhLine({ modifiers: ["95"], place_of_service: "11" })] }),
+    ]);
+    expect(s.total).toBe(3);
+    expect(s.clean).toBe(1);
+    expect(s.repaired).toBe(1);
+    expect(s.review).toBe(1);
+    expect(s.results.find((r) => r.claimId === "FIXABLE")!.status).toBe("repaired");
+  });
+
+  it("counts a claim needing review as review even when it also has a safe repair", () => {
+    // Otherwise a claim would be reported as handled while still blocked.
+    const s = batchHeal([
+      bhClaim({ service_lines: [bhLine({ service_date: "2026-01-15", modifiers: ["95"], place_of_service: "11" })] }),
+    ]);
+    expect(s.review).toBe(1);
+    expect(s.repaired).toBe(0);
+    expect(s.results[0].applied.length).toBeGreaterThan(0);
+  });
+
+  it("groups one rule hitting many claims as one problem", () => {
+    const s = batchHeal(
+      Array.from({ length: 8 }, (_, i) =>
+        bhClaim({ claim_id: `C${i}`, service_lines: [bhLine({ service_date: "2026-01-15" })] }),
+      ),
+    );
+    expect(s.repairsByRule).toHaveLength(1);
+    expect(s.repairsByRule[0].count).toBe(8);
+    expect(renderBatchHeal(s)).toMatch(/one upstream fault, not many independent ones/);
+  });
+
+  it("states that nothing was written and that there is no batch apply", () => {
+    const out = renderBatchHeal(batchHeal([bhClaim()]));
+    expect(out).toMatch(/NOTHING WAS WRITTEN/);
+    expect(out).toMatch(/deliberately no batch apply/);
+  });
+
+  it("carries the review question, not just the rule name", () => {
+    const s = batchHeal([bhClaim({ service_lines: [bhLine({ modifiers: ["95"], place_of_service: "11" })] })]);
+    expect(s.reviewsByRule[0].question).not.toBe("");
+    expect(renderBatchHeal(s)).toMatch(s.reviewsByRule[0].question.slice(0, 30));
+  });
+});
+
+// ── 277CA rejection analysis ─────────────────────────────────────────────────
+
+describe("clearinghouse rejection analysis", () => {
+  const DAY = 86_400_000;
+  const T0 = Date.UTC(2026, 0, 1);
+  const rej = (payer: string, code: string, at: number): RejectionObservation => ({
+    payer,
+    statusCode: code,
+    entity: "41",
+    at,
+  });
+  const acc = (payer: string, at: number): AcceptanceObservation => ({ payer, at });
+
+  /** n acceptances spread over the window so the split lands where intended. */
+  const spread = (payer: string, n: number, from: number) =>
+    Array.from({ length: n }, (_, i) => acc(payer, from + i * DAY));
+
+  it("catches a code that never appeared and now appears repeatedly", () => {
+    // Rejections placed AFTER every acceptance, so the count-based split cannot
+    // land inside the burst and score half of it as "before".
+    const rejections = Array.from({ length: NEW_CODE_THRESHOLD + 2 }, (_, i) => rej("Aetna", "21", T0 + (200 + i) * DAY));
+    const acceptances = [...spread("Aetna", 40, T0), ...spread("Aetna", 40, T0 + 60 * DAY)];
+    const a = analyzeRejections(rejections, acceptances);
+    const e = a.emerging.find((x) => x.statusCode === "21");
+    expect(e).toBeDefined();
+    expect(e!.brandNew).toBe(true);
+    expect(e!.before).toBe(0);
+    expect(renderRejectionAnalysis(a)).toMatch(/NEW — never seen before this window/);
+  });
+
+  it("refuses to call a change on a payer with too few acknowledgments", () => {
+    // Three rejections out of five is not a rate, and reporting it as one is
+    // how an alerter gets muted before it ever says anything true.
+    const a = analyzeRejections(
+      [rej("Tiny", "21", T0), rej("Tiny", "21", T0 + DAY), rej("Tiny", "21", T0 + 2 * DAY)],
+      spread("Tiny", 2, T0 + 3 * DAY),
+    );
+    expect(a.emerging).toEqual([]);
+    expect(a.thin.join(" ")).toMatch(/Tiny/);
+    expect(renderRejectionAnalysis(a)).toMatch(new RegExp(`fewer than ${MIN_ACKS_PER_PERIOD}`));
+  });
+
+  it("does not report a code that FELL", () => {
+    // A front end relaxing an edit is good news, and reporting it under
+    // "emerging edits" would train people to skim the section.
+    const rejections = [
+      ...Array.from({ length: 15 }, (_, i) => rej("Cigna", "21", T0 + i * DAY)),
+      ...Array.from({ length: 2 }, (_, i) => rej("Cigna", "21", T0 + (60 + i) * DAY)),
+    ];
+    const acceptances = [...spread("Cigna", 30, T0), ...spread("Cigna", 30, T0 + 60 * DAY)];
+    const a = analyzeRejections(rejections, acceptances);
+    expect(a.emerging.filter((e) => e.statusCode === "21")).toEqual([]);
+  });
+
+  it("resolves the status code against the bundled dataset and says so when it cannot", () => {
+    const a = analyzeRejections([rej("Aetna", "ZZZ", T0)], spread("Aetna", 30, T0));
+    expect(a.groups[0].description).toMatch(/not in the bundled 277CA dataset/);
+    expect(a.groups[0].fix).toMatch(/guessing at it/);
+  });
+
+  it("withholds a rejection rate below the sample floor but still lists the groups", () => {
+    const a = analyzeRejections([rej("Aetna", "21", T0)], []);
+    expect(a.rejectionRate).toBeNull();
+    expect(renderRejectionAnalysis(a)).toMatch(/too few to state a rate/);
+    expect(a.groups).toHaveLength(1);
+  });
+
+  it("says the rejections are recoverable and why that is time-limited", () => {
+    const rejections = Array.from({ length: 6 }, (_, i) => rej("Aetna", "21", T0 + (200 + i) * DAY));
+    const a = analyzeRejections(rejections, [...spread("Aetna", 40, T0), ...spread("Aetna", 40, T0 + 60 * DAY)]);
+    const out = renderRejectionAnalysis(a);
+    expect(out).toMatch(/never entered adjudication/);
+    expect(out).toMatch(/no appeal rights to fall back on/);
+    expect(out).toMatch(/timely filing kept running/);
+  });
+
+  it("distinguishes an empty acknowledgment history from a clean one", () => {
+    expect(renderRejectionAnalysis(analyzeRejections([], []))).toMatch(/No acknowledgments recorded/);
+  });
+});
+
+// ── Root cause analysis ──────────────────────────────────────────────────────
+
+describe("RCA report", () => {
+  const NOW = Date.UTC(2026, 0, 20);
+
+  it("raises severity when the data is at risk, regardless of how few occurrences", () => {
+    // One ENOSPC is worse than fifty schema mismatches, because the next write
+    // makes it worse rather than making the backlog longer.
+    expect(severityOf("disk", 1).severity).toBe("sev1");
+    expect(severityOf("schema_mismatch", 50).severity).toBe("sev2");
+    expect(severityOf("schema_mismatch", 1).severity).toBe("sev3");
+  });
+
+  it("treats a filing clock on many claims as worse than on one", () => {
+    expect(severityOf("payer_rejection", 1).severity).toBe("sev2");
+    expect(severityOf("payer_rejection", SYSTEMIC_AFFECTED).severity).toBe("sev1");
+  });
+
+  it("fingerprints the CAUSE, not the evidence, so a recurrence deduplicates", () => {
+    // The evidence carries the claim id and the timestamp. Fingerprinting it
+    // would make every occurrence unique — the exact duplicate-ticket pile a
+    // fingerprint exists to prevent.
+    const a = buildRca({
+      incidentRef: "batch",
+      diagnoses: [classifyFailure("ECONNREFUSED 127.0.0.1:11434 at 10:02")],
+      affected: 1,
+      generatedAt: NOW,
+    });
+    const b = buildRca({
+      incidentRef: "batch",
+      diagnoses: [classifyFailure("ECONNREFUSED 127.0.0.1:11434 at 14:51")],
+      affected: 1,
+      generatedAt: NOW + 86_400_000,
+    });
+    expect(a.ticket.fingerprint).toBe(b.ticket.fingerprint);
+  });
+
+  it("gives a different fingerprint to a different cause", () => {
+    const a = fingerprint("network", "nothing answered", "C-1");
+    const b = fingerprint("auth", "nothing answered", "C-1");
+    expect(a).not.toBe(b);
+  });
+
+  it("names an OWNER, not just a tier — the two are different questions", () => {
+    // Both are Tier 1. Sending a payer rejection to support and a rate limit to
+    // billing is how a ticket bounces twice before anyone touches it.
+    expect(ownershipFor("payer_rejection").owner).toMatch(/billing/i);
+    expect(ownershipFor("network").owner).toMatch(/support/i);
+    expect(ownershipFor("payer_rejection").tier).toBe(1);
+    expect(ownershipFor("network").tier).toBe(1);
+  });
+
+  it("quotes the evidence rather than summarising it", () => {
+    const r = buildRca({
+      incidentRef: "C-1",
+      diagnoses: [classifyFailure("SQLITE_BUSY: database is locked")],
+      affected: 1,
+      generatedAt: NOW,
+    });
+    expect(r.markdown).toMatch(/database is locked/);
+    expect(r.markdown).toMatch(/take the category on trust/);
+  });
+
+  it("reports the never-happened stages, because the gap is the finding", () => {
+    const trace = assembleTrace("C-9", [
+      { at: NOW - 30 * 86_400_000, source: "claim", label: "Claim built", detail: "status=submitted" },
+    ]);
+    const r = buildRca({ incidentRef: "C-9", diagnoses: [], trace, affected: 0, generatedAt: NOW });
+    expect(r.markdown).toMatch(/Stages that never happened/);
+    expect(r.markdown).toMatch(/Remittance received/);
+  });
+
+  it("says UNCLASSIFIED rather than picking the nearest category", () => {
+    const r = buildRca({
+      incidentRef: "C-2",
+      diagnoses: [classifyFailure("the flux capacitor emitted a shrug")],
+      affected: 1,
+      generatedAt: NOW,
+    });
+    expect(r.primary).toBe("unclassified");
+    expect(r.markdown).toMatch(/rather than picking the nearest one/);
+  });
+
+  it("warns when several distinct causes are being called one incident", () => {
+    const r = buildRca({
+      incidentRef: "window",
+      diagnoses: [
+        classifyFailure("ECONNREFUSED"),
+        classifyFailure("HTTP 401 unauthorized"),
+        classifyFailure("ENOSPC no space left"),
+      ],
+      affected: 3,
+      generatedAt: NOW,
+    });
+    expect(r.categories.length).toBe(3);
+    expect(r.markdown).toMatch(/usually not one incident/);
+  });
+
+  it("keeps a claim's OWN record as the root cause, not whatever else was noisy", () => {
+    // The regression this exists for: a claim that sat 95 days unacknowledged
+    // was filed as a network incident and addressed to engineering, because
+    // Ollama happened to be down that afternoon.
+    const trace = assembleTrace("C-STUCK", [
+      { at: NOW - 95 * 86_400_000, source: "claim", label: "Claim built", detail: "status=submitted" },
+    ]);
+    const claimCause = diagnoseTrace(trace, NOW)!;
+    const r = buildRca({
+      incidentRef: "C-STUCK",
+      diagnoses: [claimCause],
+      ambient: [classifyFailure("ECONNREFUSED"), classifyFailure("ECONNREFUSED")],
+      trace,
+      affected: 1,
+      generatedAt: NOW,
+    });
+    expect(r.primary).toBe("submission_gap");
+    expect(r.ownership.owner).toMatch(/billing/i);
+    expect(r.severity).toBe("sev2");
+    expect(r.markdown).toMatch(/Also failing in this window/);
+    expect(r.markdown).toMatch(/NOT the root cause above/);
+  });
+
+  it("reads the right gap: never acknowledged vs accepted and never paid", () => {
+    const built = { at: NOW - 95 * 86_400_000, source: "claim" as const, label: "Claim built", detail: "" };
+    const unacked = diagnoseTrace(assembleTrace("C-1", [built]), NOW)!;
+    const accepted = diagnoseTrace(
+      assembleTrace("C-1", [
+        built,
+        { at: NOW - 94 * 86_400_000, source: "filing_proof", label: "Acceptance banked", detail: "" },
+      ]),
+      NOW,
+    )!;
+    expect(unacked.category).toBe("submission_gap");
+    expect(accepted.category).toBe("no_payer_response");
+    // The distinction that matters: one has a banked acceptance to defend with.
+    expect(accepted.nextSteps.join(" ")).toMatch(/Acceptance is banked/);
+    expect(unacked.nextSteps.join(" ")).toMatch(/whether it was actually transmitted/);
+  });
+
+  it("does not fork a new ticket every day an incident stays open", () => {
+    // The cause carries an age in days, so a naive fingerprint changes at
+    // midnight — worst on precisely the incidents that last longest.
+    const at = NOW - 95 * 86_400_000;
+    const day1 = diagnoseTrace(assembleTrace("C-1", [{ at, source: "claim", label: "Claim built", detail: "" }]), NOW)!;
+    const day2 = diagnoseTrace(
+      assembleTrace("C-1", [{ at, source: "claim", label: "Claim built", detail: "" }]),
+      NOW + 86_400_000,
+    )!;
+    expect(day1.cause).not.toBe(day2.cause);
+    expect(fingerprint(day1.category, day1.cause, "C-1")).toBe(fingerprint(day2.category, day2.cause, "C-1"));
+  });
+
+  it("names WHICH clock is running rather than one generic sentence", () => {
+    expect(severityOf("submission_gap", 1).because).toMatch(/no banked acceptance/);
+    expect(severityOf("no_payer_response", 1).because).toMatch(/Acceptance is banked/);
+    expect(severityOf("payer_denial", 1).because).toMatch(/appeal rights/);
+  });
+
+  it("counts occurrences consistently between the header and the rationale", () => {
+    expect(severityOf("schema_mismatch", 2).because).toMatch(/2 occurrences/);
+    expect(severityOf("schema_mismatch", 1).because).toMatch(/One occurrence/);
+  });
+
+  it("explains why there is no Jira client instead of pretending there is one", () => {
+    const r = buildRca({
+      incidentRef: "C-3",
+      diagnoses: [classifyFailure("HTTP 429 rate limit")],
+      affected: 1,
+      generatedAt: NOW,
+    });
+    const note = renderTicketNote(r.ticket);
+    expect(note).toMatch(/Match on the fingerprint BEFORE creating/);
+    expect(note).toMatch(/first be exercised during an incident/);
+    expect(r.ticket.labels).toContain("cause:rate_limit");
   });
 });

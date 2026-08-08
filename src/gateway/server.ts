@@ -12,6 +12,66 @@ import { groupIntoModules } from "../tools/modules.js";
 import { PROFILES, selectTools } from "../tools/profiles.js";
 import { resolveOllamaTarget } from "../providers/openai.js";
 import type { ToolRegistry } from "../tools/registry.js";
+import { computeExecutiveKpis } from "../reports/kpi.js";
+import { loadAcks } from "../reports/kpi-tools.js";
+import { loadClaims, loadEras } from "../reports/tools.js";
+
+/**
+ * Above this many rows, the overview does not compute KPIs.
+ *
+ * They need every claim and every remittance parsed out of JSON, and this
+ * endpoint is hit on every page load. A dashboard that takes four seconds to
+ * paint is one people stop opening, which costs more than the tiles are worth —
+ * so past the bound it says so and points at kpi_dashboard, which is where
+ * somebody who actually wants the number goes anyway.
+ */
+const OVERVIEW_KPI_MAX_ROWS = 20_000;
+
+interface OverviewKpis {
+  daysInAr: number | null;
+  acceptanceRate: number | null;
+  netCollectionRate: number | null;
+  /** Why a figure is null, per figure. Never rendered as a zero. */
+  notes: { daysInAr: string; acceptanceRate: string; netCollectionRate: string };
+  skipped?: string;
+}
+
+function overviewKpis(store: MemoryStore): OverviewKpis | null {
+  try {
+    const rows =
+      (store.db.prepare("SELECT COUNT(*) AS c FROM claims").get() as { c: number }).c +
+      (store.db.prepare("SELECT COUNT(*) AS c FROM remittances").get() as { c: number }).c;
+    if (rows === 0) return null;
+    if (rows > OVERVIEW_KPI_MAX_ROWS) {
+      return {
+        daysInAr: null,
+        acceptanceRate: null,
+        netCollectionRate: null,
+        notes: { daysInAr: "", acceptanceRate: "", netCollectionRate: "" },
+        skipped: `${rows.toLocaleString()} rows — past the ${OVERVIEW_KPI_MAX_ROWS.toLocaleString()} bound this page computes inline. Run kpi_dashboard.`,
+      };
+    }
+
+    // The same loaders kpi_dashboard uses. Two claim↔ERA joins normalizing ids
+    // differently would let the dashboard and the tool disagree about what is
+    // outstanding, and nobody would be able to say which one was right.
+    const ctx = { services: { store } };
+    const k = computeExecutiveKpis(loadClaims(ctx), loadEras(ctx), loadAcks(store), Date.now());
+    return {
+      daysInAr: k.daysInAr.days,
+      acceptanceRate: k.cleanClaim.acceptanceRate,
+      netCollectionRate: k.netCollection.rate,
+      notes: {
+        daysInAr: k.daysInAr.note,
+        acceptanceRate: k.cleanClaim.note,
+        netCollectionRate: k.netCollection.note,
+      },
+    };
+  } catch {
+    // A widget row is not worth failing the whole overview for.
+    return null;
+  }
+}
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -89,6 +149,7 @@ export async function buildServer(opts: {
         suggestions: count("code_suggestions"),
         audit: count("audit_chain"),
       },
+      kpis: overviewKpis(store),
     };
   });
 

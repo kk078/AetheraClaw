@@ -37,6 +37,45 @@ const STARTERS = [
   ["What does the tool catalogue have for prior authorization?", "⌘", "Catalogue", "Searches all tools, including the ones not loaded into this turn."],
 ];
 
+/**
+ * Three KPI tiles, each of which can decline to show a number.
+ *
+ * The whole discipline of the KPI module is refusing to state a figure it cannot
+ * support — days in A/R with no charges to divide by, a collection rate over
+ * claims too recent to have finished paying. Rendering those as 0 would undo it
+ * silently and read as "we collect instantly", which is the one wrong answer
+ * that looks like good news. So a null shows as "—" with the reason underneath.
+ */
+function renderKpiTiles(kpis) {
+  const wrap = $("#ov-kpi-wrap");
+  if (!kpis) {
+    wrap.hidden = true;
+    return;
+  }
+  wrap.hidden = false;
+
+  const tiles = [
+    ["Days in A/R", kpis.daysInAr, (v) => String(v), kpis.notes.daysInAr],
+    ["Front-end acceptance", kpis.acceptanceRate, (v) => `${v.toFixed(1)}%`, kpis.notes.acceptanceRate],
+    ["Net collection", kpis.netCollectionRate, (v) => `${v.toFixed(1)}%`, kpis.notes.netCollectionRate],
+  ];
+
+  $("#ov-kpis").replaceChildren(
+    ...tiles.map(([label, value, fmt]) => {
+      const d = el("div", `stat${value === null ? " zero" : ""}`);
+      d.append(el("div", "v", value === null ? "—" : fmt(value)), el("div", "k", label));
+      return d;
+    }),
+  );
+
+  // The note for whichever tile is withheld, since that is the one somebody is
+  // about to ask about. If they all computed, the A/R denominator caveat is the
+  // one that decides whether the number is comparable to a published benchmark.
+  const withheld = tiles.find(([, v]) => v === null);
+  $("#ov-kpi-note").textContent =
+    kpis.skipped ?? (withheld ? withheld[3] : tiles[0][3]) ?? "";
+}
+
 async function loadOverview() {
   const ov = await fetch("/api/overview").then((r) => r.json()).catch(() => null);
   if (!ov) return;
@@ -74,6 +113,8 @@ async function loadOverview() {
       return d;
     }),
   );
+
+  renderKpiTiles(ov.kpis);
 
   $("#ov-starters").replaceChildren(
     ...STARTERS.map(([prompt, glyph, tag, why]) => {

@@ -192,6 +192,11 @@ h3.section { font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
   color: var(--ink-3); font-size: 11.5px; line-height: 1.5;
 }
 
+/* Note under the overview's revenue-cycle tiles. Its own name on purpose:
+   .note is scoped to .card and would silently pick up nothing here, and
+   .kpi-note is already taken by the tool-view tiles further down. */
+.overview-note { margin: 9px 0 0; color: var(--ink-3); font-size: 11.5px; line-height: 1.5; max-width: 80ch; }
+
 /* Stat tiles */
 .stats { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); }
 .stat {
