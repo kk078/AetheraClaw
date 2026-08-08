@@ -123,6 +123,7 @@ import {
 } from "../tools/browser/tools.js";
 import { TENANCY_TOOLS } from "../tenancy/tools.js";
 import { OPS_TOOLS } from "../ops/tools.js";
+import { SUPPORT_TOOLS } from "../support/tools.js";
 import { kpiDashboardTool } from "../reports/kpi-tools.js";
 import { contractRateListTool, contractRateSetTool } from "../tools/healthcare/intelligence/contract-tools.js";
 
@@ -229,6 +230,7 @@ export function buildRegistry(config: Config, store: MemoryStore): ToolRegistry 
     trainingProgressTool,
     ...TENANCY_TOOLS,
     ...OPS_TOOLS,
+    ...SUPPORT_TOOLS,
     kpiDashboardTool,
     contractRateSetTool,
     contractRateListTool,
