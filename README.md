@@ -155,6 +155,45 @@ Attestations are signed with a local Ed25519 key and anchored to the audit chain
 
 **Coder training** — `training_drill` draws cases weighted toward what the practice actually bills, since that is what makes them relevant, and **names what that weighting misses**: a bank shaped by the practice's history cannot ask about anything the practice has never billed, and a fifth of every draw is spread evenly across topics so the rare ones stay genuinely reachable rather than reachable in arithmetic. Cases carry **defensible alternatives**, because real coding has genuine ambiguity and grading one right answer where two coders would both survive an audit teaches a coder to distrust a correct instinct. Every answer is given with a stated confidence, and `training_progress` reports **calibration beside accuracy** — a Brier score, plus the specific list of answers that were wrong at high confidence. That list is the point: the coder who costs a practice money is not the one who gets things wrong, it is the one who gets things wrong confidently, because nobody double-checks a coder who never flags anything. Topics with few attempts show their Wilson interval instead of a number, since three attempts is not a skill level.
 
+## Running it
+
+It runs on your own machine — there is no hosted instance. `127.0.0.1:4180` only answers on the box where you started the gateway.
+
+```bash
+git clone https://github.com/kk078/AetheraClaw.git
+cd AetheraClaw
+npm install
+npm run build
+```
+
+Set a key for whichever provider you want, then start it:
+
+```bash
+# macOS / Linux
+export OLLAMA_API_KEY=...            # or ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY
+node dist/cli/index.js serve --provider ollama --profile coding
+```
+
+```powershell
+# Windows PowerShell
+$env:OLLAMA_API_KEY = "..."
+node dist\cli\index.js serve --provider ollama --profile coding
+```
+
+Then open **http://127.0.0.1:4180**. The gateway serves the web UI and the API from the same port. For a terminal REPL instead, leave `serve` running and open a second shell: `node dist/cli/index.js chat`.
+
+Windows notes: the build and the gateway are cross-platform, and `run_command` uses `cmd.exe` there rather than bash. `better-sqlite3` is a native module — it normally installs from a prebuilt binary, but if npm falls back to compiling you need the VS Build Tools C++ workload. Node 20 or newer.
+
+Two things worth knowing before you pick a port. **4190 will not work**: it is on the WHATWG fetch blocked-port list, so the server binds fine and every browser request dies with `ERR_UNSAFE_PORT`. And Node's `fetch` ignores `HTTPS_PROXY`, so behind a corporate proxy the provider SDKs fail where `curl` succeeds — there is no proxy support in the app yet.
+
+Useful commands:
+
+```bash
+node dist/cli/index.js providers      # which providers work here, models, tool counts
+node dist/cli/index.js sessions       # list past conversations
+node dist/cli/index.js audit verify   # check the tamper-evident log
+```
+
 ## Running on a provider other than Anthropic
 
 `aetheraclaw providers` prints what is usable here — which keys are set, which model each provider is configured for, and how many tools each can actually be sent.

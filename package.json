@@ -1,7 +1,7 @@
 {
   "name": "aetheraclaw",
   "version": "0.1.0",
-  "description": "Self-hosted AI assistant for US healthcare Revenue Cycle Management and medical billing & coding — inspired by OpenClaw",
+  "description": "Self-hosted AI assistant for US healthcare Revenue Cycle Management and medical billing & coding \u2014 inspired by OpenClaw",
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -11,10 +11,11 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && cp src/memory/schema.sql dist/memory/",
+    "build": "tsc -p tsconfig.json && node scripts/copy-schema.mjs",
     "dev": "tsx src/cli/index.ts serve",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/cli/index.js serve"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

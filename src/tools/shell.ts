@@ -44,7 +44,7 @@ export function createShellTool(opts: { defaultTimeoutS: number; maxOutputKb: nu
     description:
       "Run a shell command inside the workspace directory. Use for git, scripts, file inspection, and small utilities. Output is captured (stdout+stderr) and truncated if large. Commands that modify state require user approval.",
     schema: z.object({
-      command: z.string().describe("The shell command to run (bash)"),
+      command: z.string().describe("The shell command to run (bash, or cmd.exe on Windows)"),
       timeout_s: z.number().int().min(1).max(300).optional().describe("Timeout in seconds (default 30)"),
     }),
     assessRisk: (input) => assessCommandRisk(input.command),
@@ -52,7 +52,10 @@ export function createShellTool(opts: { defaultTimeoutS: number; maxOutputKb: nu
       const timeoutMs = (input.timeout_s ?? opts.defaultTimeoutS) * 1000;
       const maxBytes = opts.maxOutputKb * 1024;
       return new Promise((resolve) => {
-        const child = spawn("bash", ["-lc", input.command], {
+        // Windows has no bash: cmd.exe is what every Windows Node install has.
+        const [shell, shellArgs] =
+          process.platform === "win32" ? ["cmd.exe", ["/d", "/s", "/c"]] : ["bash", ["-lc"]];
+        const child = spawn(shell, [...shellArgs, input.command], {
           cwd: ctx.workspaceRoot,
           env: { ...process.env },
           stdio: ["ignore", "pipe", "pipe"],
