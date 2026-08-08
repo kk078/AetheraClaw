@@ -521,7 +521,7 @@ function ncciFromDir() {
 function mueFromDir() {
   const files = local().mue.filter((f) => f.setting === setting);
   if (files.length === 0) {
-    throw new Error(`no ${setting} MUE table zip in ${FROM_DIR}.${unknownNote()}`);
+    throw new Error(`no ${setting} MUE table zip in ${FROM_DIR} — none of them contains a matching MUE*.csv.${unknownNote()}`);
   }
   const table = convertMue(textFromZip(files[0].buf, /\.csv$/i));
   console.log(`  ${files[0].name} → ${files[0].inner} — ${Object.keys(table).length.toLocaleString()} code(s) with a unit limit`);
@@ -530,7 +530,11 @@ function mueFromDir() {
 
 function mpfsFromDir() {
   const files = local().rvu;
-  if (files.length === 0) throw new Error(`no RVU zip in ${FROM_DIR}.${unknownNote()}`);
+  if (files.length === 0) {
+    // Named by what makes a zip the RVU zip, since classification is by content
+    // now — "a name containing rvu26c" would send someone renaming a file.
+    throw new Error(`no RVU zip in ${FROM_DIR} — none of them contains a PPRRVU*.csv.${unknownNote()}`);
+  }
   // Last by name: rvu26c sorts after rvu26b, so the newest quarter present wins.
   const f = files[files.length - 1];
   console.log(`  ${f.name}`);
