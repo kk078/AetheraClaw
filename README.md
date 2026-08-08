@@ -34,11 +34,25 @@ API keys come from the environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMI
 ```bash
 npm install
 npm run build
-export ANTHROPIC_API_KEY=sk-ant-...        # or another provider's key
+
+# Set ONE provider key — whichever you have. No provider is privileged.
+export OLLAMA_API_KEY=...                  # Ollama Cloud
+#   or ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY
+#   or none at all, if a local Ollama server is running
+
 node dist/cli/index.js serve               # starts the gateway + web UI
 # open http://127.0.0.1:4180  — or, in another terminal:
 node dist/cli/index.js chat                # interactive REPL
 ```
+
+**`provider` in the config is a preference, not a requirement.** It ships as `"anthropic"`, but if that key is absent AetheraClaw uses whichever provider's key *is* present and announces the substitution at startup. It will not refuse to run and tell you to go and get a key for a provider you never chose. To pin one:
+
+```bash
+node dist/cli/index.js serve --provider ollama    # explicit; never substituted
+node dist/cli/index.js providers                  # which keys are present here
+```
+
+An explicit `--provider` is honoured or it fails — it is never quietly swapped, because serving a different model than the one named is worse than an error.
 
 `npm run dev` runs the gateway from source via `tsx`.
 

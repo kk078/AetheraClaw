@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import path from "node:path";
-import { loadConfig, configDir, apiKeyFor } from "../config/config.js";
+import { loadConfig, configDir, apiKeyFor, envVarFor, resolveProvider } from "../config/config.js";
 import { PROFILES, PROVIDER_TOOL_LIMITS, renderProfiles, selectTools } from "../tools/profiles.js";
 import { resolveOllamaTarget } from "../providers/openai.js";
 import { MemoryStore } from "../memory/store.js";
@@ -151,14 +151,22 @@ program
     const config = loadConfig();
     if (opts.port) config.gateway.port = Number(opts.port);
     if (opts.host) config.gateway.host = opts.host;
-    if (opts.provider) config.provider = opts.provider as typeof config.provider;
     if (opts.profile) config.toolProfile = opts.profile;
 
-    if (!apiKeyFor(config.provider) && config.provider !== "ollama") {
-      console.error(
-        `No API key for provider "${config.provider}". Set ${config.provider.toUpperCase()}_API_KEY, or pass --provider with one you have. \`aetheraclaw providers\` shows what is configured.`,
-      );
+    const choice = resolveProvider(config, { explicit: opts.provider });
+    if (choice.error) {
+      console.error(choice.error);
+      console.error("`aetheraclaw providers` shows which keys are present here.");
       process.exit(1);
+    }
+    config.provider = choice.provider;
+    if (choice.substitutedFrom) {
+      // Announced, not silent. Serving a different model than the config names
+      // without saying so is how somebody debugs the wrong provider for an hour.
+      console.log(
+        `Provider: config says "${choice.substitutedFrom}" but ${envVarFor(choice.substitutedFrom)} is not set — using "${choice.provider}" instead.`,
+      );
+      console.log(`  Set provider: "${choice.provider}" in ~/.aetheraclaw/config.json5 to make it permanent, or pass --provider to override.`);
     }
     let resolved;
     try {

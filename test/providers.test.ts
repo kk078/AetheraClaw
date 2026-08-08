@@ -1,3 +1,4 @@
+import { envVarFor, resolveProvider } from "../src/config/config.js";
 import { describe, expect, it } from "vitest";
 import {
   PROFILES,
@@ -372,5 +373,79 @@ describe("switching providers mid-session", () => {
     expect(assistantAt).toBeGreaterThan(-1);
     expect(toolAt).toBeGreaterThan(assistantAt);
     expect(messages[toolAt].tool_call_id).toBe("t1");
+  });
+});
+
+// ── Provider selection ───────────────────────────────────────────────────────
+// The shipped default is "anthropic", and the old behaviour hard-exited whenever
+// that provider's key was missing. A user who had set only OLLAMA_API_KEY was
+// therefore told, every single run, to go and get an Anthropic key — while a
+// provider that could have served the request sat configured and ignored.
+describe("provider resolution", () => {
+  const cfg = (provider: "anthropic" | "openai" | "gemini" | "ollama") => ({ provider });
+
+  it("uses the configured provider when its key is present", () => {
+    const r = resolveProvider(cfg("anthropic"), { env: { ANTHROPIC_API_KEY: "k" } });
+    expect(r.provider).toBe("anthropic");
+    expect(r.substitutedFrom).toBeUndefined();
+  });
+
+  it("falls through to the provider the user actually has a key for", () => {
+    const r = resolveProvider(cfg("anthropic"), { env: { OLLAMA_API_KEY: "k" } });
+    expect(r.provider).toBe("ollama");
+    expect(r.substitutedFrom).toBe("anthropic");
+    expect(r.error).toBe("");
+  });
+
+  it("announces the substitution rather than making it silently", () => {
+    // Serving a different model than the config names without saying so is how
+    // somebody debugs the wrong provider for an hour.
+    expect(resolveProvider(cfg("anthropic"), { env: { GEMINI_API_KEY: "k" } }).substitutedFrom).toBe("anthropic");
+  });
+
+  it("NEVER substitutes an explicit --provider", () => {
+    // That is a direct instruction; quietly serving a different model is worse
+    // than failing.
+    const r = resolveProvider(cfg("ollama"), { explicit: "openai", env: { OLLAMA_API_KEY: "k" } });
+    expect(r.provider).toBe("openai");
+    expect(r.error).toMatch(/OPENAI_API_KEY is not set/);
+  });
+
+  it("accepts an explicit provider that does have a key", () => {
+    const r = resolveProvider(cfg("anthropic"), { explicit: "ollama", env: { OLLAMA_API_KEY: "k" } });
+    expect(r).toEqual({ provider: "ollama", error: "" });
+  });
+
+  it("rejects an unknown provider name", () => {
+    expect(resolveProvider(cfg("anthropic"), { explicit: "claude", env: {} }).error).toMatch(/Unknown provider/);
+  });
+
+  it("prefers a keyed provider over keyless local Ollama", () => {
+    // Ollama with no key means a LOCAL server, which may not be running — so it
+    // is the fallback of last resort, not a confident pick.
+    const r = resolveProvider(cfg("anthropic"), { env: { OPENAI_API_KEY: "k" } });
+    expect(r.provider).toBe("openai");
+  });
+
+  it("still offers local Ollama when nothing is keyed", () => {
+    const r = resolveProvider(cfg("anthropic"), { env: {} });
+    expect(r.provider).toBe("ollama");
+    expect(r.error).toBe("");
+  });
+
+  it("runs Ollama with no key at all, since local needs none", () => {
+    expect(resolveProvider(cfg("ollama"), { env: {} })).toEqual({ provider: "ollama", error: "" });
+  });
+
+  it("names every env var when it cannot help", () => {
+    const r = resolveProvider(cfg("anthropic"), { explicit: "gemini", env: {} });
+    expect(r.error).toMatch(/GEMINI_API_KEY/);
+  });
+
+  it("derives env var names without a lookup table to drift", () => {
+    expect(envVarFor("anthropic")).toBe("ANTHROPIC_API_KEY");
+    expect(envVarFor("ollama")).toBe("OLLAMA_API_KEY");
+    expect(envVarFor("gemini")).toBe("GEMINI_API_KEY");
+    expect(envVarFor("openai")).toBe("OPENAI_API_KEY");
   });
 });

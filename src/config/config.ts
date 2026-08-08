@@ -184,6 +184,83 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
   return cfg;
 }
 
+export type ProviderName = Config["provider"];
+
+/**
+ * Preference order when the configured provider cannot run.
+ *
+ * A provider with a key ranks above one without. Ollama is last not because it
+ * is worse but because it is the only one that is "usable" with no key at all —
+ * that means a LOCAL server, which may simply not be running, so it is the
+ * fallback of last resort rather than a confident pick. With OLLAMA_API_KEY set
+ * it is Ollama Cloud and ranks with the rest.
+ */
+const SUBSTITUTION_ORDER: ProviderName[] = ["anthropic", "openai", "gemini", "ollama"];
+
+export interface ProviderChoice {
+  provider: ProviderName;
+  /** Set when the configured provider was passed over. Announced, never silent. */
+  substitutedFrom?: ProviderName;
+  /** Empty when a provider was found; otherwise why nothing could run. */
+  error: string;
+}
+
+/**
+ * Decide which provider actually runs.
+ *
+ * This exists because the previous behaviour was to hard-exit whenever the
+ * CONFIGURED provider had no key — and the shipped default is "anthropic". A
+ * user who had set only OLLAMA_API_KEY was therefore told, every single time, to
+ * go and get an Anthropic key, while a provider that could have served the
+ * request sat configured and ignored. The instruction to "set ANTHROPIC_API_KEY"
+ * was the tool refusing to use what the user had actually chosen.
+ *
+ * An EXPLICIT --provider is never substituted: that is a direct instruction, and
+ * quietly serving a different model than the one named is worse than failing.
+ * Everything else falls through to whatever can run, and says so.
+ */
+export function resolveProvider(
+  config: Pick<Config, "provider">,
+  opts: { explicit?: string; env?: NodeJS.ProcessEnv } = {},
+): ProviderChoice {
+  const env = opts.env ?? process.env;
+  const usable = (p: ProviderName): boolean => (p === "ollama" ? true : Boolean(keyFromEnv(p, env)));
+  const keyed = (p: ProviderName): boolean => Boolean(keyFromEnv(p, env));
+
+  if (opts.explicit) {
+    const p = opts.explicit as ProviderName;
+    if (!SUBSTITUTION_ORDER.includes(p)) {
+      return { provider: config.provider, error: `Unknown provider "${opts.explicit}". Choose one of: ${SUBSTITUTION_ORDER.join(", ")}.` };
+    }
+    if (!usable(p)) {
+      return { provider: p, error: `--provider ${p} was given but ${envVarFor(p)} is not set. Set it, or name a provider you have a key for.` };
+    }
+    return { provider: p, error: "" };
+  }
+
+  if (usable(config.provider)) return { provider: config.provider, error: "" };
+
+  const substitute =
+    SUBSTITUTION_ORDER.find((p) => p !== config.provider && keyed(p)) ??
+    SUBSTITUTION_ORDER.find((p) => p !== config.provider && usable(p));
+
+  if (!substitute) {
+    return {
+      provider: config.provider,
+      error: `No provider can run. Set one of ${SUBSTITUTION_ORDER.map(envVarFor).join(", ")}, or start a local Ollama server and run with --provider ollama.`,
+    };
+  }
+  return { provider: substitute, substitutedFrom: config.provider, error: "" };
+}
+
+export function envVarFor(provider: ProviderName): string {
+  return provider === "anthropic" ? "ANTHROPIC_API_KEY" : `${provider.toUpperCase()}_API_KEY`;
+}
+
+function keyFromEnv(provider: ProviderName, env: NodeJS.ProcessEnv): string | undefined {
+  return env[envVarFor(provider)];
+}
+
 export function apiKeyFor(provider: Config["provider"]): string | undefined {
   switch (provider) {
     case "anthropic":

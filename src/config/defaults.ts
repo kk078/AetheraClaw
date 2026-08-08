@@ -4,6 +4,12 @@ export const DEFAULT_CONFIG_JSON5 = `{
   // GEMINI_API_KEY, OLLAMA_API_KEY (Ollama Cloud only).
 
   // Which model provider drives the agent: "anthropic" | "openai" | "gemini" | "ollama"
+  //
+  // This is a PREFERENCE, not a requirement. If the named provider's key is not
+  // in the environment, AetheraClaw uses whichever provider's key IS present and
+  // says so at startup — it will not refuse to run and tell you to go and get a
+  // key for a provider you did not choose. Pass --provider to pin one for a
+  // single run; an explicit --provider is never substituted.
   provider: "anthropic",
 
   providers: {
