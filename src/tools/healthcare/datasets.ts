@@ -6,6 +6,8 @@ import { defineTool } from "../registry.js";
 import type { ScrubFinding } from "./finding.js";
 import { checkMueEdits, checkPtpEdits, indexPtpEdits, type MueTable, type PtpEdit, type PtpIndex, type PtpTable } from "./intelligence/ncci.js";
 import type { Icd10Table } from "./icd10-local.js";
+import type { ReferenceDbConfig } from "./reference-db.js";
+import { lookupRole } from "./reference-routes.js";
 
 // Local dataset directory: ~/.aetheraclaw/data — populated by the user or the
 // (future) data-updates fetcher. Files are optional; tools degrade gracefully.
@@ -258,20 +260,60 @@ export const hcpcsLookupTool = defineTool({
   schema: z.object({ code: z.string().describe("HCPCS/CPT code, e.g. E0601 or 99213") }),
   execute: async (input, ctx) => {
     const code = input.code.trim().toUpperCase();
+    const cfg = (ctx.services.config as { healthcare?: ReferenceDbConfig & { cptDataPath?: string } } | undefined)?.healthcare ?? {};
+    const licensedRoles = cfg.referenceDbLicensedRoles ?? [];
+
+    // ── Fullest description wins, not first source ───────────────────────────
+    // "Compiled data wins" is right where the compiled data is better and wrong
+    // here. hcpcs.json comes from the RVU file's description column, which is a
+    // TRUNCATED ABBREVIATION: J1885 reads "Ketorolac tromethamine inj" there and
+    // "Injection, ketorolac tromethamine, per 15 mg" in a real HCPCS table. The
+    // second is the code's actual descriptor, and a coder checking a unit
+    // definition needs the "per 15 mg".
+    //
+    // So candidates are gathered from every source and the LONGEST is led with.
+    // Others are named when they differ, because a descriptor that disagrees
+    // between two sources is worth seeing rather than silently resolving.
+    const candidates: Array<{ description: string; source: string }> = [];
     const hcpcs = loadJson<Record<string, string>>("hcpcs.json");
-    if (hcpcs?.[code]) return { content: `${code}: ${hcpcs[code]}` };
+    if (hcpcs?.[code]) candidates.push({ description: hcpcs[code], source: "hcpcs.json (CMS RVU file — descriptions there are abbreviated)" });
+
+    for (const role of ["hcpcs", "cpt"] as const) {
+      const hit = lookupRole(cfg, role, code, { licensedRoles });
+      if (hit) {
+        candidates.push({
+          description: hit.description,
+          source: `${hit.table} in the attached reference database` + (role === "cpt" ? " (CPT, copyright the AMA — read because healthcare.referenceDbLicensedRoles names \"cpt\")" : ""),
+        });
+      }
+    }
+
+    if (candidates.length > 0) {
+      candidates.sort((a, b) => b.description.length - a.description.length);
+      const [best, ...rest] = candidates;
+      const differing = rest.filter((c) => c.description.trim().toLowerCase() !== best.description.trim().toLowerCase());
+      return {
+        content: [
+          `${code}: ${best.description}`,
+          `Source: ${best.source}.`,
+          ...(differing.length > 0
+            ? ["", "Also described as:", ...differing.map((c) => `  "${c.description}"  — ${c.source}`)]
+            : []),
+        ].join("\n"),
+      };
+    }
+
     // User-supplied CPT CSV
-    const cfg = ctx.services.config as { healthcare?: { cptDataPath?: string } } | undefined;
-    const cptPath = cfg?.healthcare?.cptDataPath;
+    const cptPath = cfg.cptDataPath;
     if (cptPath && fs.existsSync(cptPath)) {
       const line = fs
         .readFileSync(cptPath, "utf8")
         .split(/\r?\n/)
         .find((l) => l.startsWith(code + ","));
-      if (line) return { content: `${code}: ${line.split(",").slice(1).join(",")}` };
+      if (line) return { content: `${code}: ${line.split(",").slice(1).join(",")}\nSource: ${cptPath}.` };
     }
     return {
-      content: `${code} not found in local data. HCPCS Level II: install hcpcs.json in ${dataDir()}. CPT codes require a user-supplied licensed file (healthcare.cptDataPath in config).`,
+      content: `${code} not found in local data. HCPCS Level II: install hcpcs.json in ${dataDir()}, or attach a reference database carrying a full Level II table via healthcare.referenceDbPath. CPT descriptors need either a licensed file (healthcare.cptDataPath) or a reference database with "cpt" named in healthcare.referenceDbLicensedRoles. This is a miss in the sources present, not proof the code does not exist.`,
     };
   },
 });

@@ -55,6 +55,29 @@ export const IDENTIFIER_PATTERNS: IdentifierPattern[] = [
   { pattern: /\bencounter|\bvisit_?id|admi(t|ssion)_?date/i, means: "encounter identifier" },
 ];
 
+/**
+ * Columns holding a whole document rather than a field.
+ *
+ * A GAP THE FIRST VERSION HAD, found by reading a real schema. A table of raw
+ * X12 files —
+ *
+ *   era_835_raw(id, filename, file_content, import_date, parsed, claims_count)
+ *
+ * — has not one column name that looks like an identifier, so the scan let it
+ * straight through. Every one of those `file_content` values is an 835, and an
+ * 835 carries patient names inside its NM1 segments. Column names cannot see
+ * inside a blob.
+ *
+ * So a document column in a table that also looks transactional is quarantined
+ * on the same footing as an `mrn`. The pairing matters: `rcm_knowledge.content`
+ * is 1,800 characters of reference text and must stay readable, and it sits in a
+ * table with no filename, no import date and no claim count.
+ */
+export const DOCUMENT_COLUMNS = /^(file_)?content$|^raw(_|$)|_raw$|^payload$|^body$|^document$|^edi$|^x12$/i;
+
+/** Columns that mark a table as holding transactions rather than reference data. */
+const TRANSACTIONAL_COLUMNS = /^file_?name$|^import(ed)?_|_at$|^claims?_count$|^parsed$|^received|^era_id$|^claim_id$/i;
+
 export interface IdentifierHit {
   column: string;
   means: string;
@@ -66,6 +89,18 @@ export function scanForIdentifiers(columns: string[]): IdentifierHit[] {
   for (const column of columns) {
     const match = IDENTIFIER_PATTERNS.find((p) => p.pattern.test(column));
     if (match) hits.push({ column, means: match.means });
+  }
+
+  // Only when the table also looks transactional — otherwise every reference
+  // table with a `content` column would be held back, which is noise rather
+  // than caution.
+  const transactional = columns.some((c) => TRANSACTIONAL_COLUMNS.test(c));
+  if (transactional) {
+    for (const column of columns) {
+      if (!DOCUMENT_COLUMNS.test(column)) continue;
+      if (hits.some((h) => h.column === column)) continue;
+      hits.push({ column, means: "a stored document — a raw claim or remittance can carry patient names inside it, and a column name cannot see in" });
+    }
   }
   return hits;
 }
@@ -222,6 +257,7 @@ export function describeCatalogue(catalogue: ReferenceCatalogue): string {
 export interface ReferenceDbConfig {
   referenceDbPath?: string;
   referenceDbAllowTables?: string[];
+  referenceDbLicensedRoles?: string[];
 }
 
 /** Sample size for code-shape identification. Enough to be sure, small enough to be instant. */

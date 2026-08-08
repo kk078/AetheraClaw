@@ -29,7 +29,7 @@ export const MODULES: ModuleDef[] = [
     blurb: "ICD-10, HCPCS and NPI validation against bundled and live registries.",
     note: "ICD-10 search and validation call the NLM Clinical Tables API, so they need network — and say so when they cannot reach it rather than answering from recollection. NPI check digits are Luhn-validated with no network call at all, and place of service is a bundled table rather than a memory: POS 22 is On Campus-Outpatient Hospital.",
     glyph: "◈",
-    match: ["icd10_", "hcpcs_", "npi_", "pos_lookup"],
+    match: ["icd10_", "icd10pcs_lookup", "hcpcs_", "npi_", "pos_lookup", "ndc_lookup", "loinc_lookup", "modifier_lookup", "drg_lookup", "taxonomy_lookup"],
   },
   {
     key: "em",
@@ -69,7 +69,7 @@ export const MODULES: ModuleDef[] = [
     blurb: "CARC/RARC explanation, risk scoring, worklists, appeal drafting.",
     note: "Risk scores shrink toward the practice baseline in proportion to the evidence, so three claims with one denial is not a 33% rate. appeal_triage ranks by expected recovery rather than balance, declines to guess a win rate below a real sample, and never recommends a write-off.",
     glyph: "▽",
-    match: ["denial_", "appeal_", "worklist_"],
+    match: ["denial_", "eob_crosswalk", "appeal_", "worklist_"],
   },
   {
     key: "twin",
@@ -157,7 +157,7 @@ export const MODULES: ModuleDef[] = [
     blurb: "HCC/RAF, recapture gaps, symmetric suspecting, quality measures.",
     note: "Suspecting looks both ways — documented-but-not-coded and coded-but-not-documented — from the same pass.",
     glyph: "◍",
-    match: ["raf_calculate", "hcc_recapture", "suspect_", "quality_measures"],
+    match: ["raf_calculate", "hcc_recapture", "hcc_lookup", "suspect_", "quality_measures"],
   },
   {
     key: "transparency",
@@ -261,7 +261,7 @@ export const MODULES: ModuleDef[] = [
     blurb: "Files, shell, fetch, and the tool catalogue itself.",
     note: "tool_invoke routes back through the same validation and approval gate as a direct call — a way to reach a tool, not around it.",
     glyph: "⌘",
-    match: ["run_command", "read_file", "write_file", "list_dir", "web_fetch", "web_search", "tool_", "data_status", "reference_db_", "reference_lookup"],
+    match: ["run_command", "read_file", "write_file", "list_dir", "web_fetch", "web_search", "tool_", "data_status", "reference_db_", "reference_lookup", "reference_roles"],
   },
 ];
 

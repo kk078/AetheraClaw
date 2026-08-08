@@ -41,6 +41,9 @@ export const DEFAULT_CONFIG_JSON5 = `{
     // referenceDbPath: "/path/to/reference.db",
     // Tables to read even though their columns look like patient identifiers.
     // referenceDbAllowTables: [],
+    // Licensed code sets in that database you have confirmed you may read.
+    // "cpt" reads CPT descriptors, which are copyright the AMA.
+    // referenceDbLicensedRoles: [],
     clearinghouse: "mock",
   },
 

@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { defineTool } from "../registry.js";
 import { fetchTextGuarded } from "../web-fetch.js";
+import { openDatabase } from "../../memory/sqlite.js";
+import { catalogueFor, type ReferenceDbConfig } from "./reference-db.js";
+import { resolveRoute } from "./reference-routes.js";
 
 const CMS = "https://api.coverage.cms.gov/v1";
 
@@ -59,14 +62,95 @@ export const coverageSearchLocalTool = defineTool({
  * service and read the contractor off the results, which is how you find the
  * policy that actually binds you anyway.
  */
+
+// ── MAC jurisdictions ────────────────────────────────────────────────────────
+
+interface MacRow {
+  code: string;
+  name: string;
+  jurisdiction: string;
+  states: string;
+  type: string;
+}
+
+/**
+ * State lists are written every way a spreadsheet allows.
+ *
+ * Comma, slash, semicolon and plain spaces all appear, so the list is split on
+ * any of them and matched whole. Substring matching would make "IN" hit
+ * "INDIANA", "MINNESOTA" and "VIRGINIA", and sending a claim to the wrong
+ * jurisdiction is not a cosmetic error.
+ */
+export function splitStates(raw: string): string[] {
+  return String(raw ?? "")
+    .split(/[,;/|]|\s+/)
+    .map((s) => s.trim().toUpperCase())
+    .filter((s) => /^[A-Z]{2}$/.test(s));
+}
+
+function allMacRows(cfg: ReferenceDbConfig): MacRow[] | null {
+  const catalogue = catalogueFor(cfg);
+  if ("error" in catalogue) return null;
+  const resolved = resolveRoute(catalogue, "mac");
+  if (!resolved) return null;
+  const db = openDatabase(catalogue.path, { readonly: true });
+  try {
+    const rows = db.prepare(`SELECT * FROM "${resolved.table.replace(/"/g, '""')}"`).all() as Array<Record<string, unknown>>;
+    return rows.map((r) => ({
+      code: String(r.code ?? ""),
+      name: String(r.name ?? ""),
+      jurisdiction: String(r.jurisdiction ?? ""),
+      states: String(r.states ?? ""),
+      type: String(r.type ?? ""),
+    }));
+  } finally {
+    db.close();
+  }
+}
+
 export const macLookupTool = defineTool({
   name: "mac_lookup",
   description:
-    "List the Medicare Administrative Contractors and their contract numbers. Note: the CMS Coverage API does not publish a state-to-MAC mapping, so this cannot answer 'which MAC serves my state' — search LCDs for the service with coverage_search_local and read the contractor from the results instead, which finds the policy that binds you rather than just the company name.",
+    "Find the Medicare Administrative Contractor for a state, or list contractors and their contract numbers. The CMS Coverage API publishes no state field, so a state lookup is answered from an attached reference database when one carries a MAC table — and says plainly when it cannot, rather than guessing a jurisdiction.",
   schema: z.object({
     name: z.string().default("").describe("Optional case-insensitive filter on contractor name, e.g. 'Novitas'"),
+    state: z.string().default("").describe("Two-letter state code, e.g. 'TX'. Needs an attached reference database with a MAC table."),
   }),
-  execute: async (input) => {
+  execute: async (input, ctx) => {
+    // The state question is the one people actually ask, and until now the
+    // honest answer was that it could not be answered at all. A reference
+    // database carrying a MAC table with a states column answers it; without
+    // one, the refusal below is unchanged.
+    if (input.state.trim()) {
+      const cfg = (ctx.services.config as { healthcare?: ReferenceDbConfig } | undefined)?.healthcare ?? {};
+      const macs = allMacRows(cfg);
+      if (!macs) {
+        return {
+          content: `No reference database with a MAC table is attached, and the CMS Coverage API carries no state field — so which MAC serves ${input.state.toUpperCase()} cannot be looked up here. Run coverage_search_local for the service and read contractor_name off the matching LCDs: that finds the policy that binds you, which is the useful answer anyway.`,
+        };
+      }
+      const wanted = input.state.trim().toUpperCase();
+      // Word-boundary match on the state list. A substring match would make
+      // "IN" hit "INDIANA" and every other state containing those letters, and
+      // routing a claim to the wrong jurisdiction is not a cosmetic error.
+      const hits = macs.filter((m) => splitStates(m.states).includes(wanted));
+      if (hits.length === 0) {
+        return { content: `No MAC in the attached table lists ${wanted}. That is a gap in the table rather than proof no contractor serves the state — check the table's own coverage before relying on it.` };
+      }
+      return {
+        content: [
+          ...hits.map((m) => `${m.name}${m.jurisdiction ? `  (${m.jurisdiction})` : ""}${m.type ? `  [${m.type}]` : ""}\n      contract ${m.code}\n      states: ${m.states}`),
+          "",
+          hits.length > 1
+            ? "More than one contractor serves this state — Part A/B and DME are separate jurisdictions, so read the type before assuming which one adjudicates your claim."
+            : "",
+          `Source: the attached reference database. Confirm against the contractor's own jurisdiction page before acting on it.`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      };
+    }
+
     const parsed = await cmsJson<{
       data?: Array<{ contractor_id: number; contractor_name: string; contract_number: string }>;
     }>("/data/contractor");
@@ -88,7 +172,7 @@ export const macLookupTool = defineTool({
         "",
         ...[...byName.entries()].map(([n, c]) => `  ${n}\n      ${c.join(", ")}`),
         "",
-        "The API carries no state field, so this is the contractor list rather than a state lookup. To find the policy that binds a service in your area, run coverage_search_local and read contractor_name off the matching LCDs.",
+        "The API carries no state field. Pass `state` to answer by jurisdiction from an attached reference database, or run coverage_search_local to find the policy that binds a service in your area.",
       ].join("\n"),
     };
   },

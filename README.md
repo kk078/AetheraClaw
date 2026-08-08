@@ -198,10 +198,32 @@ hope.
 
 `reference_lookup` answers from a cleared table and **says which file and table it
 came from** — a descriptor served from a private database is a different claim from
-one served by a published CMS file. If a table's codes are shaped like CPT, the
-status report raises the AMA licence question rather than quietly serving
-descriptors; whether the file may be used is the practice's answer, not
-AetheraClaw's.
+one served by a published CMS file.
+
+**Known tables are routed into the domain tools.** Nobody asking what CARC 253 means
+should have to know the answer lives in a table called `ref_carc`, so table names map
+to *roles* and the tools consult the role. `denial_explain` fills the silence left by
+the compiled subsets (24 CARCs of ~400, 14 RARCs of ~1,000) while keeping the compiled
+entry where it exists, because that one carries a category and a recommended action a
+bare code list does not. `hcpcs_lookup` gains the unpriced Level II codes the RVU file
+omits. `mac_lookup` can finally answer *which MAC serves my state* — the CMS Coverage
+API publishes no state field, and until now the honest answer was that it could not be
+looked up at all. `ndc_lookup`, `loinc_lookup`, `icd10pcs_lookup`, `modifier_lookup`,
+`drg_lookup`, `taxonomy_lookup`, `eob_crosswalk` and `hcc_lookup` cover code sets that
+previously had no home; each reports a miss as a miss rather than answering from
+recollection, and `reference_roles` lists what the attached file can actually serve.
+
+**Fullest descriptor wins, not first source.** `hcpcs.json` is built from the RVU
+file's description column, which is a truncated abbreviation — `J1885` reads
+*"Ketorolac tromethamine inj"* there against the real descriptor *"Injection,
+ketorolac tromethamine, per 15 mg"*, and a coder checking a unit definition needs the
+"per 15 mg". Sources that disagree are both shown rather than silently resolved.
+
+**Licensed content is opt-in per role.** CPT descriptors are read only when
+`healthcare.referenceDbLicensedRoles` names `"cpt"`. There is no default-on path,
+because a default cannot be a decision about somebody else's licence — and the status
+report distinguishes *present but not declared* from *absent*, which have different
+answers.
 
 **What a fresh install does and does not fetch.** `npm install` takes ~200 MB and
 no build step. Playwright's browser binaries are *not* downloaded — the payer-portal
@@ -513,7 +535,7 @@ OLLAMA_API_KEY=… aetheraclaw serve --provider ollama     # Ollama Cloud
 
 **Ollama is two services behind one name, so it carries two models.** `providers.ollama.model` is the local one (`qwen3`, whatever `ollama pull` gave you); `providers.ollama.cloudModel` is the cloud one, defaulting to **`gpt-oss:120b`**. Which pair is used follows a single decision — a key with no explicit local base URL means the cloud — so the endpoint and the model can never disagree. That mattered: the two catalogues do not overlap, and picking the URL one way and the model the other sends a real request to a real service for a model it has never heard of, whose 404 names the model rather than the mismatch that caused it. `aetheraclaw providers` prints the resolved pair, `gpt-oss:120b (cloud)` or `qwen3 (local)`, so the answer is visible before a turn is spent.
 
-**All 213 tools are reachable on every provider**, but not by shipping 213 definitions. Three catalogue tools — `tool_search`, `tool_describe`, `tool_invoke` — go on the wire, and everything else is discovered on demand. Ollama Cloud loads 64 directly and reaches the other 149 through the catalogue; `tool_invoke` routes back through the same choke point as a direct call, so zod validation, risk assessment and the approval gate all still apply. It is a way to reach a tool, not a way around it, and there are tests that hold that line.
+**All 222 tools are reachable on every provider**, but not by shipping 222 definitions. Three catalogue tools — `tool_search`, `tool_describe`, `tool_invoke` — go on the wire, and everything else is discovered on demand. Ollama Cloud loads 64 directly and reaches the other 158 through the catalogue; `tool_invoke` routes back through the same choke point as a direct call, so zod validation, risk assessment and the approval gate all still apply. It is a way to reach a tool, not a way around it, and there are tests that hold that line.
 
 The cost is a real one and worth naming: discovery becomes a step, and a tool the model cannot find is worse than one that is absent, because it will answer from memory instead. That is not hypothetical — asked what CARC 197 means with `denial_explain` deferred, a model confidently answered "Claim Not Submitted". It means *precertification absent*. So when anything is deferred the system prompt says so and instructs the model to search before answering any question about a code, deadline, payer rule or dollar amount. With that in place the same question produced a `tool_search` → `tool_describe` → `tool_invoke` chain and the correct answer.
 

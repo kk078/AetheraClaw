@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { lookupRole } from "./reference-routes.js";
+import type { ReferenceDbConfig } from "./reference-db.js";
 import { defineTool } from "../registry.js";
 
 // Compact bundled subset of X12 CARC/RARC codes (publicly published lists) with
@@ -58,13 +60,59 @@ export function explainDenial(carc: string, rarcs: string[] = []): string {
   return lines.join("\n");
 }
 
+/**
+ * The compiled tables are SUBSETS: 24 CARCs against roughly 400 published, and
+ * 14 RARCs against roughly 1,000. Everything outside them read as "not in
+ * bundled dataset", which is honest and useless — a denial nobody can explain
+ * is a denial nobody works.
+ *
+ * An attached reference database closes that. The compiled entry still wins
+ * where it exists, because it carries a CATEGORY and a RECOMMENDED ACTION that
+ * a bare code list does not, and swapping a richer answer for a longer one is
+ * not an improvement. The attached table fills the silence.
+ */
+export function explainWithReference(
+  carc: string,
+  rarcs: string[],
+  resolve: (role: "carc" | "rarc", code: string) => { description: string; table: string } | null,
+): string {
+  const lines: string[] = [];
+  const c = CARC[carc];
+  if (c) {
+    lines.push(`CARC ${carc}: ${c.desc}\nCategory: ${c.category}\nRecommended action: ${c.action}`);
+  } else {
+    const hit = resolve("carc", carc);
+    lines.push(
+      hit
+        ? `CARC ${carc}: ${hit.description}\n(From ${hit.table} in the attached reference database. No category or recommended action — the compiled table carries those and does not have this code.)`
+        : `CARC ${carc}: not in the bundled dataset and no attached reference database answers it — consult the X12 CARC list.`,
+    );
+  }
+  for (const r of rarcs) {
+    if (RARC[r]) {
+      lines.push(`RARC ${r}: ${RARC[r]}`);
+      continue;
+    }
+    const hit = resolve("rarc", r);
+    lines.push(hit ? `RARC ${r}: ${hit.description}  (from ${hit.table})` : `RARC ${r}: not in the bundled dataset and no attached reference database answers it.`);
+  }
+  return lines.join("\n");
+}
+
 export const denialExplainTool = defineTool({
   name: "denial_explain",
   description:
-    "Explain a claim adjustment/denial: CARC (claim adjustment reason code) plus optional RARC remark codes, with the denial category and recommended next action.",
+    "Explain a claim adjustment/denial: CARC (claim adjustment reason code) plus optional RARC remark codes, with the denial category and recommended next action. The bundled tables are subsets; when a reference database is attached, codes outside them are answered from it and the answer says so.",
   schema: z.object({
     carc: z.string().describe("CARC code, e.g. '197'"),
     rarcs: z.array(z.string()).optional().describe("Optional RARC remark codes, e.g. ['N115']"),
   }),
-  execute: async (input) => ({ content: explainDenial(input.carc, input.rarcs ?? []) }),
+  execute: async (input, ctx) => {
+    const cfg = (ctx.services.config as { healthcare?: ReferenceDbConfig } | undefined)?.healthcare ?? {};
+    const resolve = (role: "carc" | "rarc", code: string) => {
+      const hit = lookupRole(cfg, role, code);
+      return hit ? { description: hit.description, table: hit.table } : null;
+    };
+    return { content: explainWithReference(input.carc, input.rarcs ?? [], resolve) };
+  },
 });

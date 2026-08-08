@@ -60,6 +60,10 @@ export const ConfigSchema = z.object({
       // identifiers. Named one at a time on purpose — there is no global
       // override, because a blanket flag is the same as no gate.
       referenceDbAllowTables: z.array(z.string()).default([]),
+      // Roles whose content is licensed (currently "cpt") and which the practice
+      // has confirmed it may read. Named explicitly and never defaulted on: the
+      // default cannot be a decision about somebody else's licence.
+      referenceDbLicensedRoles: z.array(z.string()).default([]),
       clearinghouse: z.string().default("mock"),
     })
     .default({}),
