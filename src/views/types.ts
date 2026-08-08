@@ -31,7 +31,8 @@ export type ViewKind =
   | "kpi_tiles"
   | "cms1500"
   | "appeal_letter"
-  | "batch_heal";
+  | "batch_heal"
+  | "document";
 
 export interface ToolView {
   kind: ViewKind;

@@ -134,6 +134,7 @@ import {
 } from "../tools/browser/tools.js";
 import { SessionManager } from "../gateway/session-manager.js";
 import { buildServer } from "../gateway/server.js";
+import { listDocuments, purgeDocuments } from "../ingest/store.js";
 import { startChat } from "./chat.js";
 import { buildRegistry } from "../tools/build-registry.js";
 import { resolveStore, tenancyRoot } from "../tenancy/resolve.js";
@@ -444,6 +445,60 @@ program
     process.exit(report.passed === report.total ? 0 : 1);
   });
 
+
+// ── documents ────────────────────────────────────────────────────────────────
+// This deployment persists the text extracted from uploads, so it needs a way
+// to empty that. A store of document content with no purge is a liability that
+// only grows, and "delete the database" is not a retention policy.
+
+const documents = program.command("documents").description("Uploaded document text held in the database");
+
+documents
+  .command("list")
+  .description("What is stored, and which entries carry identifier-shaped text")
+  .action(() => {
+    const config = loadConfig();
+    const { store } = resolveStore(config);
+    const rows = listDocuments(store);
+    if (rows.length === 0) {
+      console.log("No documents stored.");
+      return;
+    }
+    for (const d of rows) {
+      const when = new Date(d.createdAt).toISOString().slice(0, 16).replace("T", " ");
+      const phi = d.phi.length > 0 ? `  identifiers: ${d.phi.map((p) => `${p.kind}×${p.count}`).join(", ")}` : "";
+      console.log(`${d.id}  ${when}  ${d.filename} — ${d.kind}${d.readable ? "" : " (not readable)"}${phi}`);
+    }
+    const withPhi = rows.filter((d) => d.phi.length > 0).length;
+    console.log(`\n${rows.length} document(s), ${withPhi} carrying identifier-shaped text.`);
+  });
+
+documents
+  .command("purge")
+  .description("Delete stored document text")
+  .option("--older-than <days>", "Only entries older than this many days")
+  .option("--session <id>", "Only entries from one session")
+  .option("--yes", "Do it, rather than reporting what would go")
+  .action((opts: { olderThan?: string; session?: string; yes?: boolean }) => {
+    const config = loadConfig();
+    const { store } = resolveStore(config);
+    const olderThanMs = opts.olderThan ? Date.now() - Number(opts.olderThan) * 86_400_000 : undefined;
+
+    // A dry run by default. This deletes the only copy of text somebody may
+    // still need, and the flag costs one word.
+    const scope = listDocuments(store).filter(
+      (d) => (!olderThanMs || d.createdAt <= olderThanMs) && (!opts.session || d.sessionId === opts.session),
+    );
+    if (!opts.yes) {
+      console.log(`${scope.length} document(s) would be deleted. Re-run with --yes to do it.`);
+      for (const d of scope.slice(0, 20)) console.log(`  ${d.id}  ${d.filename}`);
+      if (scope.length > 20) console.log(`  … and ${scope.length - 20} more`);
+      return;
+    }
+    const r = purgeDocuments(store, { ...(olderThanMs ? { olderThanMs } : {}), ...(opts.session ? { sessionId: opts.session } : {}) });
+    console.log(`Deleted ${r.deleted} document(s), ${r.charactersRemoved.toLocaleString()} characters of extracted text.`);
+    console.log("Each delete is recorded in the PHI access log and anchored to the audit chain.");
+  });
 
 const reference = program.command("reference").description("Manage the attached reference code database");
 

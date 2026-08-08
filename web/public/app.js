@@ -378,15 +378,45 @@ async function openSession(id) {
     fetch(`/api/sessions/${id}/messages`).then((r) => r.json()).catch(() => []),
     fetch(`/api/sessions/${id}/views`).then((r) => r.json()).catch(() => ({})),
   ]);
+  // A stored tool_result carries no tool name — only the id linking it to the
+  // tool_use that requested it. Replay therefore has to keep that link, or a
+  // replayed session shows a section for every catalogue call while the live
+  // one collapses them: the same conversation, two different shapes.
+  const calledName = new Map();
   for (const m of messages) {
     for (const block of m.content) {
       if (block.type === "text" && block.text.trim()) addMessage(m.role, block.text);
-      else if (block.type === "tool_use") addTool(block.name, block.input);
-      else if (block.type === "tool_result") finishTool(block.content, block.isError, views[block.toolUseId]);
+      else if (block.type === "tool_use") {
+        // tool_invoke is a wrapper; the tool that actually ran is named in its
+        // input. Resolving it here mirrors what the runner does live, so a
+        // replayed turn reports the same tool the original one did.
+        const inner = block.name === "tool_invoke" ? String(block.input?.name ?? "").trim() : "";
+        calledName.set(block.id, inner || block.name);
+        addTool(block.name, block.input);
+      } else if (block.type === "tool_result") {
+        const name = calledName.get(block.toolUseId) ?? "";
+        finishTool(block.content, block.isError, views[block.toolUseId], name, PLUMBING.has(name));
+      }
     }
   }
+  // A session with nothing in it is the same blank console as a fresh page, and
+  // the invitation belongs on both. Replacing the stream wholesale used to take
+  // the empty state with it and leave a void.
+  if ($("#stream").children.length === 0) $("#stream").append(emptyState());
+  endGroup();
   connect(id);
   loadSessions();
+}
+
+/** Mirrors PLUMBING_TOOLS in src/views/workflow.ts, for replay only. */
+const PLUMBING = new Set(["tool_search", "tool_describe", "tool_invoke"]);
+
+function emptyState() {
+  const box = el("div", "empty");
+  box.append(el("div", "big", "Ask about codes, coverage, claims, denials or cash."));
+  box.append(el("div", null, "The agent runs real tools and shows every call it makes."));
+  box.append(el("div", null, "Drop in a PDF, Word or Excel file and it will read that too."));
+  return box;
 }
 
 
@@ -823,13 +853,142 @@ $("#send").addEventListener("click", send);
 
 async function send() {
   const text = input.value.trim();
-  if (!text || state.turnRunning) return;
+  // An attachment on its own is a complete request — "here, read this" — so an
+  // empty box with files pending still sends.
+  if ((!text && pending.length === 0) || state.turnRunning) return;
   if (!state.sessionId) await newSession();
-  addMessage("user", text);
+
+  const note = attachmentPreamble();
+  addMessage("user", text || note.shown);
   input.value = "";
   input.style.height = "auto";
-  wsSend({ type: "user_message", sessionId: state.sessionId, text });
+  clearAttachments();
+  wsSend({ type: "user_message", sessionId: state.sessionId, text: note.forModel + text });
 }
+
+// ── Attachments ────────────────────────────────────────────────────────────
+// A file is uploaded and READ the moment it is dropped, before anything is
+// sent. Two reasons: the user finds out immediately that their scanned PDF
+// cannot be read, rather than after a round trip through the model; and the
+// identifier scan runs at the door, so "this carries a member id and its text
+// is now stored" is on screen before they decide to ask anything about it.
+//
+// The model is told the document ID, never the content. The text is in the
+// database and document_extract fetches it — pasting it into the prompt would
+// send the whole EOB to the provider on every subsequent turn of the
+// conversation, which is both the token cost and the disclosure nobody asked
+// for.
+
+let pending = [];
+
+function attachmentPreamble() {
+  if (pending.length === 0) return { shown: "", forModel: "" };
+  const readable = pending.filter((p) => p.readable);
+  const refused = pending.filter((p) => !p.readable);
+
+  const lines = pending.map((p) =>
+    p.readable
+      ? `- ${p.filename} (${p.kind}, ${p.characters} characters) — document id ${p.id}`
+      : `- ${p.filename} (${p.kind}) — COULD NOT BE READ: ${p.refusal}`,
+  );
+  const forModel =
+    `[The user attached ${pending.length} file(s).]\n${lines.join("\n")}\n` +
+    (readable.length
+      ? `Call document_extract with a document_id to read one. The text is stored; it is not in this message.\n`
+      : "") +
+    (refused.length ? `The unreadable ones cannot be recovered by retrying — tell the user what to do instead.\n` : "") +
+    "\n";
+
+  return { shown: `📎 ${pending.map((p) => p.filename).join(", ")}`, forModel };
+}
+
+function clearAttachments() {
+  pending = [];
+  renderAttachments();
+}
+
+function renderAttachments() {
+  const box = $("#attached");
+  box.replaceChildren();
+  box.hidden = pending.length === 0;
+  for (const [i, p] of pending.entries()) {
+    const chip = el("div", `chip ${p.readable ? (p.phi?.length ? "chip-phi" : "chip-ok") : "chip-bad"}`);
+    chip.append(el("span", "chip-name", p.filename));
+    chip.append(
+      el(
+        "span",
+        "chip-note",
+        p.uploading
+          ? "reading…"
+          : !p.readable
+            ? "cannot be read"
+            : p.phi?.length
+              ? `${p.characters} chars · identifiers: ${p.phi.map((s) => s.kind).join(", ")}`
+              : `${p.characters} chars`,
+      ),
+    );
+    if (!p.uploading) {
+      const x = el("button", "chip-x", "✕");
+      x.title = "Remove from this message. The extracted text stays in the database — purge it with `aetheraclaw documents purge`.";
+      x.addEventListener("click", () => {
+        pending.splice(i, 1);
+        renderAttachments();
+      });
+      chip.append(x);
+    }
+    if (!p.readable && p.refusal) chip.title = p.refusal;
+    box.append(chip);
+  }
+}
+
+async function uploadFiles(files) {
+  if (!files || files.length === 0) return;
+  if (!state.sessionId) await newSession();
+
+  for (const file of files) {
+    const slot = { filename: file.name, uploading: true, readable: true, phi: [] };
+    pending.push(slot);
+    renderAttachments();
+    try {
+      const res = await fetch(
+        `/api/upload?session=${encodeURIComponent(state.sessionId)}&filename=${encodeURIComponent(file.name)}`,
+        { method: "POST", headers: { "content-type": file.type || "application/octet-stream" }, body: file },
+      );
+      const out = await res.json();
+      Object.assign(slot, out, { uploading: false });
+      if (!res.ok) Object.assign(slot, { readable: false, refusal: out.error || `upload failed (${res.status})` });
+    } catch (err) {
+      Object.assign(slot, { uploading: false, readable: false, refusal: String(err) });
+    }
+    renderAttachments();
+  }
+}
+
+$("#attach")?.addEventListener("click", () => $("#file").click());
+$("#file")?.addEventListener("change", (e) => {
+  uploadFiles([...e.target.files]);
+  e.target.value = "";
+});
+
+// Drop anywhere on the console. A drop target the size of a paperclip is a
+// target people miss.
+const consoleView = document.querySelector("#view-console");
+for (const type of ["dragover", "dragenter"]) {
+  consoleView?.addEventListener(type, (e) => {
+    e.preventDefault();
+    consoleView.classList.add("dropping");
+  });
+}
+for (const type of ["dragleave", "drop"]) {
+  consoleView?.addEventListener(type, (e) => {
+    if (type === "dragleave" && consoleView.contains(e.relatedTarget)) return;
+    consoleView.classList.remove("dropping");
+  });
+}
+consoleView?.addEventListener("drop", (e) => {
+  e.preventDefault();
+  uploadFiles([...(e.dataTransfer?.files ?? [])]);
+});
 
 // ── Boot ───────────────────────────────────────────────────────────────
 

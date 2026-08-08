@@ -731,6 +731,10 @@ text.ring-txt { fill: var(--ink); font-size: 15px; font-family: var(--mono); fon
   display: flex; flex-direction: column; min-width: 0;
   border-left: 1px solid var(--line); background: var(--bg);
 }
+/* `display: flex` above beats the `hidden` ATTRIBUTE, which is how an empty
+   panel headed "Canvas" sat across two fifths of the console until something
+   was rendered into it. The attribute is the state; this makes it win. */
+.canvas[hidden] { display: none; }
 .canvas-head {
   display: flex; align-items: center; gap: 8px;
   padding: 12px 14px; border-bottom: 1px solid var(--line);
@@ -781,3 +785,48 @@ text.ring-txt { fill: var(--ink); font-size: 15px; font-family: var(--mono); fon
 .view-batch .bh-foot { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 10px; }
 .view-batch .bh-foot p { margin: 0 0 7px; font-size: 12px; line-height: 1.55; color: #94a3b8; }
 .view-batch .bh-foot p:last-child { color: #22d3ee; margin-bottom: 0; }
+
+/* ── Attachments ──────────────────────────────────────────────────────────── */
+.attached { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 8px; padding: 5px 9px; border-radius: 7px;
+  border: 1px solid var(--line); background: rgb(15 23 42 / .6); font-size: 12px; max-width: 380px; }
+.chip-name { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip-note { color: #94a3b8; font-size: 11px; font-family: var(--mono); white-space: nowrap; }
+.chip-x { background: none; border: 0; color: #64748b; cursor: pointer; font-size: 12px; padding: 0 2px; }
+.chip-x:hover { color: #f1f5f9; }
+.chip-ok  { border-color: rgb(6 95 70 / .5); }
+.chip-ok  .chip-note { color: #34d399; }
+/* Amber, not red: the file was read. The colour marks retention, not failure. */
+.chip-phi { border-color: rgb(180 83 9 / .55); background: rgb(69 26 3 / .35); }
+.chip-phi .chip-note { color: #fbbf24; }
+.chip-bad { border-color: rgb(159 18 57 / .55); background: rgb(76 5 25 / .35); }
+.chip-bad .chip-note { color: #fb7185; }
+
+.attach { background: none; border: 0; cursor: pointer; font-size: 16px; padding: 0 4px; opacity: .65;
+  align-self: flex-end; line-height: 2.1; }
+.attach:hover { opacity: 1; }
+
+/* Whole-console drop target: a paperclip-sized one is a target people miss. */
+#view-console.dropping { outline: 2px dashed #22d3ee; outline-offset: -8px; background: rgb(8 51 68 / .18); }
+
+/* ── document view ────────────────────────────────────────────────────────── */
+.view-doc .doc-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.view-doc .doc-name { font-size: 14px; font-weight: 600; color: var(--ink); }
+.view-doc .doc-kind { font: 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: #64748b;
+  border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; }
+.view-doc .doc-size { font: 11px var(--mono); color: #64748b; }
+.view-doc .doc-refusal { border: 1px solid rgb(159 18 57 / .5); background: rgb(76 5 25 / .35);
+  border-radius: 8px; padding: 11px 13px; }
+.view-doc .doc-refusal-h { font: 600 10px var(--mono); letter-spacing: .09em; text-transform: uppercase; color: #fb7185; margin-bottom: 6px; }
+.view-doc .doc-refusal p { margin: 0; font-size: 13px; line-height: 1.6; color: #fecdd3; }
+.view-doc .doc-phi { border: 1px solid rgb(180 83 9 / .55); background: rgb(69 26 3 / .35);
+  border-radius: 8px; padding: 11px 13px; margin-bottom: 11px; }
+.view-doc .doc-phi-h { font: 600 10px var(--mono); letter-spacing: .09em; text-transform: uppercase; color: #fbbf24; margin-bottom: 6px; }
+.view-doc .doc-phi p { margin: 0 0 5px; font-size: 13px; line-height: 1.55; color: #fde68a; }
+.view-doc .doc-phi-sub { color: #d97706 !important; font-size: 12px !important; }
+.view-doc .doc-meta { display: flex; gap: 14px; flex-wrap: wrap; font: 11px var(--mono); color: #64748b; margin-bottom: 8px; }
+.view-doc .doc-note { margin: 0 0 6px; font-size: 12px; line-height: 1.55; color: #94a3b8; }
+.view-doc .doc-section { border: 1px solid var(--line); border-radius: 8px; margin-top: 9px; background: rgb(15 23 42 / .35); }
+.view-doc .doc-section summary { cursor: pointer; padding: 9px 11px; font-size: 12px; color: var(--ink-2); }
+.view-doc .doc-text { margin: 0; padding: 0 12px 12px; font: 12px/1.6 var(--mono); color: #cbd5e1;
+  white-space: pre-wrap; word-break: break-word; max-height: 460px; overflow: auto; }

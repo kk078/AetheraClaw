@@ -12,6 +12,23 @@ import { truncateToBudget } from "./context-window.js";
 
 const MAX_TOOL_ROUNDS = 40;
 
+/**
+ * A session's title, from the first thing the user actually said.
+ *
+ * The UI prefixes a turn with a bracketed block naming any attached files, so
+ * the model knows which document ids exist. Titling from the raw text made
+ * every session with an attachment read "[The user attached 2 file(s).]" in the
+ * sidebar — the machinery, not the question.
+ */
+export function sessionTitleFrom(text: string): string {
+  // The block opens with a bracketed line and is closed by a blank line. Matching
+  // its interior line by line was tried and stopped at the first line that was
+  // neither a bullet nor blank — leaving the instruction to the model as the
+  // title. The terminator is the reliable part.
+  const withoutContext = /^\s*\[/.test(text) ? text.replace(/^[\s\S]*?\n\s*\n/, "") : text;
+  return (withoutContext.trim() || text.trim()).slice(0, 60);
+}
+
 export interface RunnerDeps {
   provider: ModelProvider;
   registry: ToolRegistry;
@@ -37,7 +54,7 @@ export async function runTurn(deps: RunnerDeps, sessionId: string, userText: str
 
   store.appendMessage(sessionId, "user", [{ type: "text", text: userText }]);
   const session = store.getSession(sessionId);
-  if (session && !session.title) store.setSessionTitle(sessionId, userText.slice(0, 60));
+  if (session && !session.title) store.setSessionTitle(sessionId, sessionTitleFrom(userText));
 
   emit({ type: "turn_started", sessionId });
 

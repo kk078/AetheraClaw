@@ -115,11 +115,16 @@
           <div class="empty">
             <div class="big">Ask about codes, coverage, claims, denials or cash.</div>
             <div>The agent runs real tools and shows every call it makes.</div>
+            <div>Drop in a PDF, Word or Excel file and it will read that too.</div>
           </div>
         </div>
         <div class="composer">
+          <div class="attached" id="attached" hidden></div>
           <div class="box">
-            <textarea id="input" rows="1" placeholder="Enter to send · Shift+Enter for a newline"></textarea>
+            <button class="attach" id="attach" title="Attach a PDF, Word, Excel, CSV or text file">📎</button>
+            <input type="file" id="file" multiple hidden
+                   accept=".pdf,.docx,.xlsx,.csv,.txt,.doc,.xls,application/pdf,text/csv,text/plain" />
+            <textarea id="input" rows="1" placeholder="Enter to send · Shift+Enter for a newline · drop a file to read it"></textarea>
             <button class="btn" id="send">Send</button>
           </div>
           <div class="hint" id="hint">Verdicts are computed server-side, where they are tested. Raw telemetry is one toggle away. Anything risky asks first.</div>

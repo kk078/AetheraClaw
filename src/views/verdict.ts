@@ -2,6 +2,7 @@ import type { ClaimScrubView, EmMeterView, MoneyWaterfallView, ToolView } from "
 import type { Cms1500View } from "./cms1500.js";
 import type { AppealLetterView } from "./appeal.js";
 import type { BatchHealView } from "./batch-heal.js";
+import type { DocumentView } from "./document.js";
 
 // ── Card summaries ───────────────────────────────────────────────────────────
 // The console showed a vertical stack of `tool_invoke` boxes tagged done/error.
@@ -219,6 +220,36 @@ function batchHealCard(v: BatchHealView): CardSummary {
   };
 }
 
+function documentCard(v: DocumentView): CardSummary {
+  // A file that could not be read is HOLD, not an error badge: nothing is
+  // broken, and the person needs to do something about it before anything else
+  // can proceed. Identifiers present is REVIEW — the content is stored, and
+  // that is a fact somebody should see rather than find later in a log.
+  const verdict: VerdictLevel = !v.readable ? "hold" : v.phi.length > 0 ? "review" : "clear";
+
+  return {
+    title: `${v.filename} — ${v.kind}`,
+    // No subject. It would be the document id, and a run group titled
+    // "eob.pdf — doc_8177c5d820324b659246" spends its header on a string
+    // nobody reads; the filename already says which document this is.
+    verdict,
+    verdictLabel: VERDICT_LABELS[verdict],
+    because: !v.readable
+      ? v.refusal
+      : v.phi.length > 0
+        ? `Read, and it carries identifier-shaped text (${v.phi.map((p) => p.kind).join(", ")}). The extracted text is stored in this database.`
+        : "Read in full. Nothing in it matched an identifier pattern — which is not the same as containing no patient information, since a name in prose has no pattern.",
+    facts: [
+      { label: "Size", value: `${(v.sizeBytes / 1024).toFixed(1)} KB` },
+      { label: "Extracted", value: v.readable ? `${v.characters.toLocaleString("en-US")} characters` : "nothing" },
+      {
+        label: v.sections.length === 1 ? "Section" : "Sections",
+        value: v.sections.length === 0 ? "none" : v.sections.map((s) => s.label).slice(0, 3).join(", ") + (v.sections.length > 3 ? ` +${v.sections.length - 3}` : ""),
+      },
+    ],
+  };
+}
+
 function waterfallCard(v: MoneyWaterfallView): CardSummary {
   return {
     title: v.title,
@@ -254,6 +285,8 @@ export function summarize(view: ToolView): CardSummary | null {
       return appealCard(view.data as AppealLetterView);
     case "batch_heal":
       return batchHealCard(view.data as BatchHealView);
+    case "document":
+      return documentCard(view.data as DocumentView);
     case "kpi_tiles":
       // The tiles ARE the summary; a card above them would restate them.
       return null;

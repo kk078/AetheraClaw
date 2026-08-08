@@ -561,6 +561,63 @@ V.batch_heal = (d) => {
   return root;
 };
 
+// ── document: an uploaded file, read or refused ──────────────────────────────
+// The refusal is the headline when there is one. "Cannot be read, and here is
+// why, and here is what to do instead" is a useful screen; an empty text pane
+// is not.
+
+V.document = (d) => {
+  const root = node("div", "toolview view-doc");
+
+  const head = node("div", "doc-head");
+  head.append(node("span", "doc-name", d.filename), node("span", "doc-kind", d.kind));
+  head.append(node("span", "doc-size", `${(d.sizeBytes / 1024).toFixed(1)} KB`));
+  root.append(head);
+
+  if (!d.readable) {
+    const box = node("div", "doc-refusal");
+    box.append(node("div", "doc-refusal-h", "Not read"));
+    box.append(node("p", null, d.refusal));
+    root.append(box);
+    for (const n of d.notes || []) root.append(node("p", "doc-note", n));
+    return root;
+  }
+
+  if (d.phi?.length) {
+    // Shown above the text, not below it. Somebody scrolling a denial letter
+    // should not learn afterwards that its content is being retained.
+    const warn = node("div", "doc-phi");
+    warn.append(node("div", "doc-phi-h", "Identifier-shaped text found"));
+    warn.append(
+      node("p", null, `${d.phi.map((p) => `${p.kind} ×${p.count}`).join(", ")}. The extracted text is stored in this database.`),
+    );
+    warn.append(
+      node("p", "doc-phi-sub", "Pattern matching finds identifiers with a shape. A patient name in prose has none and is not counted here."),
+    );
+    root.append(warn);
+  }
+
+  const meta = node("div", "doc-meta");
+  meta.append(node("span", null, `${Number(d.characters || 0).toLocaleString("en-US")} characters`));
+  meta.append(node("span", null, `${d.sections.length} section(s)`));
+  if (d.confidence < 1) meta.append(node("span", null, `${Math.round(d.confidence * 100)}% of glyphs mapped`));
+  root.append(meta);
+
+  for (const n of d.notes || []) root.append(node("p", "doc-note", n));
+
+  for (const s of d.sections) {
+    const sec = node("details", "doc-section");
+    // The first section open, the rest closed: a 40-page ADR should not push
+    // everything else off the screen, and page 1 is where people start.
+    if (d.sections.indexOf(s) === 0) sec.open = true;
+    sec.append(node("summary", null, `${s.label} — ${Number(s.characters).toLocaleString("en-US")} characters`));
+    sec.append(node("pre", "doc-text", s.text));
+    root.append(sec);
+  }
+
+  return root;
+};
+
 /** Render a view payload, or null when nothing knows how. */
 function renderView(view) {
   if (!view || !V[view.kind]) return null;

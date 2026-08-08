@@ -915,3 +915,48 @@ CREATE TABLE IF NOT EXISTS appeal_outcomes (
   decided_at   INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_appeal_outcomes_lookup ON appeal_outcomes(payer, carc, decided_at);
+
+-- ── Uploaded documents ──────────────────────────────────────────────────────
+-- Text extracted from a file somebody uploaded: an EOB, a denial letter, a
+-- remittance spreadsheet.
+--
+-- THIS TABLE HOLDS DOCUMENT CONTENT, which is a different thing from every
+-- other table here. The rest of the schema holds claim structure, codes and
+-- de-identified references; this holds whatever was in the file, and what is in
+-- a payer's EOB is a member id, a name and a diagnosis. It is stored because
+-- the deployment chose to store it, and everything that follows from that
+-- choice is why the columns below exist.
+--
+--   `phi_json` records what the identifier scan found at ingest, so a later
+--   question about exposure is answered from the record rather than by
+--   re-scanning and hoping the patterns have not changed.
+--
+--   `sha256` is over the ORIGINAL bytes, so the same document uploaded twice is
+--   recognisable as one document rather than two.
+--
+--   Reads go through the PHI access log — see src/tenancy/access-log.ts. A
+--   table of document text with no read trail is the exact thing §164.312(b)
+--   exists to prevent.
+--
+-- Retention is a decision, not a default: `aetheraclaw documents purge` exists
+-- because a store of document content with no way to empty it is a liability
+-- that only grows.
+CREATE TABLE IF NOT EXISTS documents (
+  id          TEXT PRIMARY KEY,
+  session_id  TEXT NOT NULL DEFAULT '',
+  filename    TEXT NOT NULL,
+  kind        TEXT NOT NULL,          -- pdf | docx | xlsx | csv | text | image | x12 | unknown
+  size_bytes  INTEGER NOT NULL,
+  sha256      TEXT NOT NULL,
+  -- Empty when the file could not be read; `refusal` then says why.
+  text        TEXT NOT NULL DEFAULT '',
+  sections_json TEXT NOT NULL DEFAULT '[]',
+  readable    INTEGER NOT NULL DEFAULT 0,
+  refusal     TEXT NOT NULL DEFAULT '',
+  confidence  REAL NOT NULL DEFAULT 0,
+  phi_json    TEXT NOT NULL DEFAULT '[]',
+  notes_json  TEXT NOT NULL DEFAULT '[]',
+  created_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_documents_session ON documents(session_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_documents_sha ON documents(sha256);

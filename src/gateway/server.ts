@@ -15,6 +15,8 @@ import type { ToolRegistry } from "../tools/registry.js";
 import { computeExecutiveKpis } from "../reports/kpi.js";
 import { loadAcks } from "../reports/kpi-tools.js";
 import { loadClaims, loadEras } from "../reports/tools.js";
+import { extractDocument } from "../ingest/extract.js";
+import { saveDocument } from "../ingest/store.js";
 
 /**
  * Above this many rows, the overview does not compute KPIs.
@@ -89,7 +91,26 @@ export async function buildServer(opts: {
   registry?: ToolRegistry;
 }) {
   const { config, store, sessions, registry } = opts;
-  const app = Fastify({ logger: false });
+  // 32 MB: an EOB batch PDF runs to a few megabytes and a year-end remittance
+  // spreadsheet more. Fastify's 1 MB default would refuse both with a message
+  // about the body being too large, which reads as a bug rather than a limit.
+  const app = Fastify({ logger: false, bodyLimit: 32 * 1024 * 1024 });
+
+  // Uploads arrive as raw bytes, under a CATCH-ALL content type.
+  //
+  // Listing the Office and PDF types individually was tried and is wrong: a
+  // browser sends whatever the OS says a file is, and an unregistered type is
+  // refused by Fastify with a bare 415 before any route sees it. A photo of an
+  // EOB — the single most likely thing somebody uploads — came back as
+  // "Unsupported Media Type" instead of the sentence explaining that there is
+  // no OCR here and what to do instead. Every file reaches the route; the route
+  // decides what it is from the CONTENT and answers in words.
+  app.addContentTypeParser("*", { parseAs: "buffer" }, (_req, body, done) => done(null, body));
+  // `text/plain` has a BUILT-IN parser that wins over the catch-all and hands
+  // back a string, so every CSV and .txt upload arrived as an empty body. It is
+  // overridden here; `application/json` deliberately is NOT, because the session
+  // routes need it parsed.
+  app.addContentTypeParser("text/plain", { parseAs: "buffer" }, (_req, body, done) => done(null, body));
 
   await app.register(fastifyWebsocket);
   await app.register(fastifyStatic, { root: findWebRoot(), prefix: "/" });
@@ -187,6 +208,47 @@ export async function buildServer(opts: {
     const { id } = req.params as { id: string };
     if (!store.getSession(id)) return reply.code(404).send({ error: "not found" });
     return store.loadToolViews(id);
+  });
+
+  // ── Document upload ────────────────────────────────────────────────────────
+  // Raw bytes with the filename in the query string, rather than multipart.
+  // Multipart would mean a parser dependency to read a boundary-delimited body
+  // for one field, and the browser can POST a File object directly.
+  //
+  // The file is extracted and STORED — this deployment persists document text —
+  // and the response carries the extraction, not the bytes. Nothing is written
+  // to the workspace: an upload is not a file drop, and a filename arriving from
+  // a browser is attacker-controlled input that should never reach a path.
+  app.post("/api/upload", async (req, reply) => {
+    const q = req.query as { session?: string; filename?: string };
+    const sessionId = String(q.session ?? "");
+    if (!sessionId || !store.getSession(sessionId)) return reply.code(400).send({ error: "unknown session" });
+
+    // A string can still arrive if some content type resolves to a built-in
+    // parser, and losing an upload to a type-check is a worse failure than
+    // re-encoding one.
+    const raw = req.body;
+    const body = Buffer.isBuffer(raw) ? raw : typeof raw === "string" ? Buffer.from(raw, "utf8") : null;
+    if (!body || body.length === 0) return reply.code(400).send({ error: "empty body" });
+
+    // Only the base name is kept, and separators are stripped rather than
+    // resolved — this string is displayed and stored, never opened.
+    const filename = String(q.filename ?? "upload").split(/[\\/]/).pop()!.slice(0, 200) || "upload";
+
+    const extraction = extractDocument(filename, body);
+    const doc = saveDocument(store, sessionId, extraction);
+    return {
+      id: doc.id,
+      filename: doc.filename,
+      kind: doc.kind,
+      sizeBytes: doc.sizeBytes,
+      readable: doc.readable,
+      refusal: doc.refusal,
+      characters: doc.text.length,
+      sections: doc.sections.length,
+      phi: doc.phi,
+      notes: doc.notes,
+    };
   });
 
   app.get("/ws", { websocket: true }, (socket, req) => {
