@@ -353,16 +353,69 @@ const setting = process.argv.includes("--hospital") ? "hospital" : "practitioner
 const fromDirArg = process.argv.find((a) => a.startsWith("--from-dir="));
 const FROM_DIR = fromDirArg ? fromDirArg.slice("--from-dir=".length) : null;
 
-/** Pick local ZIPs by filename. CMS's names carry the setting and the part number. */
-function localZips(pattern) {
-  const files = fs.readdirSync(FROM_DIR).filter((f) => f.toLowerCase().endsWith(".zip") && pattern.test(f));
-  return files.sort().map((f) => ({ name: f, buf: fs.readFileSync(path.join(FROM_DIR, f)) }));
+/**
+ * Classify local ZIPs by what is INSIDE them, not by their filenames.
+ *
+ * CMS serves these under names that match neither the URL path nor each other.
+ * One download session produced `ccipra-v322r0-f1.zip`,
+ * `practitionerservicesmuetable-effective-01012026.zip` and `rvu26c_0.zip` —
+ * three conventions, one of them hyphen-free, one with a browser dedupe suffix.
+ * Matching on the outer name found one file in six and reported the rest as
+ * missing while they sat in the folder.
+ *
+ * The entry names inside are stable and self-describing: `ccipra` is the
+ * practitioner PTP file and `ccioph` the outpatient-hospital one, the part
+ * number is in the entry, `PPRRVU` marks the RVU release, and the MUE CSV names
+ * its own setting. Reading them costs a central-directory parse and no
+ * decompression, and it cannot be defeated by a rename.
+ */
+function classifyLocalZips() {
+  const out = { ptp: [], mue: [], rvu: [], unknown: [] };
+  for (const name of fs.readdirSync(FROM_DIR).sort()) {
+    if (!name.toLowerCase().endsWith(".zip")) continue;
+    const buf = fs.readFileSync(path.join(FROM_DIR, name));
+    let names;
+    try {
+      names = readZipEntries(buf).map((e) => e.name);
+    } catch (err) {
+      out.unknown.push({ name, why: `not a readable ZIP (${err.message})` });
+      continue;
+    }
+
+    if (names.some((n) => /PPRRVU.*\.csv$/i.test(n))) {
+      out.rvu.push({ name, buf });
+      continue;
+    }
+    const mue = names.find((n) => /MUE.*\.csv$/i.test(n));
+    if (mue) {
+      // The CSV names its own setting: …_PractitionerServices_… / …OutpatientHospital… / …DME…
+      const isHospital = /outpatient|hospital/i.test(mue);
+      out.mue.push({ name, buf, inner: mue, setting: isHospital ? "hospital" : "practitioner" });
+      continue;
+    }
+    const ptp = names.find((n) => /(ccipra|ccioph).*-f\d.*\.txt$/i.test(n));
+    if (ptp) {
+      out.ptp.push({
+        name,
+        buf,
+        inner: ptp,
+        setting: /ccioph/i.test(ptp) ? "hospital" : "practitioner",
+        part: (ptp.match(/-f(\d)/i) ?? [])[1],
+      });
+      continue;
+    }
+    out.unknown.push({ name, why: `holds ${names.slice(0, 3).join(", ")}` });
+  }
+  return out;
 }
 
-/** Everything in the folder, for an error that shows what was actually there. */
-function allZipNames() {
-  const all = fs.readdirSync(FROM_DIR).filter((f) => f.toLowerCase().endsWith(".zip"));
-  return all.length === 0 ? "(no .zip files at all)" : all.join(", ");
+let localCache = null;
+const local = () => (localCache ??= classifyLocalZips());
+
+/** What was in the folder but matched nothing, so an empty category is explainable. */
+function unknownNote() {
+  const u = local().unknown;
+  return u.length === 0 ? "" : `\n    Ignored: ${u.map((x) => `${x.name} (${x.why})`).join("; ")}`;
 }
 
 const DOWNLOAD_HELP = [
@@ -424,20 +477,16 @@ async function fetchNcci() {
  * installing nothing, because data_status would report the dataset as present.
  */
 function ncciFromDir() {
-  // Deliberately unanchored. A browser saving a second copy produces
-  // "…-f1 (1).zip", and an anchored /-f\d\.zip$/ would classify that as "not a
-  // PTP file at all" — which surfaces as "no parts found" and sends the reader
-  // looking for a download that is sitting right there.
-  const want = setting === "hospital" ? /hospital-ptp-edits.*-f\d/i : /practitioner-ptp-edits.*-f\d/i;
-  const files = localZips(want);
+  const files = local().ptp.filter((f) => f.setting === setting);
   if (files.length === 0) {
+    const other = local().ptp.length;
     throw new Error(
-      `no ${setting} PTP zips in ${FROM_DIR}. Looking for names containing "${setting}-ptp-edits" and "-f1".."-f4".\n    Found: ${allZipNames()}`,
+      `no ${setting} PTP zips in ${FROM_DIR}.` +
+        (other > 0 ? ` Found ${other} for the OTHER setting — pass ${setting === "practitioner" ? "no flag" : "--hospital"} to match them.` : "") +
+        unknownNote(),
     );
   }
-  // Deduplicated by part number, so a duplicate download does not read as a
-  // fifth part or double-count its edits.
-  const parts = new Set(files.map((f) => (f.name.match(/-f(\d)/i) ?? [])[1]).filter(Boolean));
+  const parts = new Set(files.map((f) => f.part).filter(Boolean));
   if (parts.size < 4) {
     throw new Error(
       `only ${parts.size} of 4 PTP parts present (found f${[...parts].sort().join(", f")}). ` +
@@ -451,19 +500,18 @@ function ncciFromDir() {
   let kept = 0;
   const seen = new Set();
   for (const f of files) {
-    const part = (f.name.match(/-f(\d)/i) ?? [])[1];
-    if (seen.has(part)) {
-      console.log(`  ${f.name} — skipped, part f${part} already loaded`);
+    if (seen.has(f.part)) {
+      console.log(`  ${f.name} — skipped, part f${f.part} already loaded`);
       continue;
     }
-    seen.add(part);
+    seen.add(f.part);
     const { edits, deleted: d } = convertPtp(textFromZip(f.buf, /\.txt$/i));
     deleted += d;
     for (const e of edits) {
       (table[e.column1] ??= {})[e.column2] = e.modifierIndicator;
       kept++;
     }
-    console.log(`  ${f.name} — ${edits.length.toLocaleString()} active`);
+    console.log(`  ${f.name} → ${f.inner} — ${edits.length.toLocaleString()} active`);
   }
   console.log(`  ${deleted.toLocaleString()} retired edit(s) dropped — loading them would flag bundling CMS no longer enforces.`);
   console.log(`  ${kept.toLocaleString()} pair(s) under ${Object.keys(table).length.toLocaleString()} column-1 code(s)`);
@@ -471,21 +519,18 @@ function ncciFromDir() {
 }
 
 function mueFromDir() {
-  const want = setting === "hospital" ? /outpatient-hospital.*mue-table/i : /practitioner.*mue-table/i;
-  const files = localZips(want);
+  const files = local().mue.filter((f) => f.setting === setting);
   if (files.length === 0) {
-    throw new Error(`no ${setting} MUE table zip in ${FROM_DIR}. Looking for a name containing "${setting}" and "mue-table".\n    Found: ${allZipNames()}`);
+    throw new Error(`no ${setting} MUE table zip in ${FROM_DIR}.${unknownNote()}`);
   }
   const table = convertMue(textFromZip(files[0].buf, /\.csv$/i));
-  console.log(`  ${files[0].name} — ${Object.keys(table).length.toLocaleString()} code(s) with a unit limit`);
+  console.log(`  ${files[0].name} → ${files[0].inner} — ${Object.keys(table).length.toLocaleString()} code(s) with a unit limit`);
   write("mue.json", table);
 }
 
 function mpfsFromDir() {
-  const files = localZips(/rvu\d{2}[a-d]/i);
-  if (files.length === 0) {
-    throw new Error(`no RVU zip in ${FROM_DIR}. Looking for a name containing rvu26a…rvu26d.\n    Found: ${allZipNames()}`);
-  }
+  const files = local().rvu;
+  if (files.length === 0) throw new Error(`no RVU zip in ${FROM_DIR}.${unknownNote()}`);
   // Last by name: rvu26c sorts after rvu26b, so the newest quarter present wins.
   const f = files[files.length - 1];
   console.log(`  ${f.name}`);
