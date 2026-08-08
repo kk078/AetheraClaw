@@ -5,6 +5,7 @@ import { configDir } from "../../config/config.js";
 import { defineTool } from "../registry.js";
 import type { ScrubFinding } from "./finding.js";
 import { checkMueEdits, checkPtpEdits, indexPtpEdits, type MueTable, type PtpEdit, type PtpIndex, type PtpTable } from "./intelligence/ncci.js";
+import type { Icd10Table } from "./icd10-local.js";
 
 // Local dataset directory: ~/.aetheraclaw/data — populated by the user or the
 // (future) data-updates fetcher. Files are optional; tools degrade gracefully.
@@ -63,6 +64,19 @@ function fileStamp(name: string): string {
 
 let ncciCache: Stamped<PtpIndex> | null = null;
 let mueCache: Stamped<MueTable> | null = null;
+let icd10Cache: Stamped<Icd10Table> | null = null;
+
+/** The local ICD-10-CM code set, or null when it is not installed. */
+export function icd10Table(): Icd10Table | null {
+  const stamp = fileStamp("icd10.json");
+  if (!icd10Cache || icd10Cache.stamp !== stamp) {
+    const raw = loadJson<Icd10Table>("icd10.json");
+    // A file that parses but has no codes is worse than none: it would answer
+    // "not a valid code" for every lookup, offline and confidently.
+    icd10Cache = { stamp, value: raw && raw.billable && Object.keys(raw.billable).length > 0 ? raw : null };
+  }
+  return icd10Cache.value;
+}
 
 function ncciIndex(): PtpIndex | null {
   const stamp = fileStamp("ncci-ptp.json");
@@ -128,6 +142,8 @@ export interface DatasetStatus {
   source: string;
   /** What stops working without it. */
   absentMeans: string;
+  /** Edition or similar, when the file states one. A code set with no named year is a code set nobody can date. */
+  detail?: string;
 }
 
 const DATASETS: Array<Omit<DatasetStatus, "installed">> = [
@@ -162,6 +178,12 @@ const DATASETS: Array<Omit<DatasetStatus, "installed">> = [
     absentMeans: "No dollar conversion is possible even with RVUs present.",
   },
   {
+    file: "icd10.json",
+    purpose: "ICD-10-CM diagnosis codes with billable status (the full code set)",
+    source: "CMS ICD-10-CM 'Code Descriptions in Tabular Order' (annual, public, NOT AMA-licensed) — cms.gov/medicare/coding-billing/icd-10-codes",
+    absentMeans: "icd10_search and icd10_validate fall back to the NLM Clinical Tables API, which needs a network connection and does not name its edition.",
+  },
+  {
     file: "gpci.json",
     purpose: "Geographic Practice Cost Indices by locality",
     source: "CMS PFS Addendum E (annual, public)",
@@ -170,7 +192,17 @@ const DATASETS: Array<Omit<DatasetStatus, "installed">> = [
 ];
 
 export function datasetStatuses(): DatasetStatus[] {
-  return DATASETS.map((d) => ({ ...d, installed: fs.existsSync(path.join(dataDir(), d.file)) }));
+  return DATASETS.map((d) => {
+    const installed = fs.existsSync(path.join(dataDir(), d.file));
+    // ICD-10-CM changes every 1 October, so "installed" is not the whole answer:
+    // a FY2025 table answers every question confidently and out of last year's
+    // book. The edition is stated wherever the dataset is.
+    if (d.file === "icd10.json" && installed) {
+      const fy = icd10Table()?.fy;
+      return { ...d, installed, detail: fy ? `FY${fy}` : "unreadable — reinstall it" };
+    }
+    return { ...d, installed };
+  });
 }
 
 export function renderDatasetStatus(statuses: DatasetStatus[], cptConfigured: boolean, referenceDb?: string): string {
@@ -178,7 +210,7 @@ export function renderDatasetStatus(statuses: DatasetStatus[], cptConfigured: bo
   const lines = [
     `Local dataset directory: ${dataDir()}`,
     "",
-    ...statuses.map((s) => `${s.installed ? "installed" : "MISSING "}  ${s.file.padEnd(14)} ${s.purpose}`),
+    ...statuses.map((s) => `${s.installed ? "installed" : "MISSING "}  ${s.file.padEnd(14)} ${s.purpose}${s.detail ? `  [${s.detail}]` : ""}`),
     `${cptConfigured ? "configured" : "not set  "}  CPT (Level I)  AMA-licensed; supply your own file via healthcare.cptDataPath`,
     // The attached reference database belongs in this inventory even though it
     // is not a file in dataDir(): the question this tool answers is "what can

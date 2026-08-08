@@ -300,6 +300,50 @@ function descriptionsFrom(text) {
   return table;
 }
 
+/**
+ * ICD-10-CM, from the CMS order file.
+ *
+ * LICENCE, AND WHY THIS ONE IS DIFFERENT. Everything else this script fetches
+ * carries CPT codes and therefore an AMA copyright. ICD-10-CM does not: it is
+ * CMS/WHO and published free. That difference is exactly why the most-used
+ * lookup in the product can finally answer offline while CPT still cannot.
+ *
+ * The order file is fixed-width and states billable status outright:
+ *
+ *   00001 A00     0 Cholera                          Cholera
+ *   04413 E1165   1 Type 2 diabetes with hyperglyc…  Type 2 diabetes mellitus with hyperglycemia
+ *   └ 0-4 └5 └ 6-12 code  └14 valid flag  └ 16-75 short  └ 77+ long
+ *
+ * Column 14 is CMS ASSERTING billability, not a hint to be re-derived. Deriving
+ * it from the hierarchy instead — "a code with children is a header" — would
+ * substitute an inference for the authority's own statement, and it is wrong in
+ * both directions: E11.65 is billable and has no children, but plenty of
+ * billable codes do have more specific ones beneath them.
+ *
+ * Billable and header codes are written to separate maps rather than as objects
+ * carrying a flag, for the reason ncci-ptp.json is nested: 98,000 repetitions of
+ * the same two key names is megabytes of nothing.
+ */
+export function convertIcd10(text, fy) {
+  const billable = {};
+  const headers = {};
+  for (const raw of text.split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    if (line.length < 20) continue;
+    const bare = line.slice(6, 13).trim().toUpperCase();
+    if (!/^[A-Z][0-9][0-9A-Z]/.test(bare)) continue;
+    const valid = line[14] === "1";
+    // Long title, not the 60-character short one. The short title is truncated
+    // mid-word often enough that quoting it back as a code description is how a
+    // coder ends up reading half a diagnosis.
+    const description = line.slice(77).trim();
+    if (!description) continue;
+    const dotted = bare.length > 3 ? `${bare.slice(0, 3)}.${bare.slice(3)}` : bare;
+    (valid ? billable : headers)[dotted] = description;
+  }
+  return { fy, billable, headers };
+}
+
 /** Minimal RFC-4180 splitter — CMS quotes descriptions containing commas. */
 function parseCsvLine(line) {
   const out = [];
@@ -331,6 +375,7 @@ const NCCI_PTP_PAGE =
 const MUE_PAGE =
   "https://www.cms.gov/medicare/coding-billing/national-correct-coding-initiative-ncci-edits/medicare-ncci-medically-unlikely-edits-mues";
 const RVU_PAGE = "https://www.cms.gov/medicare/payment/fee-schedules/physician/pfs-relative-value-files";
+const ICD10_PAGE = "https://www.cms.gov/medicare/coding-billing/icd-10-codes";
 
 /** Which setting's edits to install. Practitioner is the default; a facility passes --hospital. */
 const setting = process.argv.includes("--hospital") ? "hospital" : "practitioner";
@@ -370,7 +415,7 @@ const FROM_DIR = fromDirArg ? fromDirArg.slice("--from-dir=".length) : null;
  * decompression, and it cannot be defeated by a rename.
  */
 function classifyLocalZips() {
-  const out = { ptp: [], mue: [], rvu: [], unknown: [] };
+  const out = { ptp: [], mue: [], rvu: [], icd10: [], unknown: [] };
   for (const name of fs.readdirSync(FROM_DIR).sort()) {
     if (!name.toLowerCase().endsWith(".zip")) continue;
     const buf = fs.readFileSync(path.join(FROM_DIR, name));
@@ -384,6 +429,13 @@ function classifyLocalZips() {
 
     if (names.some((n) => /PPRRVU.*\.csv$/i.test(n))) {
       out.rvu.push({ name, buf });
+      continue;
+    }
+    const icd = names.find((n) => /icd10cm_order_(\d{4})\.txt$/i.test(n));
+    if (icd) {
+      // The fiscal year is in the entry name, so a browser-renamed download
+      // still knows which edition it is.
+      out.icd10.push({ name, buf, inner: icd, fy: Number((icd.match(/_(\d{4})\.txt$/i) ?? [])[1] ?? 0) });
       continue;
     }
     const mue = names.find((n) => /MUE.*\.csv$/i.test(n));
@@ -431,6 +483,8 @@ const DOWNLOAD_HELP = [
   "            the practitioner services MUE table",
   `  MPFS      ${RVU_PAGE}`,
   "            the newest RVU quarter (rvu26a…rvu26d)",
+  `  ICD-10-CM ${ICD10_PAGE}`,
+  "            the newest 'Code Descriptions in Tabular Order' zip",
   "",
   "Then, with every ZIP saved in one folder:",
   "",
@@ -562,6 +616,72 @@ function writeMpfsFrom(zip) {
   write("hcpcs.json", descriptions);
 }
 
+/**
+ * ICD-10-CM code descriptions.
+ *
+ * The index page lists every fiscal year back to 2021 and does NOT always list
+ * the newest one — FY2026 was downloadable months before it appeared there. So
+ * the direct URL is probed newest-first (the naming has been stable for years)
+ * and the page is used only as a fallback, which is the reverse of the other
+ * datasets and deliberate: a fetcher that installs FY2025 because the page had
+ * not caught up would answer today's coding questions from last year's book,
+ * and nothing downstream could tell.
+ */
+function icd10FromDir() {
+  const files = local().icd10;
+  if (files.length === 0) {
+    throw new Error(`no ICD-10-CM zip in ${FROM_DIR} — none of them contains an icd10cm_order_YYYY.txt.${unknownNote()}`);
+  }
+  // Newest fiscal year present, not first found: a folder holding two editions
+  // should install this year's book, not whichever the filesystem listed first.
+  const f = files.slice().sort((a, b) => a.fy - b.fy).at(-1);
+  const table = convertIcd10(f.buf.length ? textFromZip(f.buf, /icd10cm_order_\d+\.txt$/i) : "", f.fy);
+  console.log(`  ${f.name} → FY${f.fy}: ${Object.keys(table.billable).length.toLocaleString()} billable, ${Object.keys(table.headers).length.toLocaleString()} header(s)`);
+  write("icd10.json", table);
+}
+
+async function fetchIcd10() {
+  if (FROM_DIR) return icd10FromDir();
+  const zipFor = (year) => `https://www.cms.gov/files/zip/${year}-code-descriptions-tabular-order.zip`;
+  // The edition IN EFFECT, not the newest published. ICD-10-CM changes on
+  // 1 October, and CMS posts the next year's file months ahead — the first
+  // version of this reached forward and installed FY2027 in August 2026, which
+  // would have answered every question about a service performed today out of
+  // next year's book. getUTCMonth() is 0-based, so October is 9.
+  const now = new Date();
+  const inEffect = now.getUTCFullYear() + (now.getUTCMonth() >= 9 ? 1 : 0);
+
+  let zip = null;
+  let fy = 0;
+  let lastError = null;
+  for (let year = inEffect; year >= inEffect - 2 && !zip; year--) {
+    try {
+      zip = await get(zipFor(year), true);
+      fy = year;
+    } catch (err) {
+      lastError = err;
+      // A 403 is the site declining, not a wrong year. Stop guessing and say so,
+      // rather than walking back through editions and reporting "no ICD-10
+      // release found" when every attempt was refused.
+      if (/HTTP 40[13]/.test(err.message)) throw err;
+    }
+  }
+  if (!zip) {
+    const url = await newestLink(ICD10_PAGE, /code-descriptions-tabular-order/);
+    fy = Number((url.match(/(20\d\d)-code-descriptions/) ?? [])[1] ?? 0);
+    zip = await get(url, true);
+  }
+  if (!zip) throw new Error(`no ICD-10-CM release could be retrieved — last attempt: ${lastError?.message ?? "unknown"}`);
+
+  const table = convertIcd10(textFromZip(zip, /icd10cm_order_\d+\.txt$/i), fy);
+  const billable = Object.keys(table.billable).length;
+  const headers = Object.keys(table.headers).length;
+  console.log(`  FY${fy}: ${billable.toLocaleString()} billable code(s), ${headers.toLocaleString()} category header(s)`);
+  if (billable === 0) throw new Error("the order file parsed to zero billable codes — the fixed-width layout has changed and the parser needs revisiting");
+  console.log("  ICD-10-CM is CMS/WHO and is NOT AMA-licensed — unlike everything else this script fetches.");
+  write("icd10.json", table);
+}
+
 async function fetchMue() {
   if (FROM_DIR) return mueFromDir();
   const url = await newestLink(MUE_PAGE, new RegExp(`${setting === "hospital" ? "outpatient-hospital" : "practitioner"}-services-mue-table\\.zip$`));
@@ -604,7 +724,7 @@ async function fetchMpfs() {
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 // hcpcs.json is written by fetchMpfs — it comes out of the same RVU file.
-const ALL = { ncci: fetchNcci, mue: fetchMue, mpfs: fetchMpfs };
+const ALL = { ncci: fetchNcci, mue: fetchMue, mpfs: fetchMpfs, icd10: fetchIcd10 };
 
 /**
  * Reject an argument this script does not understand.
@@ -646,9 +766,10 @@ async function main() {
   console.log(FROM_DIR ? `Source: local ZIPs in ${FROM_DIR} (no network)` : "Source: cms.gov");
   console.log(`Setting: ${setting} services${setting === "practitioner" ? "  (pass --hospital for outpatient facility edits)" : ""}`);
   console.log(
-    "\nThese files contain CPT codes, copyright the American Medical Association.\n" +
-      "CMS publishes them for download under an AMA licence you accept by using them.\n" +
-      "They are written to your machine only and must not be redistributed.\n",
+    "\nThe NCCI, MUE and MPFS files contain CPT codes, copyright the American Medical\n" +
+      "Association. CMS publishes them under an AMA licence you accept by using them.\n" +
+      "They are written to your machine only and must not be redistributed.\n" +
+      "ICD-10-CM is the exception: CMS/WHO, free, and not AMA-licensed at all.\n",
   );
 
   let failed = 0;
@@ -679,7 +800,12 @@ async function main() {
   process.exit(failed === 0 ? 0 : 1);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Guarded, so importing this file for its converters does not launch a download.
+// Without it, `import(...)` of this module fetches ~30 MB from CMS and rewrites
+// ~/.aetheraclaw/data as a side effect of reading a function out of it.
+if (process.argv[1]?.endsWith("fetch-cms-data.mjs")) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

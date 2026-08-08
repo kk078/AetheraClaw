@@ -86,13 +86,40 @@ the script carries a small ZIP reader so it runs on a stock Windows install.
 
 ```bash
 node scripts/fetch-cms-data.mjs                 # all of it, ~25s
-node scripts/fetch-cms-data.mjs --only=mue,mpfs # a subset
+node scripts/fetch-cms-data.mjs --only=icd10    # a subset: ncci, mue, mpfs, icd10
 node scripts/fetch-cms-data.mjs --hospital      # outpatient facility edits instead of practitioner
 ```
 
 Verified end to end against the July 2026 releases: 1,728,585 active PTP edits,
 15,162 MUE ceilings, 17,095 priced codes, 218 GPCI localities, conversion factor
-33.4009 read out of the RVU file rather than remembered.
+33.4009 read out of the RVU file rather than remembered, and 74,706 billable
+ICD-10-CM codes with 23,460 category headers.
+
+**ICD-10-CM is the one dataset here that is not AMA-licensed.** It is CMS/WHO and
+published free, which is exactly why the most-used lookup in the product can now
+answer offline while CPT still cannot. `icd10_search` and `icd10_validate` read
+the local table when it is installed and fall back to the NLM Clinical Tables API
+when it is not — **and every answer says which one served it, and which fiscal
+year**. A stale FY2025 table answering as though it were current is the failure
+that replaces network dependency, and it is invisible unless the edition is named.
+
+Billable status comes from CMS's own order file rather than being inferred from
+the hierarchy. The file states it outright in column 14, and "a code with children
+is a header" is wrong in both directions — plenty of billable codes have more
+specific ones beneath them. The fetcher installs **the edition in effect, not the
+newest published**: CMS posts next year's file months ahead, and the first version
+of this reached forward and installed FY2027 in August 2026, which would have
+answered every question about a service performed that day out of next year's book.
+
+Search is literal matching over CMS titles, **ranked by how many of the search
+words appear rather than filtered to all of them**. Requiring every word returned
+`Z86.31` (*personal history of diabetic foot ulcer*) and nothing else for "diabetic
+foot ulcer", because `E11.621` is titled *…diabetes mellitus with foot ulcer* — the
+one code a coder wanted, excluded by a letter. Billable codes rank above category
+headers at equal relevance, since "acute appendicitis" otherwise led with three
+headers that are the most on-point titles in the file and none of them claimable.
+Measured: 108 ms to load the 8 MB table once, then 1.9 ms per validation and code
+lookup, 20 ms for a term search.
 
 **If CMS refuses (HTTP 403), download them yourself.** Its CDN declines some
 clients outright — a plain 403 on pages a browser loads fine from the same
@@ -314,7 +341,7 @@ The dangerous failure in a billing assistant is not a crash, it is a fluent wron
 
 ## Healthcare RCM tools
 
-**Coding & validation** — `icd10_search`, `icd10_validate` (NLM Clinical Tables), `hcpcs_lookup`, `pos_lookup` (full CMS Place of Service code set, including the unassigned ranges — a claim carrying POS 38 rejects, and that is different from an unknown code), `npi_validate`/`npi_lookup`/`npi_search` (NPPES), `data_status` (which reference tables are installed and what cannot be checked without each).
+**Coding & validation** — `icd10_search`, `icd10_validate` (local CMS code set when installed, NLM Clinical Tables otherwise — the answer names which), `hcpcs_lookup`, `pos_lookup` (full CMS Place of Service code set, including the unassigned ranges — a claim carrying POS 38 rejects, and that is different from an unknown code), `npi_validate`/`npi_lookup`/`npi_search` (NPPES), `data_status` (which reference tables are installed and what cannot be checked without each).
 **Coverage & medical necessity** — `coverage_search_national` (NCD), `coverage_search_local` (LCD), `mac_lookup`, `sad_exclusion_check` (CMS Coverage API).
 **Claims lifecycle** — `claim_autoheal` repairs only the defects with exactly one correct answer — a date written `2026-01-15`, a place of service left as one digit — because those write down what the claim already said. Everything else comes back as a question, including the one auto-repair rule everybody wants: **POS is never rewritten to agree with a telehealth modifier.** Place of service is a factual assertion about where the service happened; when it and the modifier disagree the claim contains two contradictory statements and nothing in it says which is wrong, so "correcting" POS resolves the contradiction by inventing a fact — and if the visit really was in the office, an automated system has just put a false statement on a Medicare claim. Choosing between 02 and 10 is worse still: they are distinguished by where the *patient* was, which the claim does not record at all. Parsing an 835 now opens worklist items for the denials inside it, deduplicated on claim+CARC so re-parsing the same remittance adds nothing, and summed per reason so three lines denied for one cause rank as one piece of work rather than three small ones. `claim_scrub` (code/dx-pointer/NPI/modifier/POS/NCCI/MUE rules + the compliance pack below), `claim_build_837p`, `era_parse_835`, `ack_parse_277ca`, `denial_explain` (CARC/RARC), `reimbursement_estimate`, `payment_variance` (see claim intelligence below).
 **Secondary claims & COB** — `ack_parse_277ca` decodes the clearinghouse/payer acknowledgment that arrives *before* adjudication, splitting accepted from rejected claims and translating each status category/status/entity triplet into what is wrong and whose data caused it. A front-end rejection never entered the payer's system: there are no appeal rights, no remittance will follow, and timely filing keeps running — so rejections open worklist items immediately. `cob_determine_primary` resolves payer order and emits the SBR05 MSP type code, covering Medicare Secondary Payer rules (working aged at 20+ employees, disability at 100+, the 30-month ESRD coordination period, workers' comp, auto/no-fault, liability, Black Lung, VA) and commercial coordination (own coverage before dependent, active before retiree/COBRA, and the birthday rule with its court-decree and custodial-parent overrides); when a missing fact — usually employer size — is what decides the answer, it says so instead of guessing. `cob_balance_check` enforces `charge = paid + adjustments` on every line, the arithmetic secondary payers check first and the most common reason a secondary claim is rejected up front. `claim_build_secondary` generates the secondary 837 with the primary's adjudication carried in loop 2320 (SBR, CAS, AMT, OI, DTP\*573) and loop 2430 (SVD, CAS, DTP\*573), extracted from the primary's raw 835 rather than re-keyed, and refuses to emit while the balance check fails.
@@ -490,9 +517,9 @@ Two provider quirks are handled rather than left to bite: **Ollama Cloud** is se
 
 Switching providers mid-session keeps the conversation: history is stored in normalized form, and Anthropic-only blocks (thinking, server-side search results) are dropped rather than replayed to a provider that cannot read them.
 
-**What the live APIs actually give you.** ICD-10 search and validation call the NLM Clinical Tables API, so they need network — billable status is derived from whether the code has children in the returned hierarchy, not asserted from memory. NPI validation is an offline Luhn check; NPI lookup hits NPPES, and a non-2xx throws rather than being reported as "no record" — a network outage must not read as "this provider does not exist". NCD and LCD search work against the CMS Coverage API. Two things do not, and both were found by calling them rather than by testing them: **the Coverage API publishes no state-to-MAC mapping at all**, so `mac_lookup` lists contractors and says to find your binding policy by searching LCDs instead of pretending to answer by state; and the **SAD exclusion list is licence-gated** — it embeds AMA CPT descriptors, so CMS answers 401 until you accept the licence agreement and present a token, which the tool now explains instead of surfacing a bare HTTP error.
+**What the live APIs actually give you.** ICD-10 search and validation prefer the locally installed CMS code set, where billable status is CMS's own assertion and the fiscal year is named; without it they call the NLM Clinical Tables API, which needs network and derives billable status from whether the code has children in the returned hierarchy. Either way it is looked up, never asserted from memory. NPI validation is an offline Luhn check; NPI lookup hits NPPES, and a non-2xx throws rather than being reported as "no record" — a network outage must not read as "this provider does not exist". NCD and LCD search work against the CMS Coverage API. Two things do not, and both were found by calling them rather than by testing them: **the Coverage API publishes no state-to-MAC mapping at all**, so `mac_lookup` lists contractors and says to find your binding policy by searching LCDs instead of pretending to answer by state; and the **SAD exclusion list is licence-gated** — it embeds AMA CPT descriptors, so CMS answers 401 until you accept the licence agreement and present a token, which the tool now explains instead of surfacing a bare HTTP error.
 
-Several tools use free public APIs (NLM, NPPES, CMS Coverage) — no keys required. Optional datasets go in `~/.aetheraclaw/data/`: `ncci-ptp.json` and `mue.json` (bundling and unit edits), `hcpcs.json`, `mpfs.json` (RVUs), `global-periods.json` (`{"CODE": 90}`) for global-period lookup, `mpfs-cf.json` (`{"cf": 32.35}`) and `gpci.json` (`{"LOCALITY": {work, pe, mp}}`) for locality-accurate pricing, `em-benchmark.json` (`{"99213": 38.2}` percentages, from the CMS *Medicare Physician & Other Practitioners* public use file) for peer E/M comparison, and `hcc-model.json` (ICD-10→HCC mapping, category definitions with coefficients and hierarchies, demographic terms) from the CMS risk-adjustment model files. `code_update_diff` reads code-set editions from the same directory, either as a bare `{"CODE": "description"}` map or wrapped as `{"label", "effective", "codes"}`. CPT is AMA-licensed and supplied by the user via `healthcare.cptDataPath`. Every dataset is optional — tools that need one say so instead of guessing.
+Several tools use free public APIs (NLM, NPPES, CMS Coverage) — no keys required. Optional datasets go in `~/.aetheraclaw/data/`: `ncci-ptp.json` and `mue.json` (bundling and unit edits), `icd10.json` (the full ICD-10-CM code set with billable status and its fiscal year), `hcpcs.json`, `mpfs.json` (RVUs), `global-periods.json` (`{"CODE": 90}`) for global-period lookup, `mpfs-cf.json` (`{"cf": 32.35}`) and `gpci.json` (`{"LOCALITY": {work, pe, mp}}`) for locality-accurate pricing, `em-benchmark.json` (`{"99213": 38.2}` percentages, from the CMS *Medicare Physician & Other Practitioners* public use file) for peer E/M comparison, and `hcc-model.json` (ICD-10→HCC mapping, category definitions with coefficients and hierarchies, demographic terms) from the CMS risk-adjustment model files. `code_update_diff` reads code-set editions from the same directory, either as a bare `{"CODE": "description"}` map or wrapped as `{"label", "effective", "codes"}`. CPT is AMA-licensed and supplied by the user via `healthcare.cptDataPath`. Every dataset is optional — tools that need one say so instead of guessing.
 
 ## Example
 
