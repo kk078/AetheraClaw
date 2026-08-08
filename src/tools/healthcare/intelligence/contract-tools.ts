@@ -36,7 +36,7 @@ export function loadContractRates(store: MemoryStore, payer?: string): ContractR
 export const contractRateSetTool = defineTool({
   name: "contract_rate_set",
   description:
-    "Record contracted allowed amounts from the practice's signed fee schedule, so payment_variance can measure payments against what the payer actually agreed to rather than against Medicare or against the payer's own habit. Rates are dated: a fee schedule amendment is normally why a payment changed, and an undated rate would be applied to claims it never governed. A source citation is required — a rate nobody can trace to a signed schedule cannot support a recovery claim.",
+    "Record contracted allowed amounts from the practice's signed fee schedule, so payment_variance can measure payments against what the payer actually agreed to rather than against Medicare or against the payer's own habit. Rates are dated: a fee schedule amendment is normally why a payment changed, and an undated rate would be applied to claims it never governed. A source citation is required — a rate nobody can trace to a signed schedule cannot support a recovery claim. LIMIT: one flat allowed amount per code, date and modifier. Carve-outs, per-diems, percent-of-charge, lesser-of and case rates cannot be recorded here, and a line governed by one of those will be measured against the wrong number.",
   schema: z.object({
     payer: z.string(),
     source: z.string().describe("Document and section, e.g. 'Aetna PAR agreement 2026, Exhibit A p.4'"),

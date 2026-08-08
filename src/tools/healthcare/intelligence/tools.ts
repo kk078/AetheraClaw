@@ -171,6 +171,17 @@ export const paymentVarianceTool = defineTool({
         return serviceDate ? [{ payer: l.payer, code: l.code, serviceDate }] : [];
       });
       notes.push(renderCoverage(rateCoverage(rates, billed)));
+      // A KNOWN LIMIT, said every time this basis runs rather than buried in a
+      // README. contract_rates holds ONE allowed amount per code, date and
+      // modifier — a flat fee schedule. Real agreements also carry carve-outs,
+      // per-diems, percent-of-charge, lesser-of and case rates, and none of
+      // them is representable here. Against a contract with any of those, a
+      // "shortfall" against the flat rate is a confidently wrong number, which
+      // is worse than no number: it names a figure and a payer and invites
+      // somebody to dispute it.
+      notes.push(
+        "LIMIT: this basis models a FLAT rate per code, date and modifier only. Carve-outs, per-diems, percent-of-charge, lesser-of and case rates are not represented. If any line here is governed by one of those terms, its shortfall is meaningless — check the agreement before disputing.",
+      );
       if (undated > 0) {
         notes.push(
           `${undated} adjudicated line(s) belong to claims not stored here, so their date of service is unknown and no contracted rate could be selected for them. They were skipped rather than measured against today's rate.`,

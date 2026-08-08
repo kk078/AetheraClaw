@@ -343,15 +343,27 @@ program
     const store = new MemoryStore(path.join(configDir(), "aetheraclaw.db"));
     const all = buildRegistry(config, store).specs();
 
-    console.log(`Registry: ${all.length} tools.\n`);
+    // Stated per provider, because the registry size genuinely differs by one:
+    // Anthropic has a server-side web search, so web_search is not registered
+    // for it. One number here would be wrong for three of the four rows below.
+    console.log(`Registry: ${all.length} tools under the configured provider ("${config.provider}").`);
+    console.log("Anthropic is one smaller than the rest — it has a server-side web search, so web_search is not registered for it.\n");
     const width = 11;
     console.log(
       ["provider".padEnd(width), "key", "model".padEnd(22), "cap", ...PROFILES.map((p) => p.name.slice(0, 6).padStart(7))].join("  "),
     );
     for (const name of ["anthropic", "openai", "gemini", "ollama"] as const) {
       const key = apiKeyFor(name) ? " set " : name === "ollama" ? "local" : " --  ";
+      // The registry is provider-dependent: web_search is registered only for
+      // providers that lack a server-side one, i.e. everything except Anthropic.
+      // Counting every row against the CONFIGURED provider's registry made this
+      // table off by one for every other row — under-reporting on a machine
+      // configured for Anthropic, over-reporting on one configured for anything
+      // else. Each row is now counted against the registry that provider would
+      // actually get.
+      const forProvider = buildRegistry({ ...config, provider: name }, store).specs();
       const counts = PROFILES.map((p) => {
-        const s = selectTools(all, p.name, name);
+        const s = selectTools(forProvider, p.name, name);
         const mark = s.droppedByLimit.length ? "*" : s.deferred.length ? "+" : "";
         return `${s.specs.length}${mark}`.padStart(7);
       });
