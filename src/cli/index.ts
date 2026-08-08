@@ -134,6 +134,7 @@ import { buildRegistry } from "../tools/build-registry.js";
 import { resolveStore, tenancyRoot } from "../tenancy/resolve.js";
 import { TenantRegistry } from "../tenancy/registry.js";
 import { checkSlug, tenantDbPath } from "../tenancy/tenant.js";
+import { retentionPlan } from "../support/tool-log.js";
 
 const program = new Command();
 program.name("aetheraclaw").description("Self-hosted AI assistant for healthcare RCM and medical billing & coding");
@@ -197,6 +198,10 @@ program
     console.log(`AetheraClaw gateway: http://${config.gateway.host}:${config.gateway.port}`);
     console.log(`Provider: ${config.provider} · Workspace: ${config.workspaceRoot}`);
     console.log(`SQLite: ${store.db.driver}`);
+    // Amortized retention: once at startup rather than on every tool call, so
+    // the log's cost does not scale with the log's size.
+    const pruned = store.pruneToolCalls(retentionPlan(Date.now()));
+    if (pruned > 0) console.log(`Tool log: pruned ${pruned} row(s) past retention`);
     if (config.tenancy.enabled) console.log(`Tenant: ${tenant.name} (${tenant.slug}) — isolated database`);
     const picked = selectTools(registry.specs(), config.toolProfile, config.provider);
     console.log(

@@ -363,6 +363,41 @@ CREATE TABLE IF NOT EXISTS contract_rates (
 );
 CREATE INDEX IF NOT EXISTS idx_contract_rates_lookup ON contract_rates(payer_key, code);
 
+-- ── Tool call log ───────────────────────────────────────────────────────────
+-- One row per tool invocation, so a support engineer can ask what failed rather
+-- than having to bring the errors with them.
+--
+-- input_shape holds KEY NAMES ONLY, never values. Tool input carries claim data,
+-- and a log that stored it would become the largest copy of that data in the
+-- system, with weaker access control than the tables it copied from, sitting
+-- there whether or not anyone ever reads it. The shape is enough to see that a
+-- call was malformed.
+--
+-- error_text IS stored, scrubbed of identifier shapes. It is what the classifier
+-- reads and cannot be reduced without destroying its use. Scrubbed rather than
+-- refused — unlike phi_access_log, where a caller passing an identifier has a
+-- bug worth surfacing; here the string came from a library and nobody chose it.
+--
+-- Retention is part of the design: this is the only table that grows with every
+-- action forever, and a log that fills the disk is its own incident.
+CREATE TABLE IF NOT EXISTS tool_calls (
+  id          TEXT PRIMARY KEY,
+  session_id  TEXT NOT NULL DEFAULT '',
+  tool_name   TEXT NOT NULL,
+  ok          INTEGER NOT NULL,
+  outcome     TEXT NOT NULL,       -- ok | invalid_input | unknown_tool | denied | error
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  input_shape TEXT NOT NULL DEFAULT '',
+  error_text  TEXT NOT NULL DEFAULT '',
+  -- 0 for a call the model made directly, 1+ for one reached through tool_invoke.
+  -- One logical call through the catalogue produces two rows and both are true;
+  -- the depth is what lets the summary avoid counting the failure twice.
+  depth       INTEGER NOT NULL DEFAULT 0,
+  created_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_at ON tool_calls(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_failures ON tool_calls(ok, created_at DESC);
+
 -- ── Ops baselines ───────────────────────────────────────────────────────────
 -- Small key/value store for the operational sweeps: dataset hashes recorded at
 -- install time, so the next sweep can report what changed. Deliberately not a

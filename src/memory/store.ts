@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { newId } from "../shared/ids.js";
 import { openDatabase, type SqliteDb } from "./sqlite.js";
+import type { RetentionPlan, ToolCallRecord } from "../support/tool-log.js";
 
 export interface SessionRow {
   id: string;
@@ -161,6 +162,96 @@ export class MemoryStore {
       }
     }
     return out;
+  }
+
+  /**
+   * Record one tool call.
+   *
+   * Called from the registry's choke point on every invocation, so this runs
+   * more often than anything else in the store. It is a single INSERT with no
+   * read, and pruning is amortized rather than done here — a retention sweep on
+   * every call would make the log's cost scale with the log's size, which is the
+   * opposite of what a log should do.
+   */
+  recordToolCall(record: ToolCallRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO tool_calls (id, session_id, tool_name, ok, outcome, duration_ms, input_shape, error_text, depth, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        newId("tc"),
+        record.sessionId,
+        record.toolName,
+        record.ok ? 1 : 0,
+        record.outcome,
+        record.durationMs,
+        record.inputShape,
+        record.errorText,
+        record.depth,
+        record.at,
+      );
+  }
+
+  loadToolCalls(sinceMs: number, opts: { failuresOnly?: boolean; tool?: string; limit?: number } = {}): ToolCallRecord[] {
+    const clauses = ["created_at >= ?"];
+    const params: unknown[] = [sinceMs];
+    if (opts.failuresOnly) clauses.push("ok = 0");
+    if (opts.tool) {
+      clauses.push("tool_name = ?");
+      params.push(opts.tool);
+    }
+    params.push(opts.limit ?? 1000);
+
+    const rows = this.db
+      .prepare(
+        `SELECT session_id, tool_name, ok, outcome, duration_ms, input_shape, error_text, depth, created_at
+           FROM tool_calls WHERE ${clauses.join(" AND ")} ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(...params) as Array<{
+      session_id: string;
+      tool_name: string;
+      ok: number;
+      outcome: string;
+      duration_ms: number;
+      input_shape: string;
+      error_text: string;
+      depth: number;
+      created_at: number;
+    }>;
+
+    return rows.map((r) => ({
+      sessionId: r.session_id,
+      toolName: r.tool_name,
+      ok: r.ok === 1,
+      outcome: r.outcome as ToolCallRecord["outcome"],
+      durationMs: r.duration_ms,
+      inputShape: r.input_shape,
+      errorText: r.error_text,
+      depth: r.depth,
+      at: r.created_at,
+    }));
+  }
+
+  /** Drop rows past the age cutoff, then past the row ceiling. Returns how many went. */
+  pruneToolCalls(plan: RetentionPlan): number {
+    let removed = 0;
+    this.db.transaction(() => {
+      removed += Number(this.db.prepare("DELETE FROM tool_calls WHERE created_at < ?").run(plan.cutoff).changes);
+      // The ceiling is a second, independent bound: a burst inside the retention
+      // window can outrun the age rule entirely, and the age rule alone would let
+      // it fill the disk while every row was technically recent.
+      removed += Number(
+        this.db
+          .prepare(
+            `DELETE FROM tool_calls WHERE id IN (
+               SELECT id FROM tool_calls ORDER BY created_at DESC LIMIT -1 OFFSET ?
+             )`,
+          )
+          .run(plan.maxRows).changes,
+      );
+    })();
+    return removed;
   }
 
   close(): void {

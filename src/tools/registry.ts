@@ -3,6 +3,7 @@ import { zodToJsonSchema } from "./zod-schema.js";
 import { buildCatalog, searchCatalog } from "./catalog.js";
 import type { ToolContext, ToolDefinition, ToolResult } from "./types.js";
 import type { ToolSpec } from "../providers/types.js";
+import { inputShapeOf, outcomeOf, scrubErrorText } from "../support/tool-log.js";
 
 // ── Unknown-tool recovery ────────────────────────────────────────────────────
 // A model that has been told about `web_search` will sometimes call `search`.
@@ -47,6 +48,36 @@ export class ToolRegistry {
 
   // Single choke point: validate → assess risk → approval gate → execute.
   async execute(name: string, rawInput: unknown, ctx: ToolContext): Promise<ToolResult> {
+    const started = Date.now();
+    const depth = ctx.callDepth ?? 0;
+    ctx.callDepth = depth + 1;
+    let result: ToolResult;
+    try {
+      result = await this.run(name, rawInput, ctx);
+    } finally {
+      ctx.callDepth = depth;
+    }
+    if (ctx.onToolCall) {
+      try {
+        ctx.onToolCall({
+          sessionId: ctx.sessionId,
+          toolName: name,
+          ok: !result.isError,
+          outcome: outcomeOf(result.content, result.isError),
+          durationMs: Date.now() - started,
+          inputShape: inputShapeOf(rawInput),
+          errorText: result.isError ? scrubErrorText(result.content) : "",
+          depth,
+          at: started,
+        });
+      } catch {
+        // A broken log must never take down the call it was only observing.
+      }
+    }
+    return result;
+  }
+
+  private async run(name: string, rawInput: unknown, ctx: ToolContext): Promise<ToolResult> {
     const tool = this.tools.get(name);
     if (!tool) {
       return { content: `Unknown tool: ${name}\n${suggestNames(this.tools, name)}`, isError: true };

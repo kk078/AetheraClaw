@@ -3,8 +3,9 @@ import { defineTool } from "../tools/registry.js";
 import type { MemoryStore } from "../memory/store.js";
 import { appendAudit } from "../audit/store.js";
 import { assembleTrace, normalizeClaimId, renderTrace, type TraceEvent } from "./trace.js";
-import { classifyFailure, diagnoseBatch, renderBatch, renderDiagnosis } from "./fmea.js";
+import { classifyFailure, diagnoseBatch, diagnoseRecords, renderBatch, renderDiagnosis } from "./fmea.js";
 import { OVERDUE_JOB_HOURS, STUCK_ATTEMPTS, renderFailedOps, summarize, type StalledItem } from "./failed-ops.js";
+import { renderCallSummary, summarizeCalls } from "./tool-log.js";
 import {
   DIFF_SAMPLE,
   MAX_SNAPSHOT_ROWS,
@@ -141,15 +142,66 @@ export const traceClaimTool = defineTool({
 export const fmeaTool = defineTool({
   name: "support_fmea_diagnose",
   description:
-    "Classify one or many failure texts — error messages, stack frames, 277CA rejection triplets — into a root-cause category with the next steps that resolve it, and a count per category when given a batch (forty failures with one cause is one incident; forty with eleven is a different situation). Anything no rule matches comes back UNCLASSIFIED rather than guessed at: a confident wrong category sends an engineer down the wrong path for an hour precisely because it sounded certain.",
+    "Classify failures into a root-cause category with the next steps that resolve it. Reads the tool-call log by default — every tool invocation is recorded, so this works on real production failures without anyone finding and pasting them first — or classifies text passed in directly. On a batch it counts per category, because forty failures with one cause is one incident and forty with eleven is something that changed underneath them all. Anything no rule matches comes back UNCLASSIFIED rather than guessed at: a confident wrong category sends an engineer down the wrong path for an hour precisely because it sounded certain.",
   schema: z.object({
-    failures: z.array(z.string()).min(1).describe("Error text, log lines, or acknowledgment status descriptions"),
+    failures: z
+      .array(z.string())
+      .optional()
+      .describe("Classify this text instead of reading the log — for an error from somewhere else"),
+    hours: z.number().int().min(1).max(24 * 90).default(24).describe("How far back to read the log"),
+    tool: z.string().optional().describe("Only this tool's calls"),
+    limit: z.number().int().min(1).max(500).default(200),
   }),
-  execute: async (input) => {
-    if (input.failures.length === 1) {
-      return { content: renderDiagnosis(classifyFailure(input.failures[0])) };
+  execute: async (input, ctx) => {
+    if (input.failures && input.failures.length > 0) {
+      return {
+        content:
+          input.failures.length === 1
+            ? renderDiagnosis(classifyFailure(input.failures[0]))
+            : renderBatch(diagnoseBatch(input.failures)),
+      };
     }
-    return { content: renderBatch(diagnoseBatch(input.failures)) };
+
+    const store = ctx.services.store as MemoryStore | undefined;
+    if (!store) {
+      return {
+        content: "No database in this context, so the tool-call log cannot be read. Pass `failures` to classify text directly.",
+        isError: true,
+      };
+    }
+
+    const since = Date.now() - input.hours * 3_600_000;
+    // Every call, so the summary can report a failure RATE. Reading only the
+    // failures would give a count, and a count ranks the busiest tool first
+    // rather than the broken one.
+    const all = store.loadToolCalls(since, { tool: input.tool, limit: input.limit });
+    const failed = all.filter((r) => !r.ok);
+    const windowLabel = `in the last ${input.hours}h${input.tool ? ` for ${input.tool}` : ""}`;
+
+    const parts = [renderCallSummary(summarizeCalls(all), windowLabel)];
+    if (failed.length > 0) {
+      // diagnoseRecords, not diagnoseBatch: the log recorded WHY each call failed
+      // at the choke point that decided it, and re-deriving that from the prose
+      // throws away a fact for a guess.
+      parts.push("", renderBatch(diagnoseRecords(failed)));
+      // The input shape is the fastest read on a malformed-call cluster: the
+      // same wrong key set on every one of them says the caller is consistent,
+      // which is a different fix from a caller that is erratic.
+      const shapes = new Map<string, number>();
+      for (const r of failed) if (r.inputShape) shapes.set(r.inputShape, (shapes.get(r.inputShape) ?? 0) + 1);
+      const repeated = [...shapes.entries()].filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1]);
+      if (repeated.length > 0) {
+        parts.push(
+          "",
+          "Input shapes on the failures (key names only — values are never logged):",
+          ...repeated.slice(0, 5).map(([shape, n]) => `  ${String(n).padStart(4)} × { ${shape} }`),
+        );
+      }
+    }
+    if (all.length === input.limit) {
+      parts.push("", `Hit the ${input.limit}-row limit, so this window may be larger than what is shown. Narrow with --hours or raise the limit.`);
+    }
+    return { content: parts.join("\n") };
   },
 });
 

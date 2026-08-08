@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import type { ToolView } from "../views/types.js";
+import type { ToolCallRecord } from "../support/tool-log.js";
 
 export type RiskLevel = "safe" | "confirm";
 
@@ -9,6 +10,25 @@ export interface ToolContext {
   approvalPolicy: "always" | "unsafe-only" | "never";
   requestApproval(details: { toolName: string; description: string; input: unknown }): Promise<boolean>;
   signal?: AbortSignal;
+  /**
+   * Called once per tool execution, whatever the outcome.
+   *
+   * Optional so the registry stays free of any database dependency — a callback
+   * the caller wires up, not a store the registry reaches for. Failures inside
+   * it are swallowed by the registry: a broken log must never take down the tool
+   * call it was only observing.
+   */
+  onToolCall?(record: ToolCallRecord): void;
+  /**
+   * How deep this call is inside another tool's execution.
+   *
+   * Managed by the registry, which increments it around `execute` and restores
+   * it after. Tools that re-enter the registry — `tool_invoke` — pass their own
+   * context straight through, so the registry is the only place that can see the
+   * nesting. Safe to mutate because tool execution is sequential within one
+   * context; two concurrent turns get two contexts.
+   */
+  callDepth?: number;
   services: Record<string, unknown>; // shared handles (db, config, …) for domain tools
 }
 

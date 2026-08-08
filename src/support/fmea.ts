@@ -189,6 +189,69 @@ export function classifyFailure(text: string): Diagnosis {
   };
 }
 
+/**
+ * Outcomes the registry already determined, so the classifier must not re-derive them.
+ *
+ * The tool-call log records WHY a call failed at the choke point that decided
+ * it: an unknown name, a schema rejection, a denied approval. Feeding that
+ * row's error prose back through a text classifier throws away a fact for a
+ * guess — and the guess came back UNCLASSIFIED, which is worse than the
+ * structured answer sitting one field away. Only a genuine execution error
+ * needs the text rules.
+ */
+const OUTCOME_DIAGNOSES: Record<string, Omit<Diagnosis, "evidence">> = {
+  unknown_tool: {
+    category: "schema_mismatch",
+    confidence: "certain",
+    cause: "The model called a tool that does not exist.",
+    nextSteps: [
+      "The registry already replied with the nearest real names — deliberately, rather than aliasing the invented one, so the model corrects itself instead of learning nothing.",
+      "A NAME that recurs across sessions is worth a look: it usually means a real tool is hard to discover, not that the model is careless.",
+    ],
+  },
+  invalid_input: {
+    category: "schema_mismatch",
+    confidence: "certain",
+    cause: "The input did not match the tool's schema and was rejected before execution.",
+    nextSteps: [
+      "The validation message names the exact field. This self-corrects on retry, so a one-off is not an incident.",
+      "The same wrong input SHAPE repeating is the signal: it means the schema is being misread the same way every time, which is a description problem rather than a model problem.",
+    ],
+  },
+  denied: {
+    category: "unclassified",
+    confidence: "certain",
+    cause: "A human denied the approval request.",
+    nextSteps: [
+      "Not a fault. It is recorded because a run that stopped because somebody said no looks identical to a run that failed, until you can tell them apart.",
+    ],
+  },
+};
+
+/**
+ * Diagnose a logged call, preferring the recorded outcome over its prose.
+ */
+export function diagnoseRecord(record: { toolName: string; outcome: string; errorText: string }): Diagnosis {
+  const known = OUTCOME_DIAGNOSES[record.outcome];
+  if (known) return { ...known, evidence: `${record.toolName}: ${record.errorText.slice(0, 200)}` };
+  return classifyFailure(`${record.toolName}: ${record.errorText}`);
+}
+
+export function diagnoseRecords(records: Array<{ toolName: string; outcome: string; errorText: string }>): BatchDiagnosis {
+  const diagnoses = records.map(diagnoseRecord);
+  return { total: records.length, byCategory: groupCategories(diagnoses), diagnoses };
+}
+
+function groupCategories(diagnoses: Diagnosis[]): BatchDiagnosis["byCategory"] {
+  const grouped = new Map<FailureCategory, { count: number; example: string }>();
+  for (const d of diagnoses) {
+    const slot = grouped.get(d.category) ?? { count: 0, example: d.evidence };
+    slot.count++;
+    grouped.set(d.category, slot);
+  }
+  return [...grouped.entries()].map(([category, v]) => ({ category, ...v })).sort((a, b) => b.count - a.count);
+}
+
 export interface BatchDiagnosis {
   total: number;
   byCategory: Array<{ category: FailureCategory; count: number; example: string }>;
@@ -204,19 +267,7 @@ export interface BatchDiagnosis {
  */
 export function diagnoseBatch(texts: string[]): BatchDiagnosis {
   const diagnoses = texts.map(classifyFailure);
-  const grouped = new Map<FailureCategory, { count: number; example: string }>();
-  for (const d of diagnoses) {
-    const slot = grouped.get(d.category) ?? { count: 0, example: d.evidence };
-    slot.count++;
-    grouped.set(d.category, slot);
-  }
-  return {
-    total: texts.length,
-    byCategory: [...grouped.entries()]
-      .map(([category, v]) => ({ category, ...v }))
-      .sort((a, b) => b.count - a.count),
-    diagnoses,
-  };
+  return { total: texts.length, byCategory: groupCategories(diagnoses), diagnoses };
 }
 
 export function renderDiagnosis(d: Diagnosis): string {
