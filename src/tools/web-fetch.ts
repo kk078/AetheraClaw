@@ -53,16 +53,58 @@ export function stripHtml(html: string): string {
     .trim();
 }
 
+/** Hosts whose content this project reaches through a real API instead of scraping. */
+const API_ALTERNATIVES: Array<{ host: RegExp; advice: string }> = [
+  {
+    host: /(^|\.)cms\.gov$/i,
+    advice:
+      "cms.gov blocks automated page fetches. Use the coverage tools instead — coverage_search_national, coverage_search_local and sad_exclusion_check call the CMS Coverage API directly and return structured results.",
+  },
+  { host: /(^|\.)nih\.gov$/i, advice: "For ICD-10 lookups use icd10_search, which calls the NLM Clinical Tables API." },
+  { host: /(^|\.)npiregistry\.cms\.hhs\.gov$/i, advice: "Use npi_lookup or npi_search, which call the NPPES API." },
+];
+
+/**
+ * Turn an HTTP failure into something a model can act on.
+ *
+ * A bare "HTTP 403" reads as transient, so a model retries it, then retries a
+ * different URL on the same host, and burns a conversation discovering that the
+ * site simply does not serve robots. Saying so once, and naming the tool that
+ * does have the data, ends it on the first attempt.
+ */
+export function httpFailure(status: number, url: URL): string {
+  const alt = API_ALTERNATIVES.find((a) => a.host.test(url.hostname));
+  const base = `HTTP ${status} from ${url.hostname}`;
+  if (status === 403 || status === 401 || status === 406 || status === 429) {
+    const why =
+      status === 429
+        ? "the host is rate-limiting this client"
+        : "the host refuses automated access from a non-browser client";
+    return `${base} — ${why}. This is the site's access decision, not a transient error; do not retry it or try to look like a browser.${alt ? ` ${alt.advice}` : " If the data exists behind a public API, use the tool that calls it."}`;
+  }
+  if (status === 404) return `${base} — the page does not exist. Check the URL rather than retrying.`;
+  return base;
+}
+
 export async function fetchTextGuarded(rawUrl: string): Promise<string> {
   const url = new URL(rawUrl);
   await assertPublicHost(url);
   const res = await fetch(url, {
     method: "GET",
     signal: AbortSignal.timeout(TIMEOUT_MS),
-    headers: { "user-agent": "AetheraClaw/0.1 (+self-hosted RCM assistant)" },
+    headers: {
+      "user-agent": "AetheraClaw/0.1 (+self-hosted RCM assistant)",
+      // Some origins reject a request with no Accept/Accept-Language outright.
+      // Sending them is ordinary HTTP politeness, not disguise: the User-Agent
+      // above still says exactly what this is. Rotating it to impersonate a
+      // browser would be evasion of a site's stated access decision, and a
+      // healthcare compliance tool is the last place to build that in.
+      accept: "text/html,application/xhtml+xml,application/json;q=0.9,text/plain;q=0.8,*/*;q=0.5",
+      "accept-language": "en-US,en;q=0.9",
+    },
     redirect: "follow",
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status} from ${url.hostname}`);
+  if (!res.ok) throw new Error(httpFailure(res.status, url));
   const reader = res.body?.getReader();
   if (!reader) return "";
   const chunks: Uint8Array[] = [];

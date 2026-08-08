@@ -78,6 +78,12 @@ export function searchCatalog(catalog: CatalogEntry[], query: string, limit = 12
     // "timely filing deadline" beats a tool that only matches "deadline".
     const covered = terms.filter((t) => nameTokens.has(t) || name.includes(t) || descTokens.has(t)).length;
     score += covered * 3;
+    // Break name-hit ties by specificity: the fewer other words the name carries,
+    // the more of it the query explains. A model that called `search` wants
+    // `web_search` before `coverage_search_local`, and without this the tie fell
+    // to alphabetical order, which pushed the intended tool off the list.
+    const nameHits = terms.filter((t) => nameTokens.has(t)).length;
+    if (nameHits > 0) score += (4 * nameHits) / nameTokens.size;
     return { ...entry, score };
   });
 

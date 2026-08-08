@@ -59,6 +59,100 @@ export function checkNcci(
   return findings;
 }
 
+// ── What is actually installed ───────────────────────────────────────────────
+// Absent data is not the same as a negative result, and a model with no way to
+// tell them apart will conflate them. Observed: asked whether an E/M and an EKG
+// bundle, a model reported that NCCI data was not installed and then stated in
+// the same answer that "the NCCI tables do not bundle 99214 with 93000" — a
+// claim about tables it had just said it could not read.
+//
+// So the inventory is a tool. "I cannot check this" becomes something the model
+// can look up and say, instead of something it has to infer from silence.
+export interface DatasetStatus {
+  file: string;
+  purpose: string;
+  installed: boolean;
+  /** Where a user gets it. Named exactly, because "download it from CMS" is not an instruction. */
+  source: string;
+  /** What stops working without it. */
+  absentMeans: string;
+}
+
+const DATASETS: Array<Omit<DatasetStatus, "installed">> = [
+  {
+    file: "ncci-ptp.json",
+    purpose: "NCCI Procedure-to-Procedure bundling edits",
+    source: "CMS National Correct Coding Initiative Edits (quarterly, public) — cms.gov/medicare/coding-billing/ncci-medicare",
+    absentMeans: "Bundling cannot be checked at all. Not 'no edit found' — no table was read.",
+  },
+  {
+    file: "mue.json",
+    purpose: "Medically Unlikely Edits (per-code unit ceilings)",
+    source: "CMS MUE tables (quarterly, public) — same NCCI page",
+    absentMeans: "Unit overages cannot be detected.",
+  },
+  {
+    file: "hcpcs.json",
+    purpose: "HCPCS Level II code descriptions",
+    source: "CMS HCPCS Quarterly Update (public)",
+    absentMeans: "hcpcs_lookup returns nothing for Level II codes.",
+  },
+  {
+    file: "mpfs.json",
+    purpose: "Medicare Physician Fee Schedule RVUs (work / PE / facility PE / MP)",
+    source: "CMS PFS Relative Value Files (annual, public)",
+    absentMeans: "reimbursement_estimate cannot compute an allowed amount. It will refuse rather than estimate — do not supply RVUs or a rate from memory.",
+  },
+  {
+    file: "mpfs-cf.json",
+    purpose: "MPFS conversion factor",
+    source: "CMS PFS Final Rule for the applicable year",
+    absentMeans: "No dollar conversion is possible even with RVUs present.",
+  },
+  {
+    file: "gpci.json",
+    purpose: "Geographic Practice Cost Indices by locality",
+    source: "CMS PFS Addendum E (annual, public)",
+    absentMeans: "Estimates cannot be localized. A national figure is not a locality figure.",
+  },
+];
+
+export function datasetStatuses(): DatasetStatus[] {
+  return DATASETS.map((d) => ({ ...d, installed: fs.existsSync(path.join(dataDir(), d.file)) }));
+}
+
+export function renderDatasetStatus(statuses: DatasetStatus[], cptConfigured: boolean): string {
+  const missing = statuses.filter((s) => !s.installed);
+  const lines = [
+    `Local dataset directory: ${dataDir()}`,
+    "",
+    ...statuses.map((s) => `${s.installed ? "installed" : "MISSING "}  ${s.file.padEnd(14)} ${s.purpose}`),
+    `${cptConfigured ? "configured" : "not set  "}  CPT (Level I)  AMA-licensed; supply your own file via healthcare.cptDataPath`,
+  ];
+  if (missing.length > 0) {
+    lines.push(
+      "",
+      "What the missing files mean — these are limits on what can be checked, not findings:",
+      ...missing.map((s) => `  ${s.file}: ${s.absentMeans}\n      Source: ${s.source}`),
+      "",
+      "None of these are bundled with AetheraClaw. The CMS files are public but versioned quarterly or annually, and CPT cannot be redistributed at all, so installation is a deliberate step the practice takes with the release it is billing under.",
+    );
+  }
+  return lines.join("\n");
+}
+
+export const dataStatusTool = defineTool({
+  name: "data_status",
+  description:
+    "Report which local reference datasets are installed (NCCI PTP, MUE, HCPCS, MPFS RVUs, conversion factor, GPCI, CPT) and what cannot be checked without each. Call this before stating that a code pair is not bundled, that a unit count is allowed, or what a service pays — if the table is not installed, the honest answer is that it could not be checked, not that no edit exists.",
+  schema: z.object({}),
+  execute: async (_input, ctx) => {
+    const cfg = ctx.services.config as { healthcare?: { cptDataPath?: string } } | undefined;
+    const cptPath = cfg?.healthcare?.cptDataPath;
+    return { content: renderDatasetStatus(datasetStatuses(), Boolean(cptPath && fs.existsSync(cptPath))) };
+  },
+});
+
 export const hcpcsLookupTool = defineTool({
   name: "hcpcs_lookup",
   description:

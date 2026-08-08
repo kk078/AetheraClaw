@@ -12,8 +12,16 @@ export const ServiceLineSchema = z.object({
   units: z.number().default(1),
   dx_pointers: z.array(z.number().int().min(1).max(12)).describe("1-based pointers into the diagnosis list"),
   service_date: z.string().describe("YYYYMMDD"),
-  place_of_service: z.string().default("11"),
-});
+  place_of_service: z.string().default("11").describe("2-digit POS code, e.g. 11 office, 22 on-campus outpatient hospital, 02/10 telehealth"),
+})
+  // Field names here are the wire names, not the words a person would reach for.
+  // Models reliably guess `procedure_code`, `cpt`, `dos` or `pos` instead, and a
+  // guessed key is stripped before validation, so the failure surfaces as
+  // "required field missing" rather than "you used the wrong name". A literal
+  // example costs a few tokens and removes the round trip.
+  .describe(
+    'One service line. Use these exact keys — e.g. {"cpt_hcpcs":"99214","modifiers":["25"],"charge":225,"units":1,"dx_pointers":[1],"service_date":"20260115","place_of_service":"11"}. Not procedure_code/cpt/dos/pos.',
+  );
 
 export const ClaimSchema = z.object({
   claim_id: z.string().describe("Patient control number / internal claim ID"),

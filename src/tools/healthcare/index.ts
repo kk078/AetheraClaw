@@ -5,13 +5,14 @@ import { icd10SearchTool, icd10ValidateTool } from "./icd10.js";
 import { npiLookupTool, npiSearchTool, npiValidateTool } from "./npi.js";
 import { coverageSearchLocalTool, coverageSearchNationalTool, macLookupTool, sadExclusionTool } from "./coverage.js";
 import { denialExplainTool } from "./denial-codes.js";
+import { posLookupTool } from "./pos.js";
 import { claimBuild837Tool } from "./x12/837.js";
 import { eraParse835Tool } from "./x12/835.js";
 import { ackParse277caTool } from "./x12/277ca.js";
 import { claimBuildSecondaryTool, cobBalanceCheckTool } from "./x12/837-cob.js";
 import { cobDeterminePrimaryTool } from "./cob.js";
 import { claimScrubTool } from "./claim-scrub.js";
-import { hcpcsLookupTool } from "./datasets.js";
+import { dataStatusTool, hcpcsLookupTool } from "./datasets.js";
 import { eligibilityCheckTool } from "./eligibility.js";
 import { worklistAddTool, worklistListTool, worklistUpdateTool } from "./worklist.js";
 import { emCalculateTool } from "./em-calculator.js";
@@ -90,6 +91,8 @@ export function registerHealthcareTools(
     icd10SearchTool,
     icd10ValidateTool,
     hcpcsLookupTool,
+    posLookupTool,
+    dataStatusTool,
     npiValidateTool,
     npiLookupTool,
     npiSearchTool,

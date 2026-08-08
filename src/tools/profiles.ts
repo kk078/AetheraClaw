@@ -26,8 +26,11 @@ export interface Profile {
 }
 
 /** Always present: the agent cannot work without files, shell and fetch. */
+// `data_status` is here rather than in a domain profile because every profile can
+// be asked a question the missing datasets answer, and "I could not check" has to
+// be reachable from all of them.
 const BASE = ["run_command", "read_file", "write_file", "list_dir", "web_fetch", "web_search",
-  "tool_search", "tool_describe", "tool_invoke"];
+  "tool_search", "tool_describe", "tool_invoke", "data_status"];
 
 export const PROFILES: Profile[] = [
   {
@@ -35,7 +38,7 @@ export const PROFILES: Profile[] = [
     description: "Look up and validate codes, calculate E/M, run CDI, work the review queue.",
     include: [
       ...BASE,
-      "icd10_", "hcpcs_", "npi_", "em_", "cdi_", "code_suggest", "coding_corrections",
+      "icd10_", "hcpcs_", "pos_lookup", "npi_", "em_", "cdi_", "code_suggest", "coding_corrections",
       "review_", "training_", "coverage_", "mac_lookup", "sad_exclusion_check",
       "global_period_", "telehealth_", "incident_to_check", "greenlight_check",
     ],
@@ -47,7 +50,7 @@ export const PROFILES: Profile[] = [
       ...BASE,
       "claim_", "era_", "ack_parse_277ca", "cob_", "eligibility_check", "superbill_build",
       "pa_", "dtr_", "filing_proof_record", "timely_filing_", "abn_generate", "gfe_",
-      "icd10_validate", "npi_validate",
+      "icd10_validate", "npi_validate", "pos_lookup",
     ],
   },
   {

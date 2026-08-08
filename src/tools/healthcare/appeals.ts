@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { checkCitations } from "./citations.js";
 import { defineTool } from "../registry.js";
 import { confinePath } from "../path-guard.js";
 import { CARC } from "./denial-codes.js";
@@ -19,10 +20,20 @@ export const appealDraftTool = defineTool({
     denial_reason_text: z.string().optional(),
     clinical_summary: z.string().describe("De-identified clinical justification for the service"),
     policy_citations: z.array(z.string()).optional().describe("NCD/LCD IDs and quoted policy language supporting coverage"),
+    citations_verified: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Set true only after looking each identifier up with the coverage tools and confirming it exists and says what this letter claims. A fabricated citation in a Medicare appeal is a false statement to the government.",
+      ),
     output_path: z.string().default("appeals/appeal.md").describe("Workspace-relative output file"),
   }),
   assessRisk: (input) => ({ level: "confirm", reason: `write appeal letter to ${input.output_path}` }),
   execute: async (input, ctx) => {
+    const citations = input.policy_citations ?? [];
+    const check = checkCitations(citations, input.citations_verified);
+    if (!check.ok) return { content: check.refusal, isError: true };
+
     const carcInfo = CARC[input.carc];
     const letter = `# Appeal of Claim Denial — ${input.claim_id}
 

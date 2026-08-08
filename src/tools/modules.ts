@@ -27,9 +27,9 @@ export const MODULES: ModuleDef[] = [
     key: "codes",
     label: "Coding & Lookup",
     blurb: "ICD-10, HCPCS and NPI validation against bundled and live registries.",
-    note: "ICD-10 runs fully offline against bundled FY2026 data. NPI check digits are Luhn-validated without a network call.",
+    note: "ICD-10 runs fully offline against bundled FY2026 data. NPI check digits are Luhn-validated without a network call. Place-of-service codes are a table, not a recollection — POS 22 is On Campus-Outpatient Hospital.",
     glyph: "◈",
-    match: ["icd10_", "hcpcs_", "npi_"],
+    match: ["icd10_", "hcpcs_", "npi_", "pos_lookup"],
   },
   {
     key: "em",
@@ -245,7 +245,7 @@ export const MODULES: ModuleDef[] = [
     blurb: "Files, shell, fetch, and the tool catalogue itself.",
     note: "tool_invoke routes back through the same validation and approval gate as a direct call — a way to reach a tool, not around it.",
     glyph: "⌘",
-    match: ["run_command", "read_file", "write_file", "list_dir", "web_fetch", "web_search", "tool_"],
+    match: ["run_command", "read_file", "write_file", "list_dir", "web_fetch", "web_search", "tool_", "data_status"],
   },
 ];
 

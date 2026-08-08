@@ -14,8 +14,8 @@ import type { ComplianceContext } from "./context.js";
 //     whichever practitioner performed the substantive portion, with modifier FS.
 // Getting this wrong is an overpayment exposure, which is why the checks are errors.
 
-const OFFICE_POS = new Set(["11"]);
-const FACILITY_POS = new Set(["19", "21", "22", "23", "24", "51", "52", "61"]);
+export const OFFICE_POS = new Set(["11"]);
+export const FACILITY_POS = new Set(["19", "21", "22", "23", "24", "51", "52", "61"]);
 const SPLIT_SHARED_MODIFIER = "FS";
 
 export function inferSetting(placeOfService: string): "office" | "facility" | undefined {
