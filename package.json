@@ -8,7 +8,7 @@
     "aetheraclaw": "dist/cli/index.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.5"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/copy-schema.mjs",
@@ -22,7 +22,6 @@
     "@fastify/static": "^10.1.3",
     "@fastify/websocket": "^11.0.0",
     "@google/genai": "^2.16.0",
-    "better-sqlite3": "^13.0.0",
     "commander": "^15.0.0",
     "fastify": "^5.0.0",
     "imapflow": "^1.6.6",
@@ -43,5 +42,8 @@
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^13.0.0"
   }
 }

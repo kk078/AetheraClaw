@@ -1,8 +1,8 @@
-import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { newId } from "../shared/ids.js";
+import { openDatabase, type SqliteDb } from "./sqlite.js";
 
 export interface SessionRow {
   id: string;
@@ -25,11 +25,11 @@ export interface MessageRow {
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 export class MemoryStore {
-  readonly db: Database.Database;
+  readonly db: SqliteDb;
 
   constructor(dbPath: string) {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-    this.db = new Database(dbPath);
+    this.db = openDatabase(dbPath);
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("foreign_keys = ON");
     const schemaFile = path.join(here, "schema.sql");

@@ -182,7 +182,9 @@ node dist\cli\index.js serve --provider ollama --profile coding
 
 Then open **http://127.0.0.1:4180**. The gateway serves the web UI and the API from the same port. For a terminal REPL instead, leave `serve` running and open a second shell: `node dist/cli/index.js chat`.
 
-Windows notes: the build and the gateway are cross-platform, and `run_command` uses `cmd.exe` there rather than bash. `better-sqlite3` is a native module — it normally installs from a prebuilt binary, but if npm falls back to compiling you need the VS Build Tools C++ workload. Node 20 or newer.
+**No build toolchain required.** SQLite comes from `better-sqlite3` when it is already installed and from Node's built-in `node:sqlite` otherwise, so a machine with no C++ compiler runs the same code. This matters because the native module has no prebuilt binary for every Node release, and when npm falls back to `node-gyp` on a machine without Visual Studio the whole install aborts — taking `tsc` with it, so what you actually see is `'tsc' is not recognized` and `Cannot find module dist\cli\index.js`, three steps downstream of the real cause. `better-sqlite3` is an optional dependency now; if it fails to build, npm carries on and the app uses the built-in driver. `serve` prints which one it got. Node **22.5 or newer** is required, since that is when `node:sqlite` arrived.
+
+Windows notes: the build and the gateway are cross-platform, and `run_command` uses `cmd.exe` there rather than bash.
 
 Two things worth knowing before you pick a port. **4190 will not work**: it is on the WHATWG fetch blocked-port list, so the server binds fine and every browser request dies with `ERR_UNSAFE_PORT`. And Node's `fetch` ignores `HTTPS_PROXY`, so behind a corporate proxy the provider SDKs fail where `curl` succeeds — there is no proxy support in the app yet.
 

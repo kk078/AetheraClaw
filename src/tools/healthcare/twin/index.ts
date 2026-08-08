@@ -365,7 +365,7 @@ export const twinCalibrateTool = defineTool({
         if (!note) continue;
         const kind = s.falseNegative ? "miss" : s.falsePositive ? "over_call" : "wrong_reason";
         const res = insert.run(newId("tn"), payerKey(s.payer), kind, note, s.claimId, Date.now());
-        learned += res.changes;
+        learned += Number(res.changes);
       }
     }
 

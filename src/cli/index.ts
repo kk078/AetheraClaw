@@ -174,6 +174,7 @@ program
     await app.listen({ host: config.gateway.host, port: config.gateway.port });
     console.log(`AetheraClaw gateway: http://${config.gateway.host}:${config.gateway.port}`);
     console.log(`Provider: ${config.provider} · Workspace: ${config.workspaceRoot}`);
+    console.log(`SQLite: ${store.db.driver}`);
     const picked = selectTools(registry.specs(), config.toolProfile, config.provider);
     console.log(`Tools: ${picked.specs.length} of ${registry.specs().length} (profile "${config.toolProfile}")`);
     for (const note of picked.notes) console.log(`  ! ${note}`);

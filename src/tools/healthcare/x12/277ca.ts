@@ -354,7 +354,7 @@ export const ackParse277caTool = defineTool({
         const res = store.db
           .prepare("UPDATE claims SET status = ?, updated_at = ? WHERE json_extract(claim_json, '$.claim_id') = ?")
           .run(c.accepted ? "submitted" : "rejected", now, c.claimId);
-        statusUpdated += res.changes;
+        statusUpdated += Number(res.changes);
 
         // Bank the acceptance as proof of timely filing. A timely-filing denial
         // can arrive many months later, and by then the acknowledgment that

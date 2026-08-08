@@ -10,6 +10,7 @@ import { truncateToBudget } from "../src/agent/context-window.js";
 import { zodToJsonSchema } from "../src/tools/zod-schema.js";
 import type { ToolContext } from "../src/tools/types.js";
 import type { NormalizedMessage } from "../src/providers/types.js";
+import { openDatabase } from "../src/memory/sqlite.js";
 
 let tmp: string;
 beforeAll(() => {
@@ -149,5 +150,64 @@ describe("context window truncation", () => {
       (m, i) => m.content.some((b) => b.type === "tool_result") && !out[i - 1]?.content.some((b) => b.type === "tool_use"),
     );
     expect(hasOrphanResult).toBe(false);
+  });
+});
+
+// ── SQLite driver adapter ────────────────────────────────────────────────────
+// better-sqlite3 is a native module with no prebuilt binary for every Node
+// version, and when it falls back to node-gyp on a machine without a C++
+// toolchain `npm install` aborts — taking tsc with it, so the reported error
+// arrives three steps downstream of the cause. Node ships its own SQLite, so
+// the toolchain is not a prerequisite; these cover the part the adapter has to
+// supply itself.
+describe("sqlite adapter", () => {
+  it("opens with a driver and reports which one", () => {
+    const db = openDatabase(":memory:");
+    expect(["better-sqlite3", "node:sqlite"]).toContain(db.driver);
+    db.exec("CREATE TABLE t (id TEXT PRIMARY KEY, n INTEGER)");
+    db.prepare("INSERT INTO t VALUES (?, ?)").run("a", 1);
+    expect(db.prepare("SELECT n FROM t WHERE id = ?").get("a")).toMatchObject({ n: 1 });
+    db.close();
+  });
+
+  it("honours the named-parameter form the store uses", () => {
+    const db = openDatabase(":memory:");
+    db.exec("CREATE TABLE t (id TEXT, title TEXT)");
+    db.prepare("INSERT INTO t VALUES (@id, @title)").run({ id: "x", title: "hello" });
+    expect(db.prepare("SELECT title FROM t WHERE id = ?").get("x")).toMatchObject({ title: "hello" });
+    db.close();
+  });
+
+  it("commits a transaction and rolls the whole thing back on a throw", () => {
+    const db = openDatabase(":memory:");
+    db.exec("CREATE TABLE t (id TEXT)");
+    const insert = db.prepare("INSERT INTO t VALUES (?)");
+    const count = () => (db.prepare("SELECT COUNT(*) AS c FROM t").get() as { c: number }).c;
+
+    db.transaction((ids: string[]) => { for (const id of ids) insert.run(id); })(["a", "b"]);
+    expect(count()).toBe(2);
+
+    // A partial write must leave nothing behind, not the rows written before
+    // the failure — that is the entire reason the wrapper exists.
+    expect(() =>
+      db.transaction((ids: string[]) => {
+        for (const id of ids) {
+          if (id === "fail") throw new Error("boom");
+          insert.run(id);
+        }
+      })(["c", "fail", "d"]),
+    ).toThrow("boom");
+    expect(count()).toBe(2);
+    db.close();
+  });
+
+  it("nests without 'cannot start a transaction within a transaction'", () => {
+    const db = openDatabase(":memory:");
+    db.exec("CREATE TABLE t (id TEXT)");
+    const insert = db.prepare("INSERT INTO t VALUES (?)");
+    const inner = db.transaction((id: string) => insert.run(id));
+    db.transaction(() => { inner("a"); inner("b"); })();
+    expect(db.prepare("SELECT COUNT(*) AS c FROM t").get()).toMatchObject({ c: 2 });
+    db.close();
   });
 });
