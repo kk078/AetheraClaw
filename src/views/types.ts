@@ -22,11 +22,21 @@
 //   judgement, and it belongs next to the rules that made it — not in a
 //   browser, where it cannot be tested and will drift from the engine.
 
+import type { CardSummary } from "./verdict.js";
+
 export type ViewKind = "claim_scrub" | "money_waterfall" | "em_meter" | "kpi_tiles";
 
 export interface ToolView {
   kind: ViewKind;
   data: unknown;
+  /**
+   * Headline verdict and facts for the console card. Attached on the way out
+   * (see verdict.ts) rather than built by each tool, and deliberately computed
+   * on the server: a badge is trusted more than the prose beneath it, so a
+   * green CLEAR derived by pattern-matching text in a browser would be a wrong
+   * answer delivered with more confidence than the right one.
+   */
+  card?: CardSummary;
 }
 
 // ── claim_scrub ──────────────────────────────────────────────────────────────

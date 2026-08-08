@@ -282,3 +282,59 @@ function renderView(view) {
 }
 
 window.renderView = renderView;
+
+// ── Workflow card ────────────────────────────────────────────────────────────
+// The wrapper the console shows instead of a `tool_invoke` box. It carries the
+// verdict badge, the sentence the verdict rests on, the headline facts, and the
+// rendered view — with the raw telemetry (input JSON, returned text) tucked into
+// a toggle underneath, because the text is what the model saw and dropping it
+// would make the transcript a worse record than the log it replaced.
+//
+// The badge is NOT decided here. `card` arrives pre-computed from the server
+// (src/views/verdict.ts) for exactly the reason the header of this file gives
+// for severity: a badge is trusted more than the prose under it.
+
+function workflowCard(card, toolName, at) {
+  const box = node("div", "wfcard");
+  if (card.verdict) box.classList.add(`v-${card.verdict}`);
+
+  const head = node("div", "wfhead");
+  const left = node("div", "wfhead-l");
+  if (card.verdict) left.append(node("span", `vbadge ${card.verdict}`, card.verdictLabel || card.verdict));
+  left.append(node("h3", null, card.title || toolName));
+  head.append(left, node("span", "wftime", at));
+  box.append(head);
+
+  if (card.facts?.length) {
+    const grid = node("div", "wffacts");
+    for (const f of card.facts) {
+      const cell = node("div", "wffact");
+      cell.append(node("span", "k", f.label), node("span", "v", f.value));
+      grid.append(cell);
+    }
+    box.append(grid);
+  }
+  if (card.because) box.append(node("p", "wfbecause", card.because));
+  return box;
+}
+
+/** The collapsed technical log that sits under a card. */
+function telemetry(toolName, input, output, isError) {
+  const d = node("details", "wftel");
+  const s = node("summary");
+  s.append(node("code", null, toolName), node("span", "wftel-hint", "View raw tool telemetry"));
+  if (isError) s.append(node("span", "vbadge hold", "FAILED"));
+  d.append(s);
+  if (input !== undefined) {
+    d.append(node("div", "wftel-label", "input"));
+    d.append(node("pre", null, JSON.stringify(input ?? {}, null, 2)));
+  }
+  d.append(node("div", "wftel-label", "returned to the model"));
+  const pre = node("pre", null, String(output ?? ""));
+  if (isError) pre.classList.add("err");
+  d.append(pre);
+  return d;
+}
+
+window.workflowCard = workflowCard;
+window.toolTelemetry = telemetry;

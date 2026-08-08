@@ -19,20 +19,37 @@
   </div>
 
   <div class="topbar">
-    <span class="pill" id="pill-provider"><span class="dot"></span><b>—</b></span>
-    <span class="pill" id="pill-tools">—</span>
-    <span class="pill" id="pill-driver">—</span>
+    <div class="ticker" id="ticker"></div>
     <span class="spacer"></span>
     <span class="pill click" id="btn-palette">Search tools <span class="kbd">Ctrl K</span></span>
-    <span class="pill" id="pill-conn"><span class="dot off"></span><span>offline</span></span>
+    <div class="sysbar">
+      <span class="pill" id="pill-provider"><span class="dot"></span><b>—</b></span>
+      <span class="pill" id="pill-tools">—</span>
+      <span class="pill" id="pill-driver">—</span>
+      <span class="pill" id="pill-conn"><span class="dot off"></span><span>offline</span></span>
+    </div>
   </div>
 
   <aside class="rail">
     <nav>
+      <div class="navgroup">Core operations</div>
       <div class="navitem active" data-view="overview"><span class="g">⬡</span> Overview</div>
-      <div class="navitem" data-view="modules"><span class="g">▦</span> Modules <span class="count" id="c-modules"></span></div>
       <div class="navitem" data-view="console"><span class="g">▶</span> Console</div>
       <div class="navitem" data-view="workbench"><span class="g">◫</span> Workbench</div>
+
+      <div class="navgroup">Intelligence</div>
+      <div class="navitem" data-view="modules"><span class="g">▦</span> Modules <span class="count" id="c-modules"></span></div>
+      <!-- Domain entry points load a starter prompt into the console rather than
+           pretending to be pages. A nav item that opens an empty screen is worse
+           than one that does the thing. -->
+      <div class="navitem" data-domain="denials"><span class="g">▽</span> Denials</div>
+      <div class="navitem" data-domain="money"><span class="g">▤</span> Remittance &amp; cash</div>
+      <div class="navitem" data-domain="em"><span class="g">◐</span> E/M risk</div>
+
+      <div class="navgroup">Support &amp; ops</div>
+      <div class="navitem" data-domain="trace"><span class="g">⇉</span> Claim trace</div>
+      <div class="navitem" data-domain="fmea"><span class="g">⚙</span> FMEA diagnostics</div>
+      <div class="navitem" data-domain="telemetry"><span class="g">◈</span> Telemetry</div>
     </nav>
     <div class="sectionlabel">Sessions</div>
     <div class="scroll" id="session-list"></div>
@@ -97,9 +114,18 @@
             <textarea id="input" rows="1" placeholder="Enter to send · Shift+Enter for a newline"></textarea>
             <button class="btn" id="send">Send</button>
           </div>
-          <div class="hint" id="hint">Tool calls appear inline and expand. Anything risky asks first.</div>
+          <div class="hint" id="hint">Verdicts are computed server-side, where they are tested. Raw telemetry is one toggle away. Anything risky asks first.</div>
         </div>
       </div>
+
+      <aside class="canvas" id="canvas" hidden>
+        <div class="canvas-head">
+          <h3 id="canvas-title">Canvas</h3>
+          <button class="btn ghost sm" id="canvas-print" title="Print or save as PDF">Print / PDF</button>
+          <button class="btn ghost sm" id="canvas-close" title="Close the canvas">✕</button>
+        </div>
+        <div class="canvas-body" id="canvas-body"></div>
+      </aside>
     </section>
 
     <!-- Workbench ----------------------------------------------------- -->

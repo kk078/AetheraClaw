@@ -537,3 +537,132 @@ text.ring-txt { fill: var(--ink); font-size: 15px; font-family: var(--mono); fon
   .ladder { grid-template-columns: repeat(2, 1fr); }
   table.lines { font-size: 11.5px; }
 }
+
+/* ── Console redesign: workflow cards, canvas, ticker ─────────────────────── */
+
+/* Header. System status moves right and gets quieter; the KPI ticker takes the
+   left, because the numbers a biller acts on outrank the driver name. */
+.sysbar { display: flex; gap: 6px; align-items: center; }
+.ticker { display: flex; gap: 18px; align-items: center; min-width: 0; overflow: hidden; }
+.tick { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.tick b { font-family: var(--mono); font-size: 13px; color: var(--ink); font-weight: 600; }
+.tick span { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.tick.warn b { color: var(--warn); }
+
+/* Nav groups */
+.navgroup {
+  margin: 14px 0 4px; padding: 0 10px;
+  font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
+}
+.navgroup:first-child { margin-top: 0; }
+
+/* A running call is a line, not a card — a card shell would look like a
+   finished verdict for as long as the tool takes to run. */
+.running {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 12px; margin: 6px 0;
+  font-size: 12px; color: var(--ink-3);
+}
+.running code { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
+.spin {
+  width: 9px; height: 9px; border-radius: 50%;
+  border: 1.5px solid var(--line); border-top-color: var(--accent);
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.wfgroup { margin: 12px 0; }
+
+.wfcard {
+  border: 1px solid var(--line); border-left: 3px solid var(--line);
+  border-radius: 12px; background: var(--bg-2); padding: 14px 16px;
+}
+.wfcard.v-clear  { border-left-color: var(--good); }
+.wfcard.v-review { border-left-color: var(--warn); }
+.wfcard.v-hold   { border-left-color: var(--bad); }
+
+.wfhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.wfhead-l { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.wfhead h3 { margin: 0; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.wftime { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); flex: none; }
+
+.vbadge {
+  flex: none; border-radius: 999px; padding: 3px 9px;
+  font-size: 10px; font-weight: 700; letter-spacing: .06em;
+}
+.vbadge.clear  { background: color-mix(in srgb, var(--good) 14%, transparent); color: var(--good); }
+.vbadge.review { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
+.vbadge.hold   { background: color-mix(in srgb, var(--bad) 14%, transparent);  color: var(--bad); }
+
+.wffacts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 14px; margin-top: 13px;
+}
+.wffact { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wffact .k { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.wffact .v { font-size: 13.5px; color: var(--ink); font-family: var(--mono); }
+.wfbecause { margin: 12px 0 0; font-size: 12px; line-height: 1.55; color: var(--ink-2); }
+
+/* Technical log. Tight, muted, closed — present because the text is what the
+   model saw, and dropping it would make this a worse record than the log. */
+.wftel { margin-top: 6px; }
+.wftel > summary {
+  cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px;
+  padding: 5px 4px; font-size: 11px; color: var(--ink-3);
+}
+.wftel > summary::-webkit-details-marker { display: none; }
+.wftel > summary::before { content: "▸"; font-size: 9px; }
+.wftel[open] > summary::before { content: "▾"; }
+.wftel code { font-family: var(--mono); font-size: 11px; color: var(--ink-2); }
+.wftel-hint { color: var(--ink-3); }
+.wftel-label {
+  margin: 8px 0 3px; font-size: 9.5px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.wftel pre {
+  margin: 0; padding: 9px 11px; border-radius: 8px; background: var(--bg-3);
+  font-size: 11px; line-height: 1.5; color: var(--ink-2);
+  max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+}
+.wftel pre.err { color: var(--bad); }
+
+.recall {
+  margin-top: 7px; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--line); background: transparent;
+  color: var(--ink-3); font-size: 11px; font-family: inherit; cursor: pointer;
+}
+.recall:hover { color: var(--ink); border-color: var(--accent); }
+
+/* Canvas — the right column. One artifact at a time; a stack of every view is
+   the log stream again, one column over. */
+#view-console { display: flex; min-height: 0; }
+#view-console .console { flex: 1 1 auto; min-width: 0; }
+.canvas {
+  flex: 0 0 clamp(360px, 42%, 620px);
+  display: flex; flex-direction: column; min-width: 0;
+  border-left: 1px solid var(--line); background: var(--bg);
+}
+.canvas-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px; border-bottom: 1px solid var(--line);
+}
+.canvas-head h3 { margin: 0; flex: 1; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.btn.sm { padding: 4px 9px; font-size: 11px; }
+.canvas-body { flex: 1; overflow: auto; padding: 14px; }
+
+@media (max-width: 1100px) {
+  /* Below this the two columns fight; the canvas goes under the feed. */
+  #view-console { flex-direction: column; }
+  .canvas { flex: 0 0 auto; max-height: 46vh; border-left: 0; border-top: 1px solid var(--line); }
+}
+
+/* Print: the canvas artifact alone, on white. This is the PDF export — the
+   browser already has one, and a bundled PDF library to reproduce it would be
+   a dependency earning nothing. */
+@media print {
+  body * { visibility: hidden; }
+  #canvas, #canvas * { visibility: visible; }
+  #canvas { position: absolute; inset: 0; width: 100%; border: 0; background: #fff; }
+  .canvas-head button { display: none; }
+  .canvas-body { overflow: visible; max-height: none; }
+}

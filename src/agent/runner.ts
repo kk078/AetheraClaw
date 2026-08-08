@@ -4,6 +4,7 @@ import type { ModelProvider, NormalizedBlock, NormalizedMessage } from "../provi
 import { selectTools } from "../tools/profiles.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolContext } from "../tools/types.js";
+import { withCard } from "../views/verdict.js";
 import type { AgentEvent } from "../shared/events.js";
 import { buildSystemPrompt, catalogueBlock } from "./system-prompt.js";
 import { truncateToBudget } from "./context-window.js";
@@ -113,14 +114,17 @@ export async function runTurn(deps: RunnerDeps, sessionId: string, userText: str
       const results: NormalizedBlock[] = [];
       for (const call of toolUses) {
         const result = await registry.execute(call.name, call.input, ctx);
-        if (result.view) store.saveToolView(sessionId, call.id, result.view);
+        // One place, so the stored view and the streamed view cannot disagree
+        // about the verdict.
+        const view = result.view ? withCard(result.view) : undefined;
+        if (view) store.saveToolView(sessionId, call.id, view);
         emit({
           type: "tool_result",
           sessionId,
           toolUseId: call.id,
           summary: result.content.slice(0, 400),
           isError: result.isError ?? false,
-          view: result.view,
+          view,
         });
         // `result.view` is deliberately NOT carried into the block pushed here:
         // this array becomes the model's next turn, and the view would be sent

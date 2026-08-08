@@ -24,7 +24,32 @@ function show(view) {
   document.querySelectorAll(".navitem").forEach((n) => n.classList.toggle("active", n.dataset.view === view));
   if (view === "console") $("#input").focus();
 }
-document.querySelectorAll(".navitem").forEach((n) => n.addEventListener("click", () => show(n.dataset.view)));
+/**
+ * Domain nav items load a starter prompt into the console.
+ *
+ * They are not pages and do not pretend to be. Every one of these is a tool
+ * that already works from the console, and a nav item opening an empty screen
+ * headed "Denial Management" would be worse than one that does the thing.
+ */
+const DOMAIN_PROMPTS = {
+  denials: "Show me the open denial worklist, sorted by what is recoverable and what is closest to a deadline.",
+  money: "Run the KPI dashboard, then show me payment variance for anything underpaid.",
+  em: "Check the E/M levels I have billed against the documentation, in both directions.",
+  trace: "Trace claim ",
+  fmea: "Diagnose the tool failures from the last 24 hours and tell me whether this is one incident or several.",
+  telemetry: "Check Ollama telemetry, dataset health, and tenant database integrity.",
+};
+
+document.querySelectorAll(".navitem").forEach((n) =>
+  n.addEventListener("click", () => {
+    if (n.dataset.view) return show(n.dataset.view);
+    const prompt = DOMAIN_PROMPTS[n.dataset.domain];
+    if (!prompt) return;
+    show("console");
+    $("#input").value = prompt;
+    $("#input").focus();
+  }),
+);
 
 // ── Overview ───────────────────────────────────────────────────────────
 
@@ -76,6 +101,31 @@ function renderKpiTiles(kpis) {
     kpis.skipped ?? (withheld ? withheld[3] : tiles[0][3]) ?? "";
 }
 
+/**
+ * The operational strip in the header.
+ *
+ * Only figures this database can actually support. A ticker showing a hardcoded
+ * "94.2%" would be the most-read number in the product and a lie, so a metric
+ * with nothing behind it is omitted rather than filled in — and the strip is
+ * empty on a fresh install, which is the correct amount to say.
+ */
+function renderTicker(ov) {
+  const ticks = [];
+  const k = ov.kpis;
+  if (k && k.acceptanceRate !== null) ticks.push(["Clean claim rate", `${k.acceptanceRate.toFixed(1)}%`, false]);
+  if (k && k.daysInAr !== null) ticks.push(["Days in A/R", String(k.daysInAr), false]);
+  if (ov.counts?.worklist) ticks.push(["Open worklist", `${ov.counts.worklist}`, ov.counts.worklist > 0]);
+  if (ov.counts?.heldMail) ticks.push(["Mail held", `${ov.counts.heldMail}`, true]);
+
+  $("#ticker").replaceChildren(
+    ...ticks.map(([label, value, warn]) => {
+      const d = el("div", `tick${warn ? " warn" : ""}`);
+      d.append(el("b", null, value), el("span", null, label));
+      return d;
+    }),
+  );
+}
+
 async function loadOverview() {
   const ov = await fetch("/api/overview").then((r) => r.json()).catch(() => null);
   if (!ov) return;
@@ -115,6 +165,7 @@ async function loadOverview() {
   );
 
   renderKpiTiles(ov.kpis);
+  renderTicker(ov);
 
   $("#ov-starters").replaceChildren(
     ...STARTERS.map(([prompt, glyph, tag, why]) => {
@@ -412,37 +463,88 @@ function addMessage(role, text) {
 
 function addTool(name, input) {
   $("#stream").querySelector(".empty")?.remove();
-  const d = el("details", "tool");
-  const s = el("summary");
-  s.append(el("code", null, name), el("span", "st", "running…"));
-  d.append(s, el("pre", null, JSON.stringify(input ?? {}, null, 2)));
+  // A running call is a thin line, not a card. The card is what the RESULT
+  // earns: printing a card shell up front means every in-flight call looks like
+  // a finished verdict for as long as it takes to run.
+  const d = el("div", "running");
+  d.append(el("span", "spin"), el("code", null, name), el("span", "st", "running…"));
+  d.dataset.input = JSON.stringify(input ?? {});
+  d.dataset.tool = name;
   $("#stream").append(d);
   scroll();
   liveTool = d;
   return d;
 }
 
-function finishTool(summary, isError, view) {
-  const d = liveTool ?? $("#stream").querySelector(".tool:last-of-type");
-  if (!d) return;
-  d.querySelector(".st").textContent = isError ? "error" : "done";
-  if (isError) d.classList.add("err");
-  const out = el("pre", null, String(summary ?? ""));
-  out.style.color = isError ? "var(--bad)" : "var(--ink-2)";
-  d.append(out);
+const clock = () => new Date().toTimeString().slice(0, 8);
 
-  // A rendered view goes OUTSIDE the collapsed tool row. The raw text stays
-  // inside it, because the text is what the model saw and hiding that would
-  // make the transcript a worse record than it was — but the component is the
-  // thing a coder is meant to read, and burying it one click deep in a
-  // <details> that defaults to closed defeats the point.
+/**
+ * Send a rendered view to the canvas column, and say so in the feed.
+ *
+ * The canvas holds ONE thing at a time on purpose. A stack of every view
+ * produced this session is the log stream again, one column to the right; the
+ * point of a canvas is that it shows the artifact currently being worked on.
+ * Superseded views stay reachable — the feed keeps a chip that puts them back.
+ */
+function toCanvas(rendered, title) {
+  const canvas = $("#canvas-body");
+  canvas.replaceChildren(rendered);
+  $("#canvas-title").textContent = title;
+  $("#canvas").hidden = false;
+  document.body.classList.add("split");
+  return rendered;
+}
+
+function finishTool(summary, isError, view) {
+  const d = liveTool ?? $("#stream").querySelector(".running:last-of-type");
+  if (!d) return;
+  const name = d.dataset.tool || "tool";
+  let input;
+  try {
+    input = JSON.parse(d.dataset.input || "{}");
+  } catch {
+    input = {};
+  }
+
+  const card = view?.card;
+  const replacement = el("div", "wfgroup");
+
+  if (card && window.workflowCard) {
+    replacement.append(window.workflowCard(card, name, clock()));
+  } else {
+    // No card means the server had no structured verdict for this tool — most
+    // of them. A neutral header, never a green one: an invented CLEAR on a tool
+    // whose output nobody parsed is the failure this whole design is avoiding.
+    const bare = el("div", "wfcard plain");
+    const head = el("div", "wfhead");
+    const left = el("div", "wfhead-l");
+    if (isError) left.append(el("span", "vbadge hold", "FAILED"));
+    left.append(el("h3", null, name));
+    head.append(left, el("span", "wftime", clock()));
+    bare.append(head);
+    bare.append(el("p", "wfbecause", firstLines(String(summary ?? ""))));
+    replacement.append(bare);
+  }
+
+  if (window.toolTelemetry) replacement.append(window.toolTelemetry(name, input, summary, isError));
+  d.replaceWith(replacement);
+
   const rendered = view && window.renderView ? window.renderView(view) : null;
   if (rendered) {
-    d.open = false;
-    $("#stream").append(rendered);
+    toCanvas(rendered, card?.title || name);
+    const chip = el("button", "recall", `↗ ${card?.title || name}`);
+    chip.addEventListener("click", () => toCanvas(window.renderView(view), card?.title || name));
+    replacement.append(chip);
   }
+
   liveTool = null;
   scroll();
+}
+
+/** First couple of lines of a tool's text, for a card with no structured view. */
+function firstLines(text, max = 240) {
+  const t = text.trim().split("\n").slice(0, 2).join(" ").trim();
+  return t.length > max ? `${t.slice(0, max)}…` : t || "(no output)";
 }
 
 function scroll() {
@@ -570,3 +672,13 @@ async function send() {
 (async function boot() {
   await Promise.all([loadOverview(), loadModules(), loadSessions()]);
 })();
+
+// ── Canvas controls ────────────────────────────────────────────────────
+$("#canvas-close")?.addEventListener("click", () => {
+  $("#canvas").hidden = true;
+  document.body.classList.remove("split");
+});
+// The browser's own print dialog IS the PDF export. Bundling a PDF library to
+// reproduce something every browser already does well would be a dependency
+// earning nothing, and the print stylesheet already isolates the artifact.
+$("#canvas-print")?.addEventListener("click", () => window.print());

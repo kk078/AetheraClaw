@@ -131,6 +131,13 @@ export async function buildServer(opts: {
         return 0;
       }
     };
+    const countWhere = (table: string, where: string): number => {
+      try {
+        return (store.db.prepare(`SELECT COUNT(*) AS c FROM ${table} WHERE ${where}`).get() as { c: number }).c;
+      } catch {
+        return 0;
+      }
+    };
     const ollama = resolveOllamaTarget(config.providers.ollama, process.env.OLLAMA_API_KEY);
     return {
       provider: config.provider,
@@ -148,6 +155,9 @@ export async function buildServer(opts: {
         worklist: count("worklist_items"),
         suggestions: count("code_suggestions"),
         audit: count("audit_chain"),
+        // Surfaced in the header ticker: mail held at the PHI boundary is work
+        // nobody can see from any other screen, and some of it has a clock.
+        heldMail: countWhere("inbound_mail", "quarantined = 1 AND status = 'new'"),
       },
       kpis: overviewKpis(store),
     };
