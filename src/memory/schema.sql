@@ -363,6 +363,26 @@ CREATE TABLE IF NOT EXISTS contract_rates (
 );
 CREATE INDEX IF NOT EXISTS idx_contract_rates_lookup ON contract_rates(payer_key, code);
 
+-- ── Structured tool views ───────────────────────────────────────────────────
+-- Rendered payloads for the web UI, keyed by the tool call that produced them.
+--
+-- A SEPARATE TABLE, deliberately. The runner rebuilds the model's context by
+-- replaying `messages.content_json` verbatim, so anything stored there is sent
+-- to the provider on every subsequent turn. A rendered claim form is thousands
+-- of tokens of JSON restating what the tool's text already said — storing it
+-- alongside the message would silently double the cost of every tool call that
+-- draws something. Here it is reachable by the browser and unreachable by the
+-- model, which is exactly the split that makes rich rendering free.
+CREATE TABLE IF NOT EXISTS tool_views (
+  session_id  TEXT NOT NULL,
+  tool_use_id TEXT NOT NULL,
+  kind        TEXT NOT NULL,
+  data_json   TEXT NOT NULL,
+  created_at  INTEGER NOT NULL,
+  PRIMARY KEY (session_id, tool_use_id)
+);
+CREATE INDEX IF NOT EXISTS idx_tool_views_session ON tool_views(session_id, created_at);
+
 CREATE TABLE IF NOT EXISTS filing_proof (
   id TEXT PRIMARY KEY,
   claim_id TEXT NOT NULL,

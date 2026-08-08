@@ -98,6 +98,36 @@ export class MemoryStore {
       .all(sessionId) as MessageRow[];
   }
 
+  /**
+   * Save a tool's rendered view.
+   *
+   * Kept out of `messages` on purpose — see the schema comment. Nothing written
+   * here is ever replayed into the model's context.
+   */
+  saveToolView(sessionId: string, toolUseId: string, view: { kind: string; data: unknown }): void {
+    this.db
+      .prepare(
+        "INSERT OR REPLACE INTO tool_views (session_id, tool_use_id, kind, data_json, created_at) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(sessionId, toolUseId, view.kind, JSON.stringify(view.data), Date.now());
+  }
+
+  /** Views for a session, keyed by tool_use_id so the UI can attach them on replay. */
+  loadToolViews(sessionId: string): Record<string, { kind: string; data: unknown }> {
+    const rows = this.db
+      .prepare("SELECT tool_use_id, kind, data_json FROM tool_views WHERE session_id = ?")
+      .all(sessionId) as Array<{ tool_use_id: string; kind: string; data_json: string }>;
+    const out: Record<string, { kind: string; data: unknown }> = {};
+    for (const r of rows) {
+      try {
+        out[r.tool_use_id] = { kind: r.kind, data: JSON.parse(r.data_json) };
+      } catch {
+        // A malformed row loses one rendering, not the whole transcript.
+      }
+    }
+    return out;
+  }
+
   close(): void {
     this.db.close();
   }

@@ -2,7 +2,9 @@ import { z } from "zod";
 import { defineTool } from "../registry.js";
 import { npiLuhnValid } from "./npi.js";
 import { ClaimSchema, type ClaimInput } from "./x12/837.js";
-import { checkNcci } from "./datasets.js";
+import { buildClaimScrubView } from "../../views/build.js";
+import { autohealClaim } from "./autoheal.js";
+import { checkNcci, ncciDataNotice } from "./datasets.js";
 import type { ScrubFinding } from "./finding.js";
 import { checkGlobalPeriod } from "./compliance/global-period.js";
 import { checkIncidentTo } from "./compliance/incident-to.js";
@@ -77,11 +79,15 @@ export function scrubClaim(claim: ClaimInput, options: ScrubOptions = {}): Scrub
     procsOnDate.set(key, [...(procsOnDate.get(key) ?? []), line.cpt_hcpcs]);
   });
 
-  // NCCI PTP/MUE checks (from bundled/loaded data when available)
+  // NCCI PTP/MUE checks run per distinct service date — bundling is a same-day
+  // question. The missing-data notice does NOT belong in that loop: it is a fact
+  // about the installation, and repeating it per date group made a three-date
+  // claim report the same warning three times.
   for (const [date, procs] of procsOnDate) {
-    const ncci = checkNcci(procs, claim.service_lines.filter((l) => l.service_date === date));
-    findings.push(...ncci);
+    findings.push(...checkNcci(procs, claim.service_lines.filter((l) => l.service_date === date)));
   }
+  const ncciNotice = ncciDataNotice();
+  if (ncciNotice) findings.push(ncciNotice);
 
   // Accepted policy rules, compiled from coverage documents.
   if (options.policyRules?.length) findings.push(...evaluateRules(claim, options.policyRules));
@@ -133,6 +139,11 @@ export const claimScrubTool = defineTool({
     const lines = findings.map((f) => `[${f.severity.toUpperCase()}] ${f.rule}: ${f.message}`);
     const errors = findings.filter((f) => f.severity === "error").length;
     lines.push(`\nResult: ${errors === 0 ? "PASS (no errors)" : `${errors} error(s) must be fixed before submission`}`);
-    return { content: lines.join("\n") };
+    return {
+      content: lines.join("\n"),
+      // The text above is what the model reads. This is the same run rendered as
+      // a line-item form for the person reading the transcript.
+      view: { kind: "claim_scrub", data: buildClaimScrubView(claim, findings, { autoheal: autohealClaim(claim) }) },
+    };
   },
 });

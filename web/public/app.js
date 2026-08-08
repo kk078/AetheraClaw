@@ -248,12 +248,17 @@ async function openSession(id) {
   const stream = $("#stream");
   stream.replaceChildren();
 
-  const messages = await fetch(`/api/sessions/${id}/messages`).then((r) => r.json()).catch(() => []);
+  // Views live outside the message stream so they never enter the model's
+  // context, which means replaying a session needs this second fetch.
+  const [messages, views] = await Promise.all([
+    fetch(`/api/sessions/${id}/messages`).then((r) => r.json()).catch(() => []),
+    fetch(`/api/sessions/${id}/views`).then((r) => r.json()).catch(() => ({})),
+  ]);
   for (const m of messages) {
     for (const block of m.content) {
       if (block.type === "text" && block.text.trim()) addMessage(m.role, block.text);
       else if (block.type === "tool_use") addTool(block.name, block.input);
-      else if (block.type === "tool_result") finishTool(block.content, block.isError);
+      else if (block.type === "tool_result") finishTool(block.content, block.isError, views[block.toolUseId]);
     }
   }
   connect(id);
@@ -376,7 +381,7 @@ function addTool(name, input) {
   return d;
 }
 
-function finishTool(summary, isError) {
+function finishTool(summary, isError, view) {
   const d = liveTool ?? $("#stream").querySelector(".tool:last-of-type");
   if (!d) return;
   d.querySelector(".st").textContent = isError ? "error" : "done";
@@ -384,6 +389,17 @@ function finishTool(summary, isError) {
   const out = el("pre", null, String(summary ?? ""));
   out.style.color = isError ? "var(--bad)" : "var(--ink-2)";
   d.append(out);
+
+  // A rendered view goes OUTSIDE the collapsed tool row. The raw text stays
+  // inside it, because the text is what the model saw and hiding that would
+  // make the transcript a worse record than it was — but the component is the
+  // thing a coder is meant to read, and burying it one click deep in a
+  // <details> that defaults to closed defeats the point.
+  const rendered = view && window.renderView ? window.renderView(view) : null;
+  if (rendered) {
+    d.open = false;
+    $("#stream").append(rendered);
+  }
   liveTool = null;
   scroll();
 }
@@ -446,7 +462,7 @@ function connect(sessionId) {
         addTool(e.toolName, e.input);
         break;
       case "tool_result":
-        finishTool(e.summary, e.isError);
+        finishTool(e.summary, e.isError, e.view);
         break;
       case "approval_request":
         askApproval(e);

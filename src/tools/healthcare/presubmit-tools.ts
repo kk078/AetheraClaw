@@ -9,6 +9,8 @@ import { loadEras } from "./analytics.js";
 import { collectOutcomes, indexHistory, scoreDenialRisk } from "./prediction/risk.js";
 import { datasetStatuses } from "./datasets.js";
 import { assessEmLevel, evaluateGate, renderEmRisk, renderGate, type EmRisk } from "./presubmit.js";
+import { buildClaimScrubView, buildEmMeter } from "../../views/build.js";
+import { autohealClaim } from "./autoheal.js";
 
 const MdmSchema = z.object({
   patient_type: z.enum(["new", "established"]),
@@ -42,7 +44,18 @@ export const emLevelRiskTool = defineTool({
   execute: async (input) => {
     const result = assessEmLevel(input.billed_code, input.documentation as Parameters<typeof assessEmLevel>[1]);
     if ("error" in result) return { content: result.error, isError: true };
-    return { content: renderEmRisk(result) };
+    const d = input.documentation;
+    return {
+      content: renderEmRisk(result),
+      view: {
+        kind: "em_meter",
+        data: buildEmMeter(result, [
+          { label: "Problems addressed", level: describeProblems(d.problems) },
+          { label: "Data reviewed", level: describeData(d.data) },
+          { label: "Risk", level: d.risk },
+        ]),
+      },
+    };
   },
 });
 
@@ -123,6 +136,39 @@ export const presubmitCheckTool = defineTool({
         ...findings.map((f) => `  [${f.severity}] ${f.rule}: ${f.message}`),
       );
     }
-    return { content: parts.join("\n"), isError: gate.verdict === "hold" };
+    return {
+      content: parts.join("\n"),
+      isError: gate.verdict === "hold",
+      view: {
+        kind: "claim_scrub",
+        data: buildClaimScrubView(claim, findings, {
+          autoheal: autohealClaim(claim),
+          blindSpots: checksNotRun,
+          verdict: gate.verdict,
+        }),
+      },
+    };
   },
 });
+
+// Short human labels for the meter's element rows. The MDM LEVEL each element
+// scores to is computed by calculateEm; these describe what was entered, so a
+// coder can see which input drove the level rather than only the verdict.
+function describeProblems(p: z.infer<typeof MdmSchema>["problems"]): string {
+  const parts: string[] = [];
+  if (p.threat_to_life) parts.push("threat to life");
+  if (p.exacerbated_chronic) parts.push(`${p.exacerbated_chronic} exacerbated chronic`);
+  if (p.stable_chronic) parts.push(`${p.stable_chronic} stable chronic`);
+  if (p.acute_complicated_or_systemic) parts.push(`${p.acute_complicated_or_systemic} acute complicated`);
+  if (p.acute_uncomplicated) parts.push(`${p.acute_uncomplicated} acute uncomplicated`);
+  if (p.minor_problems) parts.push(`${p.minor_problems} minor`);
+  return parts.join(", ") || "none recorded";
+}
+
+function describeData(d: z.infer<typeof MdmSchema>["data"]): string {
+  const cat1 = d.tests_reviewed + d.tests_ordered + d.external_notes + (d.independent_historian ? 1 : 0);
+  const parts = [`${cat1} category-1 item(s)`];
+  if (d.independent_interpretation) parts.push("independent interpretation");
+  if (d.discussed_with_external) parts.push("external discussion");
+  return parts.join(", ");
+}

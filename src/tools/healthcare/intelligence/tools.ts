@@ -21,6 +21,7 @@ import {
   type PaidLine,
 } from "./variance.js";
 import { rateCoverage, rateFor, renderCoverage } from "./contract.js";
+import { buildVarianceWaterfall } from "../../../views/build.js";
 import { loadContractRates } from "./contract-tools.js";
 import { loadClaims } from "../../../reports/tools.js";
 import { earliestServiceDate } from "../../../reports/aggregate.js";
@@ -240,7 +241,13 @@ export const paymentVarianceTool = defineTool({
       renderVariance(findings, { linesExamined: lines.length, basis: input.basis }),
       ...(notes.length ? ["", ...notes.map((n) => `Note: ${n}`)] : []),
     ].join("\n");
-    return { content };
+    return {
+      content,
+      view: {
+        kind: "money_waterfall",
+        data: buildVarianceWaterfall(findings, { basis: input.basis, linesExamined: lines.length }),
+      },
+    };
   },
 });
 

@@ -92,6 +92,19 @@ aetheraclaw serve --tenant acme-health
 
 > This build remains **not approved for real PHI**. The access log, tenant isolation and identifier refusals are the infrastructure a PHI-approved deployment would need; turning them on does not by itself make this system a covered-entity-ready one, and the no-PHI posture in the system prompt, intake, email and portal paths is unchanged.
 
+### The console renders results, not transcripts
+
+A tool returns two things now: the text the model reads, and an optional **structured view** the browser renders. The text is unchanged, so no tool's behaviour in the agent loop changed and no prompt was rewritten.
+
+The view **never enters the model's context**. It is stored in its own `tool_views` table and streamed straight to the UI, because the runner rebuilds provider context by replaying `messages.content_json` verbatim — anything stored there is re-sent every turn, and a rendered claim form is thousands of tokens of JSON restating what the tool's prose already said. That split is what makes rich rendering free rather than a per-turn tax. A test asserts the payload does not appear in the message rows.
+
+- **`claim_scrub` / `presubmit_check`** render a line-item form: one row per service line, severity stripe, place-of-service *name* beside the code, findings expanded underneath. A **safe repair** shows what it changes (`2026-01-15 → 20260115`); anything needing a fact the claim does not contain shows as **needs a human** with the question — never a button. A one-click "accept fix" on a POS/telehealth mismatch would put a false statement on a Medicare claim in a single click, which is exactly what `claim_autoheal` refuses to do.
+- **`payment_variance`** renders expected → shortfall → actually allowed, with the reclaimable dollars as a badge, and the caveat attached to the basis: a Medicare comparison against a commercial payer is *not* a recovery claim, and a payer's own median describes its habit rather than its obligation.
+- **`em_level_risk`** renders the four-code ladder with **documented** and **billed** marked on it, plus the MDM elements that produced the level.
+- **`kpi_dashboard`** renders rings. An uncomputable metric shows `—`, never `0` — a zero reads as a measurement.
+
+Severity, line attribution and whether a repair may be offered as a button are all decided server-side in `src/views/build.ts`, where they are tested. A browser is the wrong place to re-derive a domain judgement, and a second implementation would drift from the rule engine.
+
 ### Grounding
 
 The dangerous failure in a billing assistant is not a crash, it is a fluent wrong answer. Every item here exists because a model running against this system produced one, and each is a countermeasure with a test behind it (`test/grounding.test.ts`).

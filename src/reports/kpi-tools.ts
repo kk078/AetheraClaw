@@ -2,6 +2,7 @@ import { z } from "zod";
 import { defineTool } from "../tools/registry.js";
 import type { MemoryStore } from "../memory/store.js";
 import { computeExecutiveKpis, computeNetCollectionRate, renderKpis, type AckRecord } from "./kpi.js";
+import { buildKpiTiles } from "../views/build.js";
 // Reused rather than reimplemented: two claim↔ERA loaders that normalize claim
 // ids differently would make the report and the KPIs disagree about what is
 // outstanding, which is exactly the kind of discrepancy nobody can explain.
@@ -74,6 +75,6 @@ export const kpiDashboardTool = defineTool({
       "",
       `Computed from ${claims.length} stored claim(s) and ${eras.length} remittance(s). These describe what is in this database, not the practice — a claim never built here is invisible to all three.`,
     );
-    return { content: parts.join("\n") };
+    return { content: parts.join("\n"), view: { kind: "kpi_tiles", data: buildKpiTiles(kpis) } };
   },
 });

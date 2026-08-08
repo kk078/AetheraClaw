@@ -109,13 +109,18 @@ export async function runTurn(deps: RunnerDeps, sessionId: string, userText: str
       const results: NormalizedBlock[] = [];
       for (const call of toolUses) {
         const result = await registry.execute(call.name, call.input, ctx);
+        if (result.view) store.saveToolView(sessionId, call.id, result.view);
         emit({
           type: "tool_result",
           sessionId,
           toolUseId: call.id,
           summary: result.content.slice(0, 400),
           isError: result.isError ?? false,
+          view: result.view,
         });
+        // `result.view` is deliberately NOT carried into the block pushed here:
+        // this array becomes the model's next turn, and the view would be sent
+        // to the provider on every turn thereafter.
         results.push({ type: "tool_result", toolUseId: call.id, content: result.content, isError: result.isError });
       }
       store.appendMessage(sessionId, "user", results);

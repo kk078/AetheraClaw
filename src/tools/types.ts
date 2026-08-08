@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import type { ToolView } from "../views/types.js";
 
 export type RiskLevel = "safe" | "confirm";
 
@@ -14,6 +15,16 @@ export interface ToolContext {
 export interface ToolResult {
   content: string;
   isError?: boolean;
+  /**
+   * Optional structured payload for the UI.
+   *
+   * Never reaches the model: `content` is what goes into the conversation, and
+   * this is stored separately and streamed to the browser. A rendered claim form
+   * would be thousands of tokens of JSON restating what `content` already says
+   * in prose — paying for it twice would be the entire cost of the feature with
+   * none of the benefit.
+   */
+  view?: ToolView;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

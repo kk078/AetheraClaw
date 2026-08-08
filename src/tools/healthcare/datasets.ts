@@ -45,18 +45,30 @@ export function checkNcci(
   if (ncciCache === undefined) ncciCache = loadJson("ncci-ptp.json");
   if (mueCache === undefined) mueCache = loadJson("mue.json");
 
-  const findings: ScrubFinding[] = [
+  return [
     ...(ncciCache ? checkPtpEdits(ncciCache, lines) : []),
     ...(mueCache ? checkMueEdits(mueCache, lines) : []),
   ];
-  if (!ncciCache && !mueCache) {
-    findings.push({
-      severity: "info",
-      rule: "ncci-data",
-      message: `NCCI/MUE data not installed — drop ncci-ptp.json / mue.json (from public CMS files) into ${dataDir()} for bundling & unit edits`,
-    });
-  }
-  return findings;
+}
+
+/**
+ * The "NCCI data is not installed" notice, or null when it is.
+ *
+ * Separated from checkNcci because the scrubber runs the edits once per DISTINCT
+ * SERVICE DATE — bundling is a same-day question — and this notice was being
+ * appended inside that loop. A claim spanning three dates therefore reported the
+ * same missing-data warning three times. It is a fact about the installation,
+ * not about a date group, so it belongs at the claim level and is emitted once.
+ */
+export function ncciDataNotice(): ScrubFinding | null {
+  if (ncciCache === undefined) ncciCache = loadJson("ncci-ptp.json");
+  if (mueCache === undefined) mueCache = loadJson("mue.json");
+  if (ncciCache || mueCache) return null;
+  return {
+    severity: "info",
+    rule: "ncci-data",
+    message: `NCCI/MUE data not installed — drop ncci-ptp.json / mue.json (from public CMS files) into ${dataDir()} for bundling & unit edits`,
+  };
 }
 
 // ── What is actually installed ───────────────────────────────────────────────

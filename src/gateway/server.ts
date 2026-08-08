@@ -110,6 +110,14 @@ export async function buildServer(opts: {
     }));
   });
 
+  // Views live outside the message stream, so replaying a session needs a second
+  // fetch. Keyed by tool_use_id, which is what the message blocks carry.
+  app.get("/api/sessions/:id/views", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!store.getSession(id)) return reply.code(404).send({ error: "not found" });
+    return store.loadToolViews(id);
+  });
+
   app.get("/ws", { websocket: true }, (socket, req) => {
     const url = new URL(req.url ?? "/ws", "http://localhost");
     const initialSession = url.searchParams.get("session");
