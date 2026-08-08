@@ -363,6 +363,17 @@ CREATE TABLE IF NOT EXISTS contract_rates (
 );
 CREATE INDEX IF NOT EXISTS idx_contract_rates_lookup ON contract_rates(payer_key, code);
 
+-- ── Ops baselines ───────────────────────────────────────────────────────────
+-- Small key/value store for the operational sweeps: dataset hashes recorded at
+-- install time, so the next sweep can report what changed. Deliberately not a
+-- cache — nothing here is derivable, which is the point. A hash you did not
+-- record cannot tell you a file changed behind your back.
+CREATE TABLE IF NOT EXISTS ops_baseline (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
 -- ── Structured tool views ───────────────────────────────────────────────────
 -- Rendered payloads for the web UI, keyed by the tool call that produced them.
 --

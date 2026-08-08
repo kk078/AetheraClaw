@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bindScope, checkSlug, tenantDbPath, type Tenant } from "../src/tenancy/tenant.js";
 import { SINGLE_TENANT, TenantRegistry } from "../src/tenancy/registry.js";
+import { MemoryStore } from "../src/memory/store.js";
 import {
   BULK_EXPORT_RECORDS,
   DISCLOSING_ACTIONS,
@@ -323,5 +324,41 @@ describe("access log persistence and integrity", () => {
     registry.create("Beta", "beta2");
     const beta = registry.storeFor("beta2");
     expect(loadAccessEvents(beta, 0)).toEqual([]);
+  });
+});
+
+describe("database file permissions", () => {
+  it("creates a database owner-only, including the WAL", () => {
+    // Found by ops_tenant_integrity_check on its first real run: databases were
+    // being created at whatever the umask allowed — 0644 on a default Linux
+    // install — so in the database-per-tenant design every tenant's claims were
+    // world-readable, and the isolation boundary IS the filesystem.
+    if (process.platform === "win32") return;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ac-perm-"));
+    const dbPath = path.join(dir, "sub", "db.sqlite");
+    const store = new MemoryStore(dbPath);
+    store.createSession("force a write");
+    try {
+      expect(fs.statSync(dbPath).mode & 0o777).toBe(0o600);
+      expect(fs.statSync(path.dirname(dbPath)).mode & 0o777).toBe(0o700);
+      const wal = `${dbPath}-wal`;
+      if (fs.existsSync(wal)) expect(fs.statSync(wal).mode & 0o777).toBe(0o600);
+    } finally {
+      store.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("gives every tenant database the same treatment", () => {
+    if (process.platform === "win32") return;
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "ac-permt-"));
+    const reg = new TenantRegistry(root);
+    try {
+      reg.create("Acme", "acme");
+      expect(fs.statSync(tenantDbPath(root, "acme")).mode & 0o777).toBe(0o600);
+    } finally {
+      reg.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

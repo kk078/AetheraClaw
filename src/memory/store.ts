@@ -24,6 +24,35 @@ export interface MessageRow {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
+/**
+ * Make a database owner-only.
+ *
+ * SQLite also creates `-wal` and `-shm` siblings, and the WAL holds recently
+ * written rows — leaving it readable would defeat the point of locking down the
+ * main file. Windows does not model POSIX permissions, so chmod there is a
+ * no-op the platform reports as success; the check that reads these back knows
+ * not to report a mode on Windows for the same reason.
+ *
+ * Failures are swallowed deliberately: a filesystem that cannot represent these
+ * modes (a mounted share, a container volume) must not stop the application from
+ * starting. ops_tenant_integrity_check reads the modes back and reports what is
+ * actually on disk, which is the honest place for that to surface.
+ */
+export function restrictPermissions(dbPath: string): void {
+  try {
+    fs.chmodSync(path.dirname(dbPath), 0o700);
+  } catch {
+    /* not representable here */
+  }
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      if (fs.existsSync(dbPath + suffix)) fs.chmodSync(dbPath + suffix, 0o600);
+    } catch {
+      /* not representable here */
+    }
+  }
+}
+
 export class MemoryStore {
   readonly db: SqliteDb;
 
@@ -31,6 +60,12 @@ export class MemoryStore {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     this.db = openDatabase(dbPath);
     this.db.pragma("journal_mode = WAL");
+    // Tighten permissions AFTER the driver has created the file. Databases were
+    // being created at whatever the umask allowed — 0644 on a default Linux
+    // install — which in the database-per-tenant design means every tenant's
+    // claims were world-readable. Found by ops_tenant_integrity_check on its
+    // first real run, which is the entire argument for having built it.
+    restrictPermissions(dbPath);
     this.db.pragma("foreign_keys = ON");
     const schemaFile = path.join(here, "schema.sql");
     // In dev (tsx) schema.sql sits next to the .ts; after tsc it must be copied — fall back to src.

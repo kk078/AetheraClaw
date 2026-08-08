@@ -86,6 +86,15 @@ export const PROFILES: Profile[] = [
     ],
   },
   {
+    name: "ops",
+    description: "Support and DevOps: database integrity, dataset health, inference telemetry, payer drift.",
+    include: [
+      ...BASE,
+      "ops_", "support_", "tenant_current", "phi_access_review", "audit_verify", "audit_log",
+      "data_status", "code_update_calendar", "code_set_register", "analytics_query",
+    ],
+  },
+  {
     name: "all",
     description: "Every tool. Only workable on a provider that caches tool definitions and has no tool-count cap.",
     include: ["*"],
