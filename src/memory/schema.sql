@@ -894,3 +894,24 @@ CREATE TABLE IF NOT EXISTS training_attempts (
   explanation TEXT NOT NULL DEFAULT '',
   answered_at INTEGER NOT NULL
 );
+
+-- Appeal outcomes. Without these, appeal_triage cannot estimate a win rate and
+-- says so rather than guessing — which is the correct behaviour on day one and
+-- the reason this table is worth filling in.
+--
+-- `appealed` is separate from `overturned` on purpose: the denominator of a win
+-- rate is appeals FILED, not denials received. Counting never-appealed denials
+-- as losses drives every rate toward zero and produces a tool that recommends
+-- never appealing, which is self-fulfilling.
+CREATE TABLE IF NOT EXISTS appeal_outcomes (
+  id           TEXT PRIMARY KEY,
+  claim_id     TEXT NOT NULL,
+  payer        TEXT NOT NULL,
+  carc         TEXT NOT NULL,
+  appealed     INTEGER NOT NULL DEFAULT 1,
+  overturned   INTEGER NOT NULL DEFAULT 0,
+  amount_cents INTEGER NOT NULL DEFAULT 0,
+  note         TEXT NOT NULL DEFAULT '',
+  decided_at   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_appeal_outcomes_lookup ON appeal_outcomes(payer, carc, decided_at);

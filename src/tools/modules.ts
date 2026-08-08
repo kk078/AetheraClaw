@@ -67,9 +67,9 @@ export const MODULES: ModuleDef[] = [
     key: "denials",
     label: "Denials & Appeals",
     blurb: "CARC/RARC explanation, risk scoring, worklists, appeal drafting.",
-    note: "Risk scores shrink toward the practice baseline in proportion to the evidence, so three claims with one denial is not a 33% rate.",
+    note: "Risk scores shrink toward the practice baseline in proportion to the evidence, so three claims with one denial is not a 33% rate. appeal_triage ranks by expected recovery rather than balance, declines to guess a win rate below a real sample, and never recommends a write-off.",
     glyph: "▽",
-    match: ["denial_", "appeal_draft", "worklist_"],
+    match: ["denial_", "appeal_", "worklist_"],
   },
   {
     key: "twin",
@@ -83,9 +83,9 @@ export const MODULES: ModuleDef[] = [
     key: "filing",
     label: "Timely Filing",
     blurb: "Per-payer deadlines, countdowns, and banked proof of acceptance.",
-    note: "Proof means an acceptance report, not a submission log. 277CA acknowledgments are banked as they arrive.",
+    note: "Proof means an acceptance report, not a submission log. 277CA acknowledgments are banked as they arrive. claim_status_inquiry (276/277) asks a payer where a quiet claim is — and NO RECORD means it was never in adjudication, which is a resubmission rather than a wait.",
     glyph: "◷",
-    match: ["timely_filing_", "filing_proof_record"],
+    match: ["timely_filing_", "filing_proof_record", "claim_status_inquiry"],
   },
   {
     key: "eligibility",

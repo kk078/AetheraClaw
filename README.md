@@ -207,6 +207,46 @@ A profile (`--profile ops`) for the people who keep it running rather than the p
 
 Two tools in the original spec are **not** built, because AetheraClaw does not have the architecture they describe. There are no microservices, no Cloudflare Workers or tunnels, and no message queue — it is a single Node process over SQLite. A `support_trace_claim` reporting "tunnel hops", or a `support_dlq_replay` listing queue messages, would be reporting on infrastructure that does not exist. The equivalents that *are* real are `support_trace_claim` and `support_failed_ops` above, under names that describe what they actually inspect.
 
+### Chasing a quiet claim, and deciding what to appeal
+
+**`claim_status_inquiry` (X12 276/277)** asks a payer where one specific claim is.
+It exists because `support_trace_claim` and `ops_generate_rca` both diagnose a
+claim as accepted-and-then-silent and ended at the same sentence — *chase the
+payer* — with nothing to chase with. Not the same as `ack_parse_277ca`: that is an
+unprompted acknowledgment that a claim got through the front door; this is a
+question about one that got through and then produced no remittance.
+
+The answer that matters most is **NO RECORD**, and it is never rendered as a
+pending status. It means the claim is not in adjudication and never was, so every
+day of waiting bought nothing and the filing clock ran throughout. The second
+thing the tool insists on: **pending is a status, not a protection.** Timely filing
+does not pause for adjudication and no appeal rights accrue while a claim pends,
+because nothing has been determined. `P3` is called out separately — the payer is
+waiting on *you*, and it is the most commonly missed status of the set. Responses
+are simulated and labelled as such on every run until a real connector is
+configured, and nothing simulated is written to the claim record.
+
+**`appeal_triage`** ranks denials by expected recovery — amount × this practice's
+own overturn rate for that payer and CARC, minus the stated cost of the work —
+rather than by balance, which puts a $4,000 denial nobody has ever won ahead of a
+$600 one they win four times in five. Two constraints are built in rather than
+warned about:
+
+- **It declines below a real sample.** Under twelve *recorded appeals* there is no
+  rate to estimate, and it makes no recommendation instead of inventing one. The
+  denominator is appeals **filed**, not denials received — counting never-appealed
+  denials as losses drives every rate toward zero and yields a tool that
+  recommends never appealing, which is self-fulfilling.
+- **It never recommends a write-off.** The closest it comes is reporting that a
+  denial is worth less than the work — and before saying that it checks for a
+  **cluster**. Seven $55 denials sharing one CARC are not seven write-offs; they
+  are one upstream fault, and they are the most valuable rows in the queue
+  precisely because a per-claim ranking would bury them.
+
+`appeal_outcome_record` is what makes the rate real: record losses as well as
+wins, and the ranking comes from this practice's results rather than an industry
+average.
+
 ### Grounding
 
 The dangerous failure in a billing assistant is not a crash, it is a fluent wrong answer. Every item here exists because a model running against this system produced one, and each is a countermeasure with a test behind it (`test/grounding.test.ts`).

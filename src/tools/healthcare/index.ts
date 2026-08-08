@@ -2,6 +2,8 @@ import type { Config } from "../../config/config.js";
 import type { MemoryStore } from "../../memory/store.js";
 import type { ToolRegistry } from "../registry.js";
 import { icd10SearchTool, icd10ValidateTool } from "./icd10.js";
+import { claimStatusInquiryTool } from "./x12/276.js";
+import { APPEAL_ECONOMICS_TOOLS } from "./appeal-tools.js";
 import { npiLookupTool, npiSearchTool, npiValidateTool } from "./npi.js";
 import { coverageSearchLocalTool, coverageSearchNationalTool, macLookupTool, sadExclusionTool } from "./coverage.js";
 import { denialExplainTool } from "./denial-codes.js";
@@ -92,6 +94,8 @@ export function registerHealthcareTools(
     // Coding & validation
     icd10SearchTool,
     icd10ValidateTool,
+    claimStatusInquiryTool,
+    ...APPEAL_ECONOMICS_TOOLS,
     hcpcsLookupTool,
     posLookupTool,
     dataStatusTool,
