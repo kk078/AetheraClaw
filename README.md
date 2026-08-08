@@ -219,6 +219,50 @@ file's description column, which is a truncated abbreviation — `J1885` reads
 ketorolac tromethamine, per 15 mg"*, and a coder checking a unit definition needs the
 "per 15 mg". Sources that disagree are both shown rather than silently resolved.
 
+### Taking it into the installation
+
+Reading a file in place works, and it is fragile in one specific way: the path
+usually points at Downloads, and Downloads is the folder people empty.
+
+```bash
+aetheraclaw reference install ~/Downloads/beacon.db \
+  --note "assembled reference DB, provenance unconfirmed" \
+  --edition icd10cm=20251001,hcpcs=20260101
+
+aetheraclaw reference status    # what is installed, and what is past its release date
+aetheraclaw reference verify    # sha256 against the manifest recorded at import
+aetheraclaw reference edition ncci=20260701
+```
+
+The copy lands in `~/.aetheraclaw/reference/`, beside `config.json5` and the CMS
+datasets, and the tools find it with no `referenceDbPath` set. An explicit path
+still wins — somebody who names one has said where the data is.
+
+Copied with **`VACUUM INTO` rather than a byte copy**: it compacts the file,
+fails loudly on a corrupt source instead of copying the corruption, and stages to
+a temporary name so a failure never replaces a working database with a broken
+one. Free space is checked *before* writing, because a copy that runs out of disk
+at 90% leaves a truncated SQLite file — which opens fine and answers some
+queries, a worse failure than no file at all.
+
+**It is not committed to the repository, and it never will be.** It is gigabytes,
+and it carries CPT, which is copyright the AMA — shipping it would hand licensed
+content to everyone who clones this, which is not the practice's licence to give.
+**It is not merged into `aetheraclaw.db` either:** that database is per-tenant and
+holds live claims, so folding shared reference data into it would put an identical
+gigabyte in every tenant's backup and make a code-set update rewrite a file
+holding claim data. Reference data and transaction data have different lifetimes.
+
+**On updating: there is no upstream to pull from.** A file somebody assembled has
+no published feed, and an "update" button that silently does nothing would be
+worse than saying so. What the app *can* do is read the release calendar: record
+which edition each code set is with `reference edition`, and `reference status`
+will tell you when one is past its date. **An unrecorded edition reports as
+unknown, never as stale** — those are different, and calling one stale sends
+somebody chasing an update they may already have. The CMS-derived slices are the
+exception: ICD-10-CM, NCCI, MUE and MPFS refresh independently through
+`scripts/fetch-cms-data.mjs`, and those installed files take precedence.
+
 **Licensed content is opt-in per role.** CPT descriptors are read only when
 `healthcare.referenceDbLicensedRoles` names `"cpt"`. There is no default-on path,
 because a default cannot be a decision about somebody else's licence — and the status

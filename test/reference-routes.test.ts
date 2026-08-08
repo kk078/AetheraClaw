@@ -252,3 +252,100 @@ describe("which description wins", () => {
     expect(out).toMatch(/not proof the code does not exist/);
   });
 });
+
+// ── The managed install ──────────────────────────────────────────────────────
+describe("taking the file into the installation", () => {
+  let home: string;
+  let prevHome: string | undefined;
+
+  beforeEach(() => {
+    prevHome = process.env.AETHERACLAW_HOME;
+    home = fs.mkdtempSync(path.join(os.tmpdir(), "aetheraclaw-managed-"));
+    process.env.AETHERACLAW_HOME = home;
+    resetCatalogueCache();
+  });
+
+  afterAll(() => {
+    if (prevHome === undefined) delete process.env.AETHERACLAW_HOME;
+    else process.env.AETHERACLAW_HOME = prevHome;
+  });
+
+  it("copies, compacts, and records what it installed", async () => {
+    const { installReference, managedDbPath, readManifest } = await import("../src/tools/healthcare/reference-store.js");
+    const m = installReference(dbFile, { note: "test fixture" });
+    expect(fs.existsSync(managedDbPath())).toBe(true);
+    expect(m.tables.find((t) => t.name === "ref_carc")!.rows).toBe(2);
+    expect(m.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(readManifest()!.sourcePath).toBe(path.resolve(dbFile));
+    // The original is not touched — an install that consumes its input is a
+    // move wearing a copy's name.
+    expect(fs.existsSync(dbFile)).toBe(true);
+  });
+
+  it("is found by the tools with no referenceDbPath set", async () => {
+    const { installReference } = await import("../src/tools/healthcare/reference-store.js");
+    installReference(dbFile);
+    resetCatalogueCache();
+    expect(lookupRole({}, "carc", "B7")?.description).toMatch(/not certified/);
+  });
+
+  it("still lets an explicit path win", async () => {
+    // Somebody who names a path has said where the data is. Quietly preferring
+    // a managed copy would answer from a file they did not choose.
+    const { installReference, managedDbPath } = await import("../src/tools/healthcare/reference-store.js");
+    installReference(dbFile);
+    resetCatalogueCache();
+    const other = path.join(home, "other.db");
+    const db = openDatabase(other);
+    db.exec("CREATE TABLE ref_carc (code TEXT, description TEXT)");
+    db.prepare("INSERT INTO ref_carc VALUES (?,?)").run("B7", "a different answer entirely");
+    db.close();
+    expect(lookupRole({ referenceDbPath: other }, "carc", "B7")?.description).toBe("a different answer entirely");
+    expect(managedDbPath()).toContain(home);
+  });
+
+  it("verifies the installed file against its manifest", async () => {
+    const { installReference, managedDbPath, verifyInstalled } = await import("../src/tools/healthcare/reference-store.js");
+    installReference(dbFile);
+    expect(verifyInstalled().ok).toBe(true);
+    fs.appendFileSync(managedDbPath(), "x");
+    const after = verifyInstalled();
+    expect(after.ok).toBe(false);
+    expect(after.message).toMatch(/Size changed/);
+  });
+
+  it("refuses to install a file that is not a usable database", async () => {
+    const { installReference, managedDbPath } = await import("../src/tools/healthcare/reference-store.js");
+    const junk = path.join(home, "junk.db");
+    fs.writeFileSync(junk, "not a database at all");
+    expect(() => installReference(junk)).toThrow();
+    // And left nothing behind at the destination.
+    expect(fs.existsSync(managedDbPath())).toBe(false);
+  });
+
+  it("reports an unrecorded edition as unknown, never as stale", async () => {
+    // Unknown and out-of-date are different, and calling an unrecorded edition
+    // stale would send somebody chasing an update they may already have.
+    const { installReference, assessReference } = await import("../src/tools/healthcare/reference-store.js");
+    const m = installReference(dbFile);
+    const icd = assessReference(m, "20260808").find((s) => s.setId === "icd10cm")!;
+    expect(icd.installed).toBeNull();
+    expect(icd.stale).toBe(false);
+    expect(icd.message).toMatch(/Edition not recorded/);
+  });
+
+  it("calls a recorded old edition stale", async () => {
+    const { installReference, assessReference } = await import("../src/tools/healthcare/reference-store.js");
+    const m = installReference(dbFile, { editions: { icd10cm: "20211001" } });
+    const icd = assessReference(m, "20260808").find((s) => s.setId === "icd10cm")!;
+    expect(icd.installed).toBe("20211001");
+    expect(icd.stale).toBe(true);
+  });
+
+  it("says plainly that there is no upstream to pull from", async () => {
+    const { installReference, describeManifest } = await import("../src/tools/healthcare/reference-store.js");
+    const text = describeManifest(installReference(dbFile), "20260808");
+    expect(text).toMatch(/no upstream to pull from/);
+    expect(text).toMatch(/fetch-cms-data/);
+  });
+});

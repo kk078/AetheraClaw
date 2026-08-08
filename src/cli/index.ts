@@ -7,6 +7,7 @@ import { resolveOllamaTarget } from "../providers/openai.js";
 import { createProvider } from "../providers/index.js";
 import { CASES } from "../eval/cases.js";
 import { renderReport, runEval } from "../eval/run.js";
+import { describeManifest, installReference, managedDbPath, readManifest, verifyInstalled, writeManifest } from "../tools/healthcare/reference-store.js";
 import { MemoryStore } from "../memory/store.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { createShellTool } from "../tools/shell.js";
@@ -422,6 +423,75 @@ program
     console.log(renderReport(report));
     store.close();
     process.exit(report.passed === report.total ? 0 : 1);
+  });
+
+
+const reference = program.command("reference").description("Manage the attached reference code database");
+
+reference
+  .command("install <file>")
+  .description("Copy a SQLite reference database into the installation, compacting and recording it")
+  .option("--note <text>", "What this file is and where it came from")
+  .option("--edition <pairs>", "Editions you have verified, e.g. icd10cm=20251001,hcpcs=20260101")
+  .action((file: string, opts: { note?: string; edition?: string }) => {
+    const editions: Record<string, string> = {};
+    for (const pair of (opts.edition ?? "").split(",").filter(Boolean)) {
+      const [k, v] = pair.split("=");
+      if (k && v) editions[k.trim()] = v.trim();
+    }
+    console.log(`Reading ${path.resolve(file)} …`);
+    console.log("Copying with VACUUM INTO — this compacts the file and fails on a corrupt source rather than copying the corruption.\n");
+    try {
+      const m = installReference(file, { note: opts.note, editions: editions as never });
+      console.log(describeManifest(m));
+      console.log("");
+      console.log("The original is untouched; delete it when you are satisfied. Nothing was written to the repository — this file is not committed, and CPT content in it cannot be redistributed.");
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
+reference
+  .command("status")
+  .description("What is installed, when it was imported, and which code sets are past their release date")
+  .action(() => {
+    const m = readManifest();
+    if (!m) {
+      console.log(`Nothing installed at ${managedDbPath()}.`);
+      console.log("Install one with `aetheraclaw reference install <file>`, or leave a file where it is and set healthcare.referenceDbPath to read it in place.");
+      return;
+    }
+    console.log(describeManifest(m));
+  });
+
+reference
+  .command("verify")
+  .description("Check the installed database still matches the manifest recorded at import")
+  .action(() => {
+    const r = verifyInstalled();
+    console.log(r.message);
+    process.exit(r.ok ? 0 : 1);
+  });
+
+reference
+  .command("edition <pairs>")
+  .description("Record which edition a code set in the installed file is, e.g. icd10cm=20251001")
+  .action((pairs: string) => {
+    const m = readManifest();
+    if (!m) {
+      console.error("Nothing installed. Run `aetheraclaw reference install <file>` first.");
+      process.exit(1);
+    }
+    for (const pair of pairs.split(",").filter(Boolean)) {
+      const [k, v] = pair.split("=");
+      if (!k || !v) continue;
+      // Recorded, not verified. This is somebody asserting what they checked,
+      // and the staleness report says so rather than implying the file was read.
+      (m.editions as Record<string, string>)[k.trim()] = v.trim();
+    }
+    writeManifest(m);
+    console.log(describeManifest(m));
   });
 
 program.parseAsync().catch((err) => {

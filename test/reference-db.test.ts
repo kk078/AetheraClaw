@@ -185,7 +185,10 @@ describe("tools", () => {
   it("says nothing is attached rather than erroring when unconfigured", async () => {
     resetCatalogueCache();
     const out = await referenceDbStatusTool.execute({}, ctx({}));
-    expect(out.content).toMatch(/No reference database is configured/);
+    expect(out.content).toMatch(/No reference database is attached/);
+    // Both routes named: read in place, or take a copy into the installation.
+    expect(out.content).toMatch(/referenceDbPath/);
+    expect(out.content).toMatch(/reference install/);
   });
 
   it("names a configured-but-missing file instead of reporting no database", async () => {

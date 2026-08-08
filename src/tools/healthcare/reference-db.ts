@@ -1,5 +1,7 @@
 import fs from "node:fs";
+import path from "node:path";
 import { z } from "zod";
+import { configDir } from "../../config/config.js";
 import { openDatabase, type SqliteDb } from "../../memory/sqlite.js";
 import { defineTool } from "../registry.js";
 
@@ -298,9 +300,15 @@ function stampOf(file: string): string {
 }
 
 export function catalogueFor(cfg: ReferenceDbConfig): ReferenceCatalogue | { error: string } {
-  const file = cfg.referenceDbPath;
+  // An explicit path wins; otherwise the managed copy, if one was installed.
+  // Resolved through a seam so this module does not import the store and the
+  // store does not import this one.
+  const file = cfg.referenceDbPath ?? resolveManaged();
   if (!file) {
-    return { error: "No reference database is configured. Set healthcare.referenceDbPath to a SQLite file to attach one — it is read in place, read-only, and never copied into AetheraClaw." };
+    return {
+      error:
+        "No reference database is attached. Either set healthcare.referenceDbPath to read a SQLite file in place, or take a copy into the installation with `aetheraclaw reference install <file>` — the second survives somebody emptying their Downloads folder.",
+    };
   }
   if (!fs.existsSync(file)) return { error: `Reference database configured but not found at ${file}.` };
   let stamp: string;
@@ -322,6 +330,24 @@ export function catalogueFor(cfg: ReferenceDbConfig): ReferenceCatalogue | { err
 /** Test seam — the cache is process-wide and fixtures reuse temp paths. */
 export function resetCatalogueCache(): void {
   catalogueCache = null;
+}
+
+/**
+ * Where `aetheraclaw reference install` puts a managed copy.
+ *
+ * Defined HERE rather than in reference-store.ts, which owns installing it. The
+ * first version had the store register a resolver back into this module, which
+ * only worked if something imported the store — a side-effect import nobody
+ * would think to keep, and the failure mode was a managed database silently not
+ * being found. Two lines of path arithmetic are not worth a registration.
+ */
+export function managedReferencePath(): string {
+  return path.join(configDir(), "reference", "reference.db");
+}
+
+function resolveManaged(): string | null {
+  const managed = managedReferencePath();
+  return fs.existsSync(managed) ? managed : null;
 }
 
 function referenceConfig(services: { config?: unknown }): ReferenceDbConfig {
