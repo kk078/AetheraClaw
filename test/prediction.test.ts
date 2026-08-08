@@ -24,7 +24,9 @@ import {
   type LineOutcome,
 } from "../src/tools/healthcare/prediction/risk.js";
 import {
+  DEFAULT_RECOVERABILITY,
   MAX_URGENCY,
+  RECOVERABILITY_BY_CATEGORY,
   URGENT_WITHIN_DAYS,
   prioritize,
   recoverabilityFor,
@@ -32,7 +34,39 @@ import {
   urgencyMultiplier,
   type WorkItem,
 } from "../src/tools/healthcare/prediction/prioritize.js";
+import { CARC } from "../src/tools/healthcare/denial-codes.js";
 import type { Era } from "../src/tools/healthcare/x12/835.js";
+
+// A category-key typo is invisible: the lookup misses, the default is returned,
+// and the queue still produces a plausible ordering. This table said
+// "authorization" and "timely" where the dataset says "prior-auth" and
+// "timely-filing", and had no entry for cob, eligibility, bundling or
+// documentation — so CARC 197, the most common denial in the set, was ranked on
+// a generic guess while a hand-written entry for it sat one key away.
+describe("recoverability table matches the CARC dataset", () => {
+  const datasetCategories = [...new Set(Object.values(CARC).map((c) => c.category))].sort();
+
+  it("has an entry for every category the dataset uses", () => {
+    const missing = datasetCategories.filter((c) => !(c in RECOVERABILITY_BY_CATEGORY));
+    expect(missing).toEqual([]);
+  });
+
+  it("has no entry the dataset never produces", () => {
+    const unused = Object.keys(RECOVERABILITY_BY_CATEGORY).filter((k) => !datasetCategories.includes(k));
+    expect(unused).toEqual([]);
+  });
+
+  it("resolves real CARCs to their own entry rather than the default", () => {
+    for (const carc of ["197", "45", "1", "96", "16", "22", "50"]) {
+      expect(recoverabilityFor(carc), `CARC ${carc}`).not.toBe(DEFAULT_RECOVERABILITY);
+    }
+  });
+
+  it("still falls back for a code the dataset does not carry", () => {
+    expect(recoverabilityFor("ZZZ9")).toBe(DEFAULT_RECOVERABILITY);
+    expect(recoverabilityFor(undefined)).toBe(DEFAULT_RECOVERABILITY);
+  });
+});
 
 // ── Filing dates ─────────────────────────────────────────────────────────────
 

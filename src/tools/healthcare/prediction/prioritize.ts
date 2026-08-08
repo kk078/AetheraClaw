@@ -26,9 +26,18 @@ export interface Recoverability {
 }
 
 /**
- * Priors by CARC category, keyed to the categories already carried in the CARC
- * dataset. These are starting estimates a practice's own outcomes should replace
- * — they are deliberately coarse, and the tool says so.
+ * Priors by CARC category. These are starting estimates a practice's own
+ * outcomes should replace — deliberately coarse, and the tool says so.
+ *
+ * Keys MUST match the `category` values in the CARC dataset exactly. They did
+ * not: this table said "authorization" and "timely" where the dataset says
+ * "prior-auth" and "timely-filing", and had no entry at all for cob,
+ * eligibility, bundling or documentation. Every one of those silently fell
+ * through to the default, so CARC 197 — the single most common denial in the
+ * set — was ranked on a generic 35% guess while a hand-written entry for it sat
+ * one key away, unreachable. A lookup miss is invisible by construction, which
+ * is why `test/prediction.test.ts` now asserts that every category in the
+ * dataset resolves to a real entry rather than trusting these strings.
  */
 export const RECOVERABILITY_BY_CATEGORY: Record<string, Recoverability> = {
   registration: {
@@ -46,10 +55,30 @@ export const RECOVERABILITY_BY_CATEGORY: Record<string, Recoverability> = {
     effortHours: 2,
     action: "Appeal with records and the applicable LCD/NCD citation. Slow and uncertain, but the dollars are usually large enough to be worth it.",
   },
-  authorization: {
+  "prior-auth": {
     probability: 0.35,
     effortHours: 1,
     action: "Look for a retro-authorization pathway; many payers allow one within a short window. If none, this may be a write-off with a process fix behind it.",
+  },
+  eligibility: {
+    probability: 0.7,
+    effortHours: 0.25,
+    action: "Re-verify coverage for the date of service and resubmit. Often the patient had different coverage that day, not none — check for a secondary or a plan change before writing it off.",
+  },
+  cob: {
+    probability: 0.75,
+    effortHours: 0.4,
+    action: "Establish payer order and bill the correct primary, or submit as secondary with the primary's adjudication attached. Use cob_determine_primary — guessing the order produces a second denial.",
+  },
+  bundling: {
+    probability: 0.3,
+    effortHours: 0.4,
+    action: "Check the NCCI modifier indicator FIRST. Indicator 0 cannot be unbundled by any modifier, so no appeal wins and the time is wasted; only indicator 1 is workable, and only where the record supports the distinct service.",
+  },
+  documentation: {
+    probability: 0.65,
+    effortHours: 0.75,
+    action: "Send the records the payer asked for, within their window. Most of these are procedural rather than substantive — the claim was never judged on the merits.",
   },
   coverage: {
     probability: 0.2,
@@ -71,7 +100,7 @@ export const RECOVERABILITY_BY_CATEGORY: Record<string, Recoverability> = {
     effortHours: 0.1,
     action: "Not an appeal at all — this is the patient's balance. Move it to patient billing.",
   },
-  timely: {
+  "timely-filing": {
     probability: 0.25,
     effortHours: 0.5,
     action: "Winnable only with proof of timely filing — an acceptance report, not a submission log. Check for a 277CA acknowledgment before spending time here.",
@@ -95,7 +124,7 @@ export const MAX_URGENCY = 10;
 
 export function recoverabilityFor(carc: string | undefined): Recoverability {
   if (!carc) return DEFAULT_RECOVERABILITY;
-  if (carc === "29") return RECOVERABILITY_BY_CATEGORY.timely;
+  if (carc === "29") return RECOVERABILITY_BY_CATEGORY["timely-filing"];
   const category = CARC[carc]?.category;
   return (category ? RECOVERABILITY_BY_CATEGORY[category] : undefined) ?? DEFAULT_RECOVERABILITY;
 }

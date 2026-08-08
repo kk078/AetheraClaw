@@ -2,6 +2,9 @@ import { z } from "zod";
 import { defineTool } from "../../registry.js";
 import { explainDenial } from "../denial-codes.js";
 import { parseX12 } from "./segments.js";
+import { newId } from "../../../shared/ids.js";
+import type { MemoryStore } from "../../../memory/store.js";
+import { denialCandidates, renderIngest, type IngestSummary } from "../prediction/intake.js";
 
 export interface EraAdjustment {
   group: string; // CO, PR, OA, PI
@@ -136,6 +139,67 @@ export function summarizeEra(era: Era): string {
   return out.join("\n");
 }
 
+/**
+ * Open a worklist item per denial, skipping ones already open.
+ *
+ * Deduplication is on the claim+CARC key rather than on a row id, so parsing the
+ * same remittance twice — which happens routinely, since a clearinghouse
+ * download and an email attachment are the same file — adds nothing. Only OPEN
+ * items suppress: an item somebody already worked and closed should reappear if
+ * the payer denies the same claim again.
+ */
+function ingestDenials(store: MemoryStore, era: Era, now: number): IngestSummary {
+  const candidates = denialCandidates(era);
+  const adjustmentCount = era.claims.reduce(
+    (n, c) => n + c.lines.reduce((m, l) => m + l.adjustments.length, 0),
+    0,
+  );
+
+  const find = store.db.prepare(
+    "SELECT id FROM worklist_items WHERE kind = 'denial' AND status IN ('open','in_progress') AND json_extract(detail_json, '$.key') = ?",
+  );
+  const insert = store.db.prepare(
+    `INSERT INTO worklist_items (id, kind, title, detail_json, status, priority, created_at, updated_at)
+     VALUES (?, 'denial', ?, ?, 'open', 0, ?, ?)`,
+  );
+
+  let opened = 0;
+  let alreadyOpen = 0;
+  let totalCents = 0;
+  store.db.transaction(() => {
+    for (const c of candidates) {
+      if (find.get(c.key)) {
+        alreadyOpen++;
+        continue;
+      }
+      insert.run(
+        newId("wl"),
+        c.title,
+        JSON.stringify({
+          key: c.key,
+          claim_id: c.claimId,
+          payer: c.payer,
+          carc: c.carc,
+          procedure: c.procedure,
+          amount_cents: c.amountCents,
+          source: "era_parse_835",
+        }),
+        now,
+        now,
+      );
+      opened++;
+      totalCents += c.amountCents;
+    }
+  })();
+
+  return {
+    opened,
+    alreadyOpen,
+    skippedNonRecoverable: Math.max(0, adjustmentCount - candidates.length),
+    totalCents,
+  };
+}
+
 export const eraParse835Tool = defineTool({
   name: "era_parse_835",
   description:
@@ -143,13 +207,19 @@ export const eraParse835Tool = defineTool({
   schema: z.object({ era_text: z.string().describe("Raw 835 file contents") }),
   execute: async (input, ctx) => {
     const era = parse835(input.era_text);
-    // Persist for analytics / denial worklists.
-    const store = (ctx.services.store ?? null) as { db?: { prepare: (s: string) => { run: (...args: unknown[]) => unknown } } } | null;
-    if (store?.db) {
-      store.db
-        .prepare("INSERT INTO remittances (id, payer, era_json, received_at) VALUES (?, ?, ?, ?)")
-        .run(`era_${Date.now()}_${Math.floor(Math.random() * 1e6)}`, era.payer, JSON.stringify(era), Date.now());
-    }
-    return { content: summarizeEra(era) };
+    const store = (ctx.services.store ?? null) as MemoryStore | null;
+    if (!store?.db) return { content: summarizeEra(era) };
+
+    const now = Date.now();
+    store.db
+      .prepare("INSERT INTO remittances (id, payer, era_json, received_at) VALUES (?, ?, ?, ?)")
+      .run(newId("era"), era.payer, JSON.stringify(era), now);
+
+    // Denials become worklist rows here rather than waiting for someone to read
+    // the summary and open them by hand — which is how the small ones never got
+    // opened at all. The queue computes priority from live rows, so there is no
+    // stored score to invalidate; getting the rows in IS the event handling.
+    const summary = ingestDenials(store, era, now);
+    return { content: summarizeEra(era) + renderIngest(summary, era.payer || "this payer") };
   },
 });

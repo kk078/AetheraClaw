@@ -12,6 +12,7 @@ import { ackParse277caTool } from "./x12/277ca.js";
 import { claimBuildSecondaryTool, cobBalanceCheckTool } from "./x12/837-cob.js";
 import { cobDeterminePrimaryTool } from "./cob.js";
 import { claimScrubTool } from "./claim-scrub.js";
+import { claimAutohealTool } from "./autoheal.js";
 import { dataStatusTool, hcpcsLookupTool } from "./datasets.js";
 import { eligibilityCheckTool } from "./eligibility.js";
 import { worklistAddTool, worklistListTool, worklistUpdateTool } from "./worklist.js";
@@ -103,6 +104,7 @@ export function registerHealthcareTools(
     sadExclusionTool,
     // Claims lifecycle
     claimScrubTool,
+    claimAutohealTool,
     claimBuild837Tool,
     eraParse835Tool,
     ackParse277caTool,

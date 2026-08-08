@@ -51,9 +51,9 @@ export const MODULES: ModuleDef[] = [
     key: "claims",
     label: "Claim Build & Scrub",
     blurb: "837P generation, rule-engine scrubbing, charge capture.",
-    note: "The scrubber reports severity, and a dangling diagnosis pointer is an error rather than a warning — it cannot be adjudicated.",
+    note: "The scrubber reports severity, and a dangling diagnosis pointer is an error rather than a warning — it cannot be adjudicated. claim_autoheal fixes only what has one correct answer; anything needing a fact the claim does not contain comes back as a question.",
     glyph: "▣",
-    match: ["claim_scrub", "claim_build_837p", "superbill_build"],
+    match: ["claim_scrub", "claim_autoheal", "claim_build_837p", "superbill_build"],
   },
   {
     key: "remittance",
