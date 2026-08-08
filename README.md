@@ -66,14 +66,49 @@ An explicit `--provider` is honoured or it fails — it is never quietly swapped
 suite offline — no database, no network, no keys — so a green run proves the
 checkout is sound before any provider is configured.
 
+### Reference data
+
+`node scripts/fetch-cms-data.mjs` downloads the current CMS files and converts them
+into the JSON the offline checks read. No dependencies and no `unzip` on the PATH —
+the script carries a small ZIP reader so it runs on a stock Windows install.
+
+```bash
+node scripts/fetch-cms-data.mjs                 # all of it, ~25s
+node scripts/fetch-cms-data.mjs --only=mue,mpfs # a subset
+node scripts/fetch-cms-data.mjs --hospital      # outpatient facility edits instead of practitioner
+```
+
+Verified end to end against the July 2026 releases: 1,728,585 active PTP edits,
+15,162 MUE ceilings, 17,095 priced codes, 218 GPCI localities, conversion factor
+33.4009 read out of the RVU file rather than remembered.
+
+**Retired edits are dropped, and that is the point.** The published PTP table is
+cumulative — 904,804 of its rows are edits CMS no longer enforces, each carrying a
+deletion date. Loading them would make the scrubber report bundling violations on
+claims that would have paid: confident, specific, and wrong. Rows carrying a 26 or
+TC modifier are skipped in the RVU file for the same class of reason — letting a
+professional-component row overwrite the global code silently prices every global
+service at about a third of the correct amount.
+
+**Licence.** These files contain CPT codes, copyright the AMA; CMS routes the NCCI
+links through an AMA licence page. They are fetched to your machine at runtime and
+are **never committed to this repository** — the same posture as `cptDataPath`. Do
+not redistribute what lands in `~/.aetheraclaw/data`.
+
+**Two limits worth knowing.** `hcpcs.json` is built from the RVU file's own
+description column, which covers every *priced* code but not unpriced HCPCS — most
+DME, supplies and drugs. CMS's "alpha-numeric HCPCS file" looks like the right
+source and is not: the 2026 ANWEB record carries ~1,700 codes and contains none of
+J1885, E0114, A0428 or G0008, so nothing here is built on it. A miss reports as
+"not found in local data" rather than as a nonexistent code. Second, `ncci-ptp.json`
+is ~105 MB and `claim_scrub` currently scans it linearly: the first scrub after
+startup costs ~2.4 s (the JSON parse), and every scrub after that ~110 ms.
+
 **What a fresh install does and does not fetch.** `npm install` takes ~200 MB and
 no build step. Playwright's browser binaries are *not* downloaded — the payer-portal
 tools need `npx playwright install chromium` first, and every other tool works
-without it. Reference datasets are not bundled either: they live in
-`~/.aetheraclaw/data` and every tool that wants one **degrades and says so** rather
-than guessing, so a first run is fully functional minus NCCI edits, MPFS pricing and
-HCPCS descriptions. `data_status` lists what is missing and what each absence stops
-you from checking.
+without it. Reference datasets are not bundled either — see above; `data_status` lists what is
+missing and what each absence stops you from checking.
 
 State lives in `~/.aetheraclaw` — `config.json5`, `aetheraclaw.db`, `data/` — and
 the workspace defaults to `~/aetheraclaw-workspace`. Set `AETHERACLAW_HOME` to put
