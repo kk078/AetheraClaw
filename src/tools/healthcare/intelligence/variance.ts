@@ -152,7 +152,7 @@ export function payerBaselines(lines: PaidLine[]): Map<string, Baseline> {
   return out;
 }
 
-export type VarianceBasis = "fee_schedule" | "payer_history";
+export type VarianceBasis = "fee_schedule" | "payer_history" | "contract";
 
 export interface VarianceFinding {
   severity: "error" | "warning" | "info";
@@ -179,6 +179,15 @@ export interface VarianceOptions {
   minSample?: number;
   /** Ignore shortfalls smaller than this many dollars. */
   minDollars?: number;
+  /**
+   * Per-line expected amount, for bases that need more than the code to decide.
+   *
+   * A contracted rate depends on payer, code, modifier AND date of service, none
+   * of which fit in a code-keyed map. Returning undefined means "no rate applies
+   * to this line", which is different from "the rate is zero" and must not
+   * become a finding.
+   */
+  expectedFor?: (line: PaidLine) => { expected: number; note: string } | undefined;
 }
 
 export function detectVariance(lines: PaidLine[], opts: VarianceOptions): VarianceFinding[] {
@@ -193,7 +202,12 @@ export function detectVariance(lines: PaidLine[], opts: VarianceOptions): Varian
     let expected: number | undefined;
     let sourceNote = "";
 
-    if (opts.basis === "fee_schedule") {
+    if (opts.expectedFor) {
+      const resolved = opts.expectedFor(line);
+      if (!resolved) continue;
+      expected = resolved.expected;
+      sourceNote = resolved.note;
+    } else if (opts.basis === "fee_schedule") {
       expected = opts.expectedByCode?.get(line.code.toUpperCase());
       sourceNote = "the Medicare fee schedule";
     } else {

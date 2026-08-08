@@ -338,6 +338,31 @@ CREATE INDEX IF NOT EXISTS idx_credentialing_due ON credentialing(status, revali
 -- winnable only with an ACCEPTANCE report — a submission log shows you sent a
 -- claim, an acknowledgment shows the payer received it, and only the second is
 -- proof. The 277CA is the cleanest source.
+-- ── Contracted rates ────────────────────────────────────────────────────────
+-- What a payer agreed to allow, per code, from the practice's own signed
+-- contract. This is the only basis on which "underpaid" is a contractual claim
+-- rather than an observation; payment_variance's other two bases compare against
+-- Medicare or against the payer's own habit, neither of which the payer owes.
+--
+-- Rates are dated because fee schedules are amended, and an amendment is
+-- normally the reason a payment changed. A rate with no effective date would
+-- silently apply the new schedule to old claims and report every one of them as
+-- correct — or as underpaid, depending on which direction the amendment went.
+CREATE TABLE IF NOT EXISTS contract_rates (
+  id             TEXT PRIMARY KEY,
+  payer_key      TEXT NOT NULL,        -- normalized payer name
+  payer          TEXT NOT NULL,
+  code           TEXT NOT NULL,
+  modifier       TEXT NOT NULL DEFAULT '',   -- '' means the base rate
+  allowed        REAL NOT NULL,        -- contracted allowed amount per unit
+  effective_from TEXT NOT NULL,        -- YYYYMMDD
+  effective_to   TEXT NOT NULL DEFAULT '',   -- '' = still in force
+  source         TEXT NOT NULL DEFAULT '',   -- where this came from; an unsourced rate is hearsay
+  created_at     INTEGER NOT NULL,
+  UNIQUE (payer_key, code, modifier, effective_from)
+);
+CREATE INDEX IF NOT EXISTS idx_contract_rates_lookup ON contract_rates(payer_key, code);
+
 CREATE TABLE IF NOT EXISTS filing_proof (
   id TEXT PRIMARY KEY,
   claim_id TEXT NOT NULL,

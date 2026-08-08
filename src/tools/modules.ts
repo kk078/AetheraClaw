@@ -59,9 +59,9 @@ export const MODULES: ModuleDef[] = [
     key: "remittance",
     label: "Remittance & Variance",
     blurb: "835 parsing, acknowledgment triage, underpayment detection.",
-    note: "Underpayment is measured against Medicare or the payer's own established median, so it works without a contract on file.",
+    note: "Underpayment is measured against Medicare, the payer's own established median, or a recorded contract. Only the last supports the sentence \"you allowed less than the agreement says\" — a payer's median describes its habit, not its obligation, so a payer underpaying since signing has a median that IS the underpayment.",
     glyph: "▤",
-    match: ["era_", "ack_parse_277ca", "payment_variance", "fee_schedule_drift", "reimbursement_estimate", "analytics_query"],
+    match: ["era_", "ack_parse_277ca", "payment_variance", "fee_schedule_drift", "reimbursement_estimate", "analytics_query", "contract_rate_", "kpi_dashboard"],
   },
   {
     key: "denials",

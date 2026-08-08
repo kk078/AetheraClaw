@@ -15,7 +15,7 @@ function db(ctx: { services: Record<string, unknown> }) {
   return store.db;
 }
 
-function loadClaims(ctx: { services: Record<string, unknown> }): StoredClaim[] {
+export function loadClaims(ctx: { services: Record<string, unknown> }): StoredClaim[] {
   const rows = db(ctx).prepare("SELECT id, payer, claim_json, status, created_at FROM claims").all() as Array<{
     id: string;
     payer: string;
@@ -33,7 +33,7 @@ function loadClaims(ctx: { services: Record<string, unknown> }): StoredClaim[] {
   });
 }
 
-function loadEras(ctx: { services: Record<string, unknown> }): StoredEra[] {
+export function loadEras(ctx: { services: Record<string, unknown> }): StoredEra[] {
   const rows = db(ctx).prepare("SELECT payer, era_json, received_at FROM remittances").all() as Array<{
     payer: string;
     era_json: string;

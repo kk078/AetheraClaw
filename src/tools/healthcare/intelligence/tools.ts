@@ -18,7 +18,12 @@ import {
   detectVariance,
   payerBaselines,
   renderVariance,
+  type PaidLine,
 } from "./variance.js";
+import { rateCoverage, rateFor, renderCoverage } from "./contract.js";
+import { loadContractRates } from "./contract-tools.js";
+import { loadClaims } from "../../../reports/tools.js";
+import { earliestServiceDate } from "../../../reports/aggregate.js";
 
 type MpfsTable = Record<string, RvuRow>;
 
@@ -100,7 +105,7 @@ export const paymentVarianceTool = defineTool({
   description:
     "Find underpaid lines across stored remittances. Recovers what each payer actually allowed (paid + patient responsibility + sequestration, since CARC 253 is a reduction to the federal payment rather than to the allowed amount) and compares it two ways. 'payer_history' measures each payer against its own established median for that code and works for any payer without knowing the contract. 'fee_schedule' compares against the Medicare MPFS and is meaningful for Medicare; commercial payers pay a contracted percentage of Medicare, so expect apparent variance there.",
   schema: z.object({
-    basis: z.enum(["payer_history", "fee_schedule"]).default("payer_history"),
+    basis: z.enum(["payer_history", "fee_schedule", "contract"]).default("payer_history"),
     payer: z.string().optional().describe("Substring filter on payer name"),
     tolerance_pct: z.number().min(0).max(1).default(0.02).describe("Ignore shortfalls under this share of expected"),
     min_dollars: z.number().min(0).default(1),
@@ -122,7 +127,55 @@ export const paymentVarianceTool = defineTool({
     if (lines.length === 0) return { content: "No adjudicated service lines matched." };
 
     let expectedByCode: Map<string, number> | undefined;
+    let expectedFor: ((line: PaidLine) => { expected: number; note: string } | undefined) | undefined;
     const notes: string[] = [];
+
+    if (input.basis === "contract") {
+      const rates = loadContractRates(store);
+      if (rates.length === 0) {
+        return {
+          content:
+            'No contracted rates on file. Record them with contract_rate_set, or use basis="payer_history", which measures each payer against its own established median and needs no contract — it can show that a payment is unusual, though never that it breaches an agreement.',
+          isError: true,
+        };
+      }
+
+      // Rate selection is by DATE OF SERVICE, which the remittance does not
+      // carry — so it is looked up from the stored claim. Using the remittance
+      // date instead would apply an amendment to claims serviced before it took
+      // effect, and near a rate change that is most of them.
+      const serviceDates = new Map<string, string>();
+      for (const stored of loadClaims({ services: ctx.services })) {
+        serviceDates.set(stored.claimId.trim().toUpperCase(), earliestServiceDate(stored.claim));
+      }
+
+      let undated = 0;
+      expectedFor = (line) => {
+        const serviceDate = serviceDates.get(line.claimId.trim().toUpperCase());
+        if (!serviceDate) {
+          undated++;
+          return undefined;
+        }
+        const rate = rateFor(rates, {
+          payer: line.payer,
+          code: line.code,
+          modifiers: line.modifiers,
+          serviceDate,
+        });
+        return rate ? { expected: rate.allowed, note: `the contracted rate (${rate.source})` } : undefined;
+      };
+
+      const billed = lines.flatMap((l) => {
+        const serviceDate = serviceDates.get(l.claimId.trim().toUpperCase());
+        return serviceDate ? [{ payer: l.payer, code: l.code, serviceDate }] : [];
+      });
+      notes.push(renderCoverage(rateCoverage(rates, billed)));
+      if (undated > 0) {
+        notes.push(
+          `${undated} adjudicated line(s) belong to claims not stored here, so their date of service is unknown and no contracted rate could be selected for them. They were skipped rather than measured against today's rate.`,
+        );
+      }
+    }
 
     if (input.basis === "fee_schedule") {
       const mpfs = loadDataJson<MpfsTable>("mpfs.json");
@@ -160,6 +213,7 @@ export const paymentVarianceTool = defineTool({
     const findings = detectVariance(lines, {
       basis: input.basis,
       expectedByCode,
+      expectedFor,
       baselines: input.basis === "payer_history" ? payerBaselines(lines) : undefined,
       tolerancePct: input.tolerance_pct,
       minSample: input.min_sample,

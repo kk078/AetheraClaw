@@ -69,6 +69,7 @@ export const PROFILES: Profile[] = [
     include: [
       ...BASE,
       "payment_variance", "reimbursement_estimate", "fee_schedule_drift", "analytics_query",
+      "kpi_dashboard", "contract_rate_",
       "revenue_model_fit", "cash_forecast", "simulate_scenario", "forecast_", "patient_",
       "rate_", "negotiation_brief", "idr_", "raf_calculate", "hcc_recapture", "suspect_",
       "quality_measures", "credit_balance_", "era_export", "report_generate",
