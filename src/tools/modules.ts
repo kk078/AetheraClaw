@@ -245,7 +245,7 @@ export const MODULES: ModuleDef[] = [
     blurb: "Email intake and replies, scheduled workbook and PDF exports.",
     note: "Outbound mail is an approval-gated draft, like every other artifact that leaves the building.",
     glyph: "✉",
-    match: ["email_", "report_generate"],
+    match: ["email_", "mail_", "report_generate"],
   },
   {
     key: "system",

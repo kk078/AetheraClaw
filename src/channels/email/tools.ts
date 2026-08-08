@@ -4,6 +4,7 @@ import { z } from "zod";
 import { defineTool } from "../../tools/registry.js";
 import { confinePath } from "../../tools/path-guard.js";
 import { newId } from "../../shared/ids.js";
+import { appendAudit } from "../../audit/store.js";
 import type { Config } from "../../config/config.js";
 import type { MemoryStore } from "../../memory/store.js";
 import { classify, redact, renderClassification, type InboundMessage } from "./classify.js";
@@ -71,7 +72,23 @@ function storeMessage(
       message.receivedAt,
       Date.now(),
     );
-  return { stored: result.changes > 0, quarantined, summary: renderClassification(message, c) };
+  const stored = result.changes > 0;
+  if (stored) {
+    // Bind the ingest into the hash chain. The HASH of the raw message is what
+    // is anchored — not the message — so the chain can later prove that a
+    // specific letter was the one ingested, without the log becoming a second
+    // copy of correspondence whose body was deliberately not stored.
+    const store = ctx.services.store as MemoryStore | undefined;
+    if (store) {
+      appendAudit(store, {
+        kind: "mail_ingest",
+        actor: `mailbox:${mailbox}`,
+        summary: `${c.kind} from ${message.from} — ${message.subject.slice(0, 120)}${quarantined ? " [HELD: PHI]" : ""}`,
+        payload: { uid: message.id, from: message.from, subject: message.subject, body: message.text },
+      });
+    }
+  }
+  return { stored, quarantined, summary: renderClassification(message, c) };
 }
 
 export const emailPollTool = defineTool({

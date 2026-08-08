@@ -81,7 +81,7 @@ export const PROFILES: Profile[] = [
     include: [
       ...BASE,
       "credentialing_", "policy_", "sentinel_", "audit_", "swarm_", "portal_", "payer_call_",
-      "call_", "ivr_map_", "email_", "code_update_", "code_set_register", "a2a_", "report_generate",
+      "call_", "ivr_map_", "email_", "mail_", "code_update_", "code_set_register", "a2a_", "report_generate",
       "phi_access_review",
     ],
   },
@@ -90,7 +90,7 @@ export const PROFILES: Profile[] = [
     description: "Support and DevOps: database integrity, dataset health, inference telemetry, payer drift.",
     include: [
       ...BASE,
-      "ops_", "support_", "tenant_current", "phi_access_review", "audit_verify", "audit_log",
+      "ops_", "support_", "mail_", "tenant_current", "phi_access_review", "audit_verify", "audit_log",
       "data_status", "code_update_calendar", "code_set_register", "analytics_query",
     ],
   },
