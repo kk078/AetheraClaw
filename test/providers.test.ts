@@ -12,6 +12,7 @@ import {
   OllamaProvider,
   OpenAIProvider,
   resolveOllamaBaseUrl,
+  resolveOllamaTarget,
 } from "../src/providers/openai.js";
 import type { ProviderEvent, ToolSpec } from "../src/providers/types.js";
 
@@ -140,6 +141,47 @@ describe("ollama base url", () => {
   });
 });
 
+describe("ollama model follows the endpoint", () => {
+  const configured = { model: "qwen3", cloudModel: "gpt-oss:120b", baseUrl: OLLAMA_LOCAL_URL };
+
+  // The pair has to move together. Local and cloud host different catalogues,
+  // so picking the URL one way and the model the other sends a real request for
+  // a model that service has never heard of — and the 404 names the model
+  // rather than the mismatch that caused it.
+  it("uses the cloud model on the cloud endpoint", () => {
+    const target = resolveOllamaTarget(configured, "sk-abc");
+    expect(target).toEqual({ baseUrl: OLLAMA_CLOUD_URL, model: "gpt-oss:120b", cloud: true });
+  });
+
+  it("uses the local model on the local endpoint", () => {
+    const target = resolveOllamaTarget(configured, undefined);
+    expect(target).toEqual({ baseUrl: OLLAMA_LOCAL_URL, model: "qwen3", cloud: false });
+  });
+
+  it("treats an explicit non-cloud URL as local even when a key is set", () => {
+    const target = resolveOllamaTarget({ ...configured, baseUrl: "http://gpu-box.lan:11434/v1" }, "sk-abc");
+    expect(target).toEqual({ baseUrl: "http://gpu-box.lan:11434/v1", model: "qwen3", cloud: false });
+  });
+
+  it("falls back to the local name when no cloud model is configured", () => {
+    expect(resolveOllamaTarget({ model: "qwen3" }, "sk-abc").model).toBe("qwen3");
+    expect(resolveOllamaTarget({ model: "qwen3", cloudModel: "" }, "sk-abc").model).toBe("qwen3");
+  });
+
+  it("wires the resolved pair into the provider", () => {
+    const saved = process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "sk-abc";
+    try {
+      const provider = new OllamaProvider(configured);
+      expect(provider.model).toBe("gpt-oss:120b");
+      expect(provider.cloud).toBe(true);
+    } finally {
+      if (saved === undefined) delete process.env.OLLAMA_API_KEY;
+      else process.env.OLLAMA_API_KEY = saved;
+    }
+  });
+});
+
 // ── Adapter wire mapping, against recorded streams ───────────────────────────
 
 /** Stand in for the OpenAI SDK, capturing the request and replaying chunks. */
@@ -162,7 +204,10 @@ function fakeOpenAI(chunks: unknown[]) {
 
 function makeProvider(chunks: unknown[], Ctor: typeof OpenAIProvider = OpenAIProvider) {
   const { client, captured } = fakeOpenAI(chunks);
-  const provider = new Ctor("test-model", { apiKey: "test" });
+  const provider =
+    Ctor === (OllamaProvider as never)
+      ? (new OllamaProvider({ model: "test-model" }) as OpenAIProvider)
+      : new Ctor("test-model", { apiKey: "test" });
   (provider as unknown as { client: unknown }).client = client;
   return { provider, captured };
 }

@@ -3,6 +3,7 @@ import { Command } from "commander";
 import path from "node:path";
 import { loadConfig, configDir, apiKeyFor } from "../config/config.js";
 import { PROFILES, PROVIDER_TOOL_LIMITS, renderProfiles, selectTools } from "../tools/profiles.js";
+import { resolveOllamaTarget } from "../providers/openai.js";
 import { MemoryStore } from "../memory/store.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { createShellTool } from "../tools/shell.js";
@@ -223,6 +224,13 @@ program
     process.exit(result.ok ? 0 : 1);
   });
 
+/** What model each provider would actually use right now. */
+function modelFor(config: ReturnType<typeof loadConfig>, name: "anthropic" | "openai" | "gemini" | "ollama"): string {
+  if (name !== "ollama") return config.providers[name].model;
+  const target = resolveOllamaTarget(config.providers.ollama, process.env.OLLAMA_API_KEY);
+  return `${target.model} (${target.cloud ? "cloud" : "local"})`;
+}
+
 program
   .command("providers")
   .description("Show which model providers are usable here, and how many tools each can take")
@@ -246,7 +254,7 @@ program
         [
           (config.provider === name ? `\u2192 ${name}` : `  ${name}`).padEnd(width),
           key,
-          config.providers[name].model.padEnd(22),
+          modelFor(config, name).padEnd(22),
           String(PROVIDER_TOOL_LIMITS[name]).padStart(3),
           ...counts,
         ].join("  "),

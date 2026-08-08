@@ -141,16 +141,48 @@ export function resolveOllamaBaseUrl(configured: string | undefined, apiKey: str
   return OLLAMA_LOCAL_URL;
 }
 
+export interface OllamaTarget {
+  baseUrl: string;
+  model: string;
+  cloud: boolean;
+}
+
+/**
+ * Resolve the endpoint AND the model together, from one decision.
+ *
+ * They have to move as a pair. Local Ollama and Ollama Cloud host different
+ * catalogues — "qwen3" exists locally and 404s on the cloud — so a setup that
+ * picks the URL one way and the model another produces a request to a real
+ * service for a model it has never heard of, and the error names the model
+ * rather than the mismatch that caused it.
+ */
+export function resolveOllamaTarget(
+  configured: { model: string; cloudModel?: string; baseUrl?: string },
+  apiKey: string | undefined,
+): OllamaTarget {
+  const baseUrl = resolveOllamaBaseUrl(configured.baseUrl, apiKey);
+  const cloud = baseUrl === OLLAMA_CLOUD_URL;
+  return {
+    baseUrl,
+    model: cloud ? (configured.cloudModel || configured.model) : configured.model,
+    cloud,
+  };
+}
+
 // Ollama speaks the OpenAI-compatible chat completions API — locally (no key) or
-// via Ollama Cloud (OLLAMA_API_KEY). Only the base URL and auth differ.
+// via Ollama Cloud (OLLAMA_API_KEY). Only the base URL, the catalogue and auth
+// differ.
 export class OllamaProvider extends OpenAIProvider {
   override readonly name = "ollama";
+  readonly cloud: boolean;
 
-  constructor(model: string, baseURL?: string) {
+  constructor(configured: { model: string; cloudModel?: string; baseUrl?: string }) {
     const key = process.env.OLLAMA_API_KEY;
+    const target = resolveOllamaTarget(configured, key);
     // "ollama" is the placeholder a local server accepts; the SDK requires
     // something non-empty.
-    super(model, { baseURL: resolveOllamaBaseUrl(baseURL, key), apiKey: key ?? "ollama" });
+    super(target.model, { baseURL: target.baseUrl, apiKey: key ?? "ollama" });
+    this.cloud = target.cloud;
     this.legacyMaxTokens = true;
   }
 }

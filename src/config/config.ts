@@ -20,11 +20,17 @@ export const ConfigSchema = z.object({
       anthropic: ProviderBlock.default({ model: "claude-opus-5" }),
       openai: ProviderBlock.default({ model: "gpt-4.1" }),
       gemini: ProviderBlock.default({ model: "gemini-2.5-pro" }),
-      // "qwen3" is a LOCAL model name — `ollama pull qwen3` provides it. Ollama
-      // Cloud serves a different catalogue (gpt-oss:120b, qwen3.5:397b,
-      // kimi-k3, …) and returns 404 for a name it does not host, so a cloud
-      // user has to set this. There is no single default that is right for both.
-      ollama: ProviderBlock.default({ model: "qwen3", baseUrl: "http://localhost:11434/v1" }),
+      // Ollama is two services behind one name, so it carries two models.
+      // "qwen3" is a LOCAL name that `ollama pull qwen3` provides; Ollama Cloud
+      // serves a different catalogue entirely and answers 404 for a name it does
+      // not host. Which one is used follows the same decision as the base URL —
+      // a key with no explicit local URL means the cloud — so the two can never
+      // disagree about which service is being addressed.
+      ollama: ProviderBlock.extend({ cloudModel: z.string().default("gpt-oss:120b") }).default({
+        model: "qwen3",
+        cloudModel: "gpt-oss:120b",
+        baseUrl: "http://localhost:11434/v1",
+      }),
     })
     .default({}),
   workspaceRoot: z.string().default("~/aetheraclaw-workspace"),

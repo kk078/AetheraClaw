@@ -14,6 +14,6 @@ export function createProvider(cfg: Config, override?: Config["provider"]): Mode
     case "gemini":
       return new GeminiProvider(cfg.providers.gemini.model);
     case "ollama":
-      return new OllamaProvider(cfg.providers.ollama.model, cfg.providers.ollama.baseUrl);
+      return new OllamaProvider(cfg.providers.ollama);
   }
 }
