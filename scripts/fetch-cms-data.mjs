@@ -338,8 +338,9 @@ const setting = process.argv.includes("--hospital") ? "hospital" : "practitioner
 async function fetchNcci() {
   // The table is split across four files; all four are needed or the edit set
   // has holes, and a hole reads exactly like "no edit exists for this pair".
-  const parts = [];
+  const table = {};
   let deleted = 0;
+  let kept = 0;
   for (let n = 1; n <= 4; n++) {
     const url = await newestLink(NCCI_PTP_PAGE, new RegExp(`${setting}-ptp-edits.*-f${n}\\.zip$`));
     process.stdout.write(`  part ${n}/4 … `);
@@ -347,13 +348,19 @@ async function fetchNcci() {
     const text = textFromZip(zip, /\.txt$/i);
     const { edits, deleted: d } = convertPtp(text);
     deleted += d;
-    // push(...edits) overflows the stack at this size — 443,000 arguments in one
-    // call is not a thing V8 will do. A loop is not slower here; it just works.
-    for (const e of edits) parts.push(e);
+    // Written as { COL1: { COL2: indicator } } rather than a list of objects.
+    // The array form repeated the three key names 1.7 million times — 105 MB on
+    // disk and 2.3 s of JSON.parse before the first scrub could run. Nested, the
+    // same edits are a fifth of the size and arrive already indexed.
+    for (const e of edits) {
+      (table[e.column1] ??= {})[e.column2] = e.modifierIndicator;
+      kept++;
+    }
     console.log(`${edits.length.toLocaleString()} active`);
   }
   console.log(`  ${deleted.toLocaleString()} retired edit(s) dropped — loading them would flag bundling CMS no longer enforces.`);
-  write("ncci-ptp.json", parts);
+  console.log(`  ${kept.toLocaleString()} pair(s) under ${Object.keys(table).length.toLocaleString()} column-1 code(s)`);
+  write("ncci-ptp.json", table);
 }
 
 async function fetchMue() {

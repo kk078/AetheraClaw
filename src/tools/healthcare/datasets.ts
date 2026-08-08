@@ -4,11 +4,12 @@ import { z } from "zod";
 import { configDir } from "../../config/config.js";
 import { defineTool } from "../registry.js";
 import type { ScrubFinding } from "./finding.js";
-import { checkMueEdits, checkPtpEdits, type MueTable, type PtpEdit } from "./intelligence/ncci.js";
+import { checkMueEdits, checkPtpEdits, indexPtpEdits, type MueTable, type PtpEdit, type PtpIndex, type PtpTable } from "./intelligence/ncci.js";
 
 // Local dataset directory: ~/.aetheraclaw/data — populated by the user or the
 // (future) data-updates fetcher. Files are optional; tools degrade gracefully.
-//   ncci-ptp.json   [{ column1, column2, modifierIndicator }]  ("0" | "1" | "9")
+//   ncci-ptp.json   { "COL1": { "COL2": "0" | "1" | "9" } }  — or the older
+//                   [{ column1, column2, modifierIndicator }] array, still read
 //   mue.json        { "CODE": maxUnits } or { "CODE": { units, mai } }
 //   hcpcs.json      { "CODE": "description" }
 //   mpfs.json       { "CODE": { work, pe, facilityPe, mp, ...policy indicators } }
@@ -35,14 +36,19 @@ function loadJson<T>(name: string): T | null {
   }
 }
 
-let ncciCache: PtpEdit[] | null | undefined;
+let ncciCache: PtpIndex | null | undefined;
 let mueCache: MueTable | null | undefined;
 
 export function checkNcci(
   _procs: string[],
   lines: Array<{ cpt_hcpcs: string; units: number; modifiers?: string[] }>,
 ): ScrubFinding[] {
-  if (ncciCache === undefined) ncciCache = loadJson("ncci-ptp.json");
+  // Indexed ONCE per process, not per claim. Both on-disk shapes are accepted:
+  // the compact object the fetcher writes, and the array earlier files carry.
+  if (ncciCache === undefined) {
+    const raw = loadJson<PtpEdit[] | PtpTable>("ncci-ptp.json");
+    ncciCache = raw ? indexPtpEdits(raw) : null;
+  }
   if (mueCache === undefined) mueCache = loadJson("mue.json");
 
   return [
@@ -61,7 +67,10 @@ export function checkNcci(
  * not about a date group, so it belongs at the claim level and is emitted once.
  */
 export function ncciDataNotice(): ScrubFinding | null {
-  if (ncciCache === undefined) ncciCache = loadJson("ncci-ptp.json");
+  if (ncciCache === undefined) {
+    const raw = loadJson<PtpEdit[] | PtpTable>("ncci-ptp.json");
+    ncciCache = raw ? indexPtpEdits(raw) : null;
+  }
   if (mueCache === undefined) mueCache = loadJson("mue.json");
   if (ncciCache || mueCache) return null;
   return {

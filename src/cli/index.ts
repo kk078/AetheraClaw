@@ -135,6 +135,7 @@ import { resolveStore, tenancyRoot } from "../tenancy/resolve.js";
 import { TenantRegistry } from "../tenancy/registry.js";
 import { checkSlug, tenantDbPath } from "../tenancy/tenant.js";
 import { retentionPlan } from "../support/tool-log.js";
+import { VIEW_RETAIN_DAYS, viewRetentionPlan } from "../views/retention.js";
 
 const program = new Command();
 program.name("aetheraclaw").description("Self-hosted AI assistant for healthcare RCM and medical billing & coding");
@@ -202,6 +203,13 @@ program
     // the log's cost does not scale with the log's size.
     const pruned = store.pruneToolCalls(retentionPlan(Date.now()));
     if (pruned > 0) console.log(`Tool log: pruned ${pruned} row(s) past retention`);
+    const views = store.pruneToolViews(viewRetentionPlan(Date.now()));
+    if (views.total > 0) {
+      console.log(
+        `Tool views: pruned ${views.total} row(s)` +
+          ` (${views.orphaned} orphaned by deleted sessions, ${views.aged} past ${VIEW_RETAIN_DAYS}d, ${views.overCeiling} over the ceiling)`,
+      );
+    }
     if (config.tenancy.enabled) console.log(`Tenant: ${tenant.name} (${tenant.slug}) — isolated database`);
     const picked = selectTools(registry.specs(), config.toolProfile, config.provider);
     console.log(

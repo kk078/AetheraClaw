@@ -59,48 +59,99 @@ function hasAny(modifiers: string[] | undefined, wanted: string[]): boolean {
   return wanted.some((w) => set.has(w));
 }
 
-export function checkPtpEdits(edits: PtpEdit[], lines: ScrubLine[]): ScrubFinding[] {
-  const out: ScrubFinding[] = [];
-  const codes = new Set(lines.map((l) => l.cpt_hcpcs.trim().toUpperCase()));
+/**
+ * column1 → column2 → modifier indicator.
+ *
+ * The real published table is 1.7 million pairs, and the original implementation
+ * walked all of them for every claim: ~110 ms per scrub, entirely spent deciding
+ * that 1,728,583 edits had nothing to do with the two codes on the claim. Keyed
+ * by the column-1 code, the cost becomes proportional to the claim instead of to
+ * the national edit table.
+ */
+export type PtpIndex = Map<string, Map<string, string>>;
 
-  for (const edit of edits) {
-    const col1 = edit.column1.trim().toUpperCase();
-    const col2 = edit.column2.trim().toUpperCase();
-    if (!codes.has(col1) || !codes.has(col2)) continue;
+/** The compact on-disk shape: the same nesting, so loading is a parse and nothing more. */
+export type PtpTable = Record<string, Record<string, string>>;
 
-    const indicator = ptpModifierIndicator(edit);
-    if (indicator === "9") continue; // deleted edit
+const norm = (code: string) => code.trim().toUpperCase();
 
-    const line2 = lines.find((l) => l.cpt_hcpcs.trim().toUpperCase() === col2);
-    const bypassed = hasAny(line2?.modifiers, DISTINCT_SERVICE_MODIFIERS);
+/**
+ * Build the lookup from either shape.
+ *
+ * The array form is what earlier data files carry and what every test passes,
+ * so it keeps working — indexing it costs one pass, which is what the old scan
+ * cost anyway. Nothing gets slower; the caller that caches the index gets fast.
+ */
+export function indexPtpEdits(source: PtpEdit[] | PtpTable): PtpIndex {
+  const index: PtpIndex = new Map();
+  const put = (col1: string, col2: string, indicator: string) => {
+    const a = norm(col1);
+    const b = norm(col2);
+    if (!a || !b) return;
+    let row = index.get(a);
+    if (!row) index.set(a, (row = new Map()));
+    row.set(b, indicator);
+  };
 
-    if (indicator === "0") {
-      out.push(
-        finding(
-          "error",
-          "ncci-ptp-no-bypass",
-          `NCCI PTP edit: ${col2} is bundled into ${col1} and the modifier indicator is 0 — no modifier can unbundle this pair. Billing ${col2} separately will deny and the denial will not be overturned. Report ${col1} alone${bypassed ? `; the distinct-service modifier on ${col2} does not help here` : ""}.`,
-        ),
-      );
-      continue;
+  if (Array.isArray(source)) {
+    for (const e of source) put(e.column1, e.column2, ptpModifierIndicator(e));
+  } else {
+    for (const [col1, row] of Object.entries(source)) {
+      for (const [col2, indicator] of Object.entries(row)) put(col1, col2, indicator);
     }
+  }
+  return index;
+}
 
-    if (!bypassed) {
-      out.push(
-        finding(
-          "error",
-          "ncci-ptp",
-          `NCCI PTP edit: ${col2} is bundled into ${col1}. Modifier indicator 1 — a distinct-service modifier (59, or the more specific XE/XP/XS/XU) may be appropriate if the documentation shows a separate session, site, or encounter. Do not append one to clear the edit unless the record supports it.`,
-        ),
-      );
-    } else {
-      out.push(
-        finding(
-          "info",
-          "ncci-ptp-bypassed",
-          `NCCI PTP edit between ${col1} and ${col2} is being bypassed by a distinct-service modifier on ${col2}. Permitted by indicator 1, but this pairing draws audit attention — make sure the record documents the separate session, site, or encounter.`,
-        ),
-      );
+export function checkPtpEdits(source: PtpEdit[] | PtpIndex, lines: ScrubLine[]): ScrubFinding[] {
+  const index = source instanceof Map ? source : indexPtpEdits(source);
+  const out: ScrubFinding[] = [];
+
+  // Line order, not file order: two codes on a claim always produce their
+  // findings in the order a reader sees the lines, whatever order CMS published
+  // the pairs in.
+  const present = lines.map((l) => norm(l.cpt_hcpcs));
+
+  for (const col1 of present) {
+    const row = index.get(col1);
+    if (!row) continue;
+    for (const col2 of present) {
+      if (col2 === col1) continue;
+      const indicator = row.get(col2);
+      if (indicator === undefined) continue;
+      if (indicator === "9") continue; // deleted edit
+
+      const line2 = lines.find((l) => norm(l.cpt_hcpcs) === col2);
+      const bypassed = hasAny(line2?.modifiers, DISTINCT_SERVICE_MODIFIERS);
+
+      if (indicator === "0") {
+        out.push(
+          finding(
+            "error",
+            "ncci-ptp-no-bypass",
+            `NCCI PTP edit: ${col2} is bundled into ${col1} and the modifier indicator is 0 — no modifier can unbundle this pair. Billing ${col2} separately will deny and the denial will not be overturned. Report ${col1} alone${bypassed ? `; the distinct-service modifier on ${col2} does not help here` : ""}.`,
+          ),
+        );
+        continue;
+      }
+
+      if (!bypassed) {
+        out.push(
+          finding(
+            "error",
+            "ncci-ptp",
+            `NCCI PTP edit: ${col2} is bundled into ${col1}. Modifier indicator 1 — a distinct-service modifier (59, or the more specific XE/XP/XS/XU) may be appropriate if the documentation shows a separate session, site, or encounter. Do not append one to clear the edit unless the record supports it.`,
+          ),
+        );
+      } else {
+        out.push(
+          finding(
+            "info",
+            "ncci-ptp-bypassed",
+            `NCCI PTP edit between ${col1} and ${col2} is being bypassed by a distinct-service modifier on ${col2}. Permitted by indicator 1, but this pairing draws audit attention — make sure the record documents the separate session, site, or encounter.`,
+          ),
+        );
+      }
     }
   }
   return out;

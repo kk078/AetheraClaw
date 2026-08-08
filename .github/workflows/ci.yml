@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# A second push to the same branch cancels the first — the older run's result is
+# about code nobody is looking at any more.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      # `npm ci` rather than `npm install`: it installs the lockfile exactly and
+      # fails if package.json and the lock disagree, which is the difference
+      # between testing what will ship and testing whatever resolved today.
+      - run: npm ci
+        env:
+          # Nothing in this suite drives a browser, and the download is ~150 MB
+          # per run. The payer-portal tools are exercised against a mocked
+          # Playwright, so skipping the binaries costs no coverage.
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+      - run: npx tsc --noEmit
+
+      - run: npm test
+
+      # The suite runs against better-sqlite3's prebuilt binary. node:sqlite is
+      # the fallback every install without one lands on, and it has caught real
+      # differences before — a transaction shim that worked on one driver and
+      # not the other. Running both is what makes the fallback a supported path
+      # rather than an untested claim.
+      - run: npm test
+        env:
+          AETHERACLAW_SQLITE: node
+
+      - run: npm run build

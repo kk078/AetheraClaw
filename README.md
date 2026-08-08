@@ -62,6 +62,18 @@ node dist/cli/index.js providers                  # which keys are present here
 
 An explicit `--provider` is honoured or it fails — it is never quietly swapped, because serving a different model than the one named is worse than an error.
 
+Every push runs `.github/workflows/ci.yml`: typecheck, the full suite on **both**
+SQLite drivers, then a build. The second driver is not ceremony — `node:sqlite` is
+where every install without a prebuilt binary lands, and running it has caught a
+transaction shim that worked on one and not the other.
+
+The suite points `AETHERACLAW_HOME` at an empty temp directory before any test
+loads. Without that it reads the developer's own config and reference data, and
+two tests failed the moment real NCCI edits were installed here. That shape is the
+dangerous one: a CI runner has no `~/.aetheraclaw`, so those tests would have
+passed forever on the machine nobody works on and failed on every machine somebody
+does.
+
 `npm run dev` runs the gateway from source via `tsx`. `npm test` runs the whole
 suite offline — no database, no network, no keys — so a green run proves the
 checkout is sound before any provider is configured.
@@ -95,14 +107,20 @@ links through an AMA licence page. They are fetched to your machine at runtime a
 are **never committed to this repository** — the same posture as `cptDataPath`. Do
 not redistribute what lands in `~/.aetheraclaw/data`.
 
-**Two limits worth knowing.** `hcpcs.json` is built from the RVU file's own
+`ncci-ptp.json` is written as `{ COL1: { COL2: indicator } }` rather than a list
+of objects, and indexed once per process rather than scanned per claim. The array
+form repeated three key names 1.7 million times — 105 MB on disk, 2.3 s of
+`JSON.parse` before the first scrub, and ~110 ms per scrub thereafter spent
+deciding that 1,728,583 edits had nothing to do with the two codes on the claim.
+Measured after: **20 MB, 1.4 s to first scrub, 0.005 ms per scrub.** The older
+array shape is still read, so an existing file keeps working.
+
+**One limit worth knowing.** `hcpcs.json` is built from the RVU file's own
 description column, which covers every *priced* code but not unpriced HCPCS — most
 DME, supplies and drugs. CMS's "alpha-numeric HCPCS file" looks like the right
 source and is not: the 2026 ANWEB record carries ~1,700 codes and contains none of
 J1885, E0114, A0428 or G0008, so nothing here is built on it. A miss reports as
-"not found in local data" rather than as a nonexistent code. Second, `ncci-ptp.json`
-is ~105 MB and `claim_scrub` currently scans it linearly: the first scrub after
-startup costs ~2.4 s (the JSON parse), and every scrub after that ~110 ms.
+"not found in local data" rather than as a nonexistent code.
 
 **What a fresh install does and does not fetch.** `npm install` takes ~200 MB and
 no build step. Playwright's browser binaries are *not* downloaded — the payer-portal

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { newId } from "../shared/ids.js";
 import { openDatabase, type SqliteDb } from "./sqlite.js";
 import type { RetentionPlan, ToolCallRecord } from "../support/tool-log.js";
+import { totalPruned, type ViewPruneResult } from "../views/retention.js";
 
 export interface SessionRow {
   id: string;
@@ -252,6 +253,37 @@ export class MemoryStore {
       );
     })();
     return removed;
+  }
+
+  /**
+   * Orphans first, then age, then the ceiling — see src/views/retention.ts.
+   *
+   * Orphans are separated because they are the only category that is pure dead
+   * weight: there is no foreign key on tool_views, so every deleted session
+   * leaves its rendered views behind permanently. Reporting the three counts
+   * separately is what tells an operator whether the table is growing because
+   * of real use or because sessions are being deleted.
+   */
+  pruneToolViews(plan: RetentionPlan): ViewPruneResult {
+    const parts = { orphaned: 0, aged: 0, overCeiling: 0 };
+    this.db.transaction(() => {
+      parts.orphaned = Number(
+        this.db
+          .prepare("DELETE FROM tool_views WHERE session_id NOT IN (SELECT id FROM sessions)")
+          .run().changes,
+      );
+      parts.aged = Number(this.db.prepare("DELETE FROM tool_views WHERE created_at < ?").run(plan.cutoff).changes);
+      parts.overCeiling = Number(
+        this.db
+          .prepare(
+            `DELETE FROM tool_views WHERE rowid IN (
+               SELECT rowid FROM tool_views ORDER BY created_at DESC LIMIT -1 OFFSET ?
+             )`,
+          )
+          .run(plan.maxRows).changes,
+      );
+    })();
+    return { ...parts, total: totalPruned(parts) };
   }
 
   close(): void {
