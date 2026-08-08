@@ -36,6 +36,11 @@ export const DEFAULT_CONFIG_JSON5 = `{
   healthcare: {
     // Path to a user-supplied licensed CPT/fee-schedule CSV (CPT is AMA-licensed and not bundled).
     // cptDataPath: "/path/to/cpt.csv",
+    // A SQLite reference database you already own. Read in place, read-only, never
+    // copied. Run "node scripts/inspect-db.mjs <path>" first to see what is in it.
+    // referenceDbPath: "/path/to/reference.db",
+    // Tables to read even though their columns look like patient identifiers.
+    // referenceDbAllowTables: [],
     clearinghouse: "mock",
   },
 

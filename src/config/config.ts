@@ -52,6 +52,14 @@ export const ConfigSchema = z.object({
   healthcare: z
     .object({
       cptDataPath: z.string().optional(),
+      // A user-supplied SQLite reference database, read in place and read-only.
+      // Same posture as cptDataPath: the file stays where the user put it and
+      // never enters the repository.
+      referenceDbPath: z.string().optional(),
+      // Tables to read despite their column names looking like patient
+      // identifiers. Named one at a time on purpose — there is no global
+      // override, because a blanket flag is the same as no gate.
+      referenceDbAllowTables: z.array(z.string()).default([]),
       clearinghouse: z.string().default("mock"),
     })
     .default({}),

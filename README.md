@@ -141,6 +141,41 @@ source and is not: the 2026 ANWEB record carries ~1,700 codes and contains none 
 J1885, E0114, A0428 or G0008, so nothing here is built on it. A miss reports as
 "not found in local data" rather than as a nonexistent code.
 
+### Attaching a reference database you already own
+
+A practice may already hold a large code or policy database. Point
+`healthcare.referenceDbPath` at the SQLite file and AetheraClaw reads it **in
+place** — read-only, never copied, never converted, never committed. Look inside
+it first:
+
+```bash
+node scripts/inspect-db.mjs /path/to/reference.db
+```
+
+That prints every table, its row count and columns, and the *shape* of a sample —
+`"1985-03-12"` as `date`, `"J. Rivera"` as `text(9)`. Values are never printed. A
+schema dump that pastes three real rows into a terminal, and from there into a
+ticket or a chat log, leaks exactly what the rest of this design exists to prevent.
+
+Once attached, **no table is readable until its column names have been scanned for
+patient identifiers** — `mrn`, `dob`, `member_id`, `last_name`, `address`, and the
+rest. A match holds the table back: `reference_db_status` names it and names the
+columns that tripped, and no tool will query it. The scan is deliberately broad,
+because a false positive costs one config line
+(`healthcare.referenceDbAllowTables`, one table at a time — there is no global
+override) and a false negative hands PHI to a language model.
+
+Read-only is enforced by SQLite, not by convention: both drivers take the flag and
+both then fail a write. A user's 1.24 GB file is not something to open writable and
+hope.
+
+`reference_lookup` answers from a cleared table and **says which file and table it
+came from** — a descriptor served from a private database is a different claim from
+one served by a published CMS file. If a table's codes are shaped like CPT, the
+status report raises the AMA licence question rather than quietly serving
+descriptors; whether the file may be used is the practice's answer, not
+AetheraClaw's.
+
 **What a fresh install does and does not fetch.** `npm install` takes ~200 MB and
 no build step. Playwright's browser binaries are *not* downloaded — the payer-portal
 tools need `npx playwright install chromium` first, and every other tool works
@@ -439,7 +474,7 @@ OLLAMA_API_KEY=… aetheraclaw serve --provider ollama     # Ollama Cloud
 
 **Ollama is two services behind one name, so it carries two models.** `providers.ollama.model` is the local one (`qwen3`, whatever `ollama pull` gave you); `providers.ollama.cloudModel` is the cloud one, defaulting to **`gpt-oss:120b`**. Which pair is used follows a single decision — a key with no explicit local base URL means the cloud — so the endpoint and the model can never disagree. That mattered: the two catalogues do not overlap, and picking the URL one way and the model the other sends a real request to a real service for a model it has never heard of, whose 404 names the model rather than the mismatch that caused it. `aetheraclaw providers` prints the resolved pair, `gpt-oss:120b (cloud)` or `qwen3 (local)`, so the answer is visible before a turn is spent.
 
-**All 176 tools are reachable on every provider**, but not by shipping 176 definitions. Three catalogue tools — `tool_search`, `tool_describe`, `tool_invoke` — go on the wire, and everything else is discovered on demand. Ollama Cloud loads 64 directly and reaches the other 113 through the catalogue; `tool_invoke` routes back through the same choke point as a direct call, so zod validation, risk assessment and the approval gate all still apply. It is a way to reach a tool, not a way around it, and there are tests that hold that line.
+**All 209 tools are reachable on every provider**, but not by shipping 209 definitions. Three catalogue tools — `tool_search`, `tool_describe`, `tool_invoke` — go on the wire, and everything else is discovered on demand. Ollama Cloud loads 64 directly and reaches the other 145 through the catalogue; `tool_invoke` routes back through the same choke point as a direct call, so zod validation, risk assessment and the approval gate all still apply. It is a way to reach a tool, not a way around it, and there are tests that hold that line.
 
 The cost is a real one and worth naming: discovery becomes a step, and a tool the model cannot find is worse than one that is absent, because it will answer from memory instead. That is not hypothetical — asked what CARC 197 means with `denial_explain` deferred, a model confidently answered "Claim Not Submitted". It means *precertification absent*. So when anything is deferred the system prompt says so and instructs the model to search before answering any question about a code, deadline, payer rule or dollar amount. With that in place the same question produced a `tool_search` → `tool_describe` → `tool_invoke` chain and the correct answer.
 

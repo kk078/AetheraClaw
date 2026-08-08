@@ -173,13 +173,20 @@ export function datasetStatuses(): DatasetStatus[] {
   return DATASETS.map((d) => ({ ...d, installed: fs.existsSync(path.join(dataDir(), d.file)) }));
 }
 
-export function renderDatasetStatus(statuses: DatasetStatus[], cptConfigured: boolean): string {
+export function renderDatasetStatus(statuses: DatasetStatus[], cptConfigured: boolean, referenceDb?: string): string {
   const missing = statuses.filter((s) => !s.installed);
   const lines = [
     `Local dataset directory: ${dataDir()}`,
     "",
     ...statuses.map((s) => `${s.installed ? "installed" : "MISSING "}  ${s.file.padEnd(14)} ${s.purpose}`),
     `${cptConfigured ? "configured" : "not set  "}  CPT (Level I)  AMA-licensed; supply your own file via healthcare.cptDataPath`,
+    // The attached reference database belongs in this inventory even though it
+    // is not a file in dataDir(): the question this tool answers is "what can
+    // this installation actually read", and answering it from one list is the
+    // whole point.
+    referenceDb
+      ? `attached   reference DB   ${referenceDb} — call reference_db_status for its tables; some may be held back`
+      : `not set    reference DB   attach your own SQLite reference database via healthcare.referenceDbPath`,
   ];
   if (missing.length > 0) {
     lines.push(
@@ -199,9 +206,16 @@ export const dataStatusTool = defineTool({
     "Report which local reference datasets are installed (NCCI PTP, MUE, HCPCS, MPFS RVUs, conversion factor, GPCI, CPT) and what cannot be checked without each. Call this before stating that a code pair is not bundled, that a unit count is allowed, or what a service pays — if the table is not installed, the honest answer is that it could not be checked, not that no edit exists.",
   schema: z.object({}),
   execute: async (_input, ctx) => {
-    const cfg = ctx.services.config as { healthcare?: { cptDataPath?: string } } | undefined;
+    const cfg = ctx.services.config as { healthcare?: { cptDataPath?: string; referenceDbPath?: string } } | undefined;
     const cptPath = cfg?.healthcare?.cptDataPath;
-    return { content: renderDatasetStatus(datasetStatuses(), Boolean(cptPath && fs.existsSync(cptPath))) };
+    const refPath = cfg?.healthcare?.referenceDbPath;
+    return {
+      content: renderDatasetStatus(
+        datasetStatuses(),
+        Boolean(cptPath && fs.existsSync(cptPath)),
+        refPath && fs.existsSync(refPath) ? refPath : undefined,
+      ),
+    };
   },
 });
 

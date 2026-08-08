@@ -60,17 +60,33 @@ function savepointTransaction(exec: (sql: string) => void) {
     };
 }
 
-function openNodeSqlite(file: string): SqliteDb {
+export interface OpenOptions {
+  /**
+   * Open the file read-only.
+   *
+   * Enforced by SQLite itself, not by us declining to write: both drivers take
+   * the flag and both then fail an INSERT with "attempt to write a readonly
+   * database". That matters for user-supplied reference databases, which may be
+   * large, irreplaceable, and not ours to modify.
+   *
+   * The two drivers spell it differently — `readonly` for better-sqlite3,
+   * `readOnly` for node:sqlite — which is precisely the sort of detail this
+   * adapter exists to absorb.
+   */
+  readonly?: boolean;
+}
+
+function openNodeSqlite(file: string, opts: OpenOptions): SqliteDb {
   // Present from Node 22.5; stable enough to depend on, and the only SQLite a
   // default Windows install is guaranteed to have.
   const { DatabaseSync } = require_("node:sqlite") as {
-    DatabaseSync: new (path: string) => {
+    DatabaseSync: new (path: string, options?: { readOnly?: boolean }) => {
       prepare(sql: string): SqliteStatement;
       exec(sql: string): void;
       close(): void;
     };
   };
-  const db = new DatabaseSync(file);
+  const db = opts.readonly ? new DatabaseSync(file, { readOnly: true }) : new DatabaseSync(file);
   const exec = (sql: string) => db.exec(sql);
   return {
     prepare: (sql) => db.prepare(sql),
@@ -83,8 +99,8 @@ function openNodeSqlite(file: string): SqliteDb {
   };
 }
 
-function openBetterSqlite(file: string): SqliteDb | null {
-  let Database: new (path: string) => {
+function openBetterSqlite(file: string, opts: OpenOptions): SqliteDb | null {
+  let Database: new (path: string, options?: { readonly?: boolean }) => {
     prepare(sql: string): SqliteStatement;
     exec(sql: string): void;
     close(): void;
@@ -96,7 +112,7 @@ function openBetterSqlite(file: string): SqliteDb | null {
   } catch {
     return null;
   }
-  const db = new Database(file);
+  const db = opts.readonly ? new Database(file, { readonly: true }) : new Database(file);
   return {
     prepare: (sql) => db.prepare(sql),
     exec: (sql) => db.exec(sql),
@@ -114,7 +130,7 @@ function openBetterSqlite(file: string): SqliteDb | null {
  * exercises the fallback on a machine where the native module installed fine.
  * A fallback nobody runs is a fallback that does not work.
  */
-export function openDatabase(file: string): SqliteDb {
-  if (process.env.AETHERACLAW_SQLITE === "node") return openNodeSqlite(file);
-  return openBetterSqlite(file) ?? openNodeSqlite(file);
+export function openDatabase(file: string, opts: OpenOptions = {}): SqliteDb {
+  if (process.env.AETHERACLAW_SQLITE === "node") return openNodeSqlite(file, opts);
+  return openBetterSqlite(file, opts) ?? openNodeSqlite(file, opts);
 }

@@ -17,6 +17,7 @@ import { claimScrubTool } from "./claim-scrub.js";
 import { claimAutohealTool } from "./autoheal.js";
 import { emLevelRiskTool, presubmitCheckTool } from "./presubmit-tools.js";
 import { dataStatusTool, hcpcsLookupTool } from "./datasets.js";
+import { REFERENCE_DB_TOOLS } from "./reference-db.js";
 import { eligibilityCheckTool } from "./eligibility.js";
 import { worklistAddTool, worklistListTool, worklistUpdateTool } from "./worklist.js";
 import { emCalculateTool } from "./em-calculator.js";
@@ -99,6 +100,7 @@ export function registerHealthcareTools(
     hcpcsLookupTool,
     posLookupTool,
     dataStatusTool,
+    ...REFERENCE_DB_TOOLS,
     npiValidateTool,
     npiLookupTool,
     npiSearchTool,

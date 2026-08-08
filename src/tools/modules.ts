@@ -261,7 +261,7 @@ export const MODULES: ModuleDef[] = [
     blurb: "Files, shell, fetch, and the tool catalogue itself.",
     note: "tool_invoke routes back through the same validation and approval gate as a direct call — a way to reach a tool, not around it.",
     glyph: "⌘",
-    match: ["run_command", "read_file", "write_file", "list_dir", "web_fetch", "web_search", "tool_", "data_status"],
+    match: ["run_command", "read_file", "write_file", "list_dir", "web_fetch", "web_search", "tool_", "data_status", "reference_db_", "reference_lookup"],
   },
 ];
 
