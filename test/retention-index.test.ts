@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { checkPtpEdits, indexPtpEdits, type PtpEdit, type PtpTable } from "../src/tools/healthcare/intelligence/ncci.js";
 import { MemoryStore } from "../src/memory/store.js";
 import { VIEW_RETAIN_MAX_ROWS, viewRetentionPlan } from "../src/views/retention.js";
+import { checkNcci, ncciDataNotice } from "../src/tools/healthcare/datasets.js";
 
 const line = (code: string, modifiers: string[] = []) => ({ cpt_hcpcs: code, units: 1, modifiers });
 
@@ -123,5 +124,35 @@ describe("tool-view retention", () => {
     expect(s.pruneToolViews(viewRetentionPlan(Date.now())).total).toBe(0);
     expect(VIEW_RETAIN_MAX_ROWS).toBeGreaterThan(0);
     s.close();
+  });
+});
+
+describe("dataset cache invalidation", () => {
+  it("picks up NCCI data installed AFTER first use, and notices removal", () => {
+    // The regression: the scrubber cached "absent" on first use and never
+    // re-checked, so it told a reader who had JUST installed the data to go and
+    // install it — specific, actionable, and describing work already finished.
+    //
+    // Static import on purpose: the module-level cache has to stay live across
+    // these calls, because that cache IS what is under test.
+    const file = path.join(process.env.AETHERACLAW_HOME!, "data", "ncci-ptp.json");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const lines = [
+      { cpt_hcpcs: "99214", units: 1, modifiers: [] },
+      { cpt_hcpcs: "0469T", units: 1, modifiers: [] },
+    ];
+
+    expect(checkNcci([], lines)).toEqual([]);
+    expect(ncciDataNotice()).not.toBeNull();
+
+    fs.writeFileSync(file, JSON.stringify({ "99214": { "0469T": "0" } }));
+    expect(checkNcci([], lines).map((f) => f.rule)).toContain("ncci-ptp-no-bypass");
+    expect(ncciDataNotice()).toBeNull();
+
+    // And back again, so a moved or deleted file does not leave the scrubber
+    // reporting edits it can no longer read.
+    fs.rmSync(file);
+    expect(checkNcci([], lines)).toEqual([]);
+    expect(ncciDataNotice()).not.toBeNull();
   });
 });

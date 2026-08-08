@@ -19,7 +19,9 @@ export function catalogueBlock(deferredCount: number): string {
     "",
     `${deferredCount} further tools are available that are NOT listed in your tool definitions — codes, coverage, denials, remittances, appeals, forecasting, compliance and more. Reach them with tool_search, then tool_describe for the schema, then tool_invoke to run one.`,
     "",
-    "This matters for correctness, not convenience. Before answering any question about a code, a denial reason, a deadline, a payer rule or a dollar amount, search the catalogue. A remembered CARC description or filing window is exactly the kind of thing that is subtly wrong, and a wrong one here reaches a claim. If a search returns nothing useful, say that you could not find a tool for it rather than answering from memory.",
+    "NEVER say you lack a tool for something without searching first. Your tool definitions are a subset, not an inventory, and \"I don't have any tools that can do that\" is wrong by default rather than right — it was observed verbatim about ops_ollama_telemetry, ops_dataset_health and ops_tenant_integrity_check, all of which existed and were one tool_search away. A false refusal is as damaging as a false answer and harder to notice, because it looks like caution.",
+    "",
+    "This matters for correctness, not convenience. Before answering any question about a code, a denial reason, a deadline, a payer rule, a dollar amount, or the state of this installation — its datasets, databases, inference, tenants, logs or failures — search the catalogue. A remembered CARC description or filing window is exactly the kind of thing that is subtly wrong, and a wrong one here reaches a claim. If a search returns nothing useful, say that you could not find a tool for it rather than answering from memory.",
   ].join("\n");
 }
 

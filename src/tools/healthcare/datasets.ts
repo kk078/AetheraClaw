@@ -36,24 +36,60 @@ function loadJson<T>(name: string): T | null {
   }
 }
 
-let ncciCache: PtpIndex | null | undefined;
-let mueCache: MueTable | null | undefined;
+// ── Cache invalidation ───────────────────────────────────────────────────────
+// These were cached on first use and never re-checked, which is right until the
+// moment somebody installs the data. Then the running process keeps its "absent"
+// answer forever and the scrubber prints "NCCI/MUE data not installed — drop
+// ncci-ptp.json into <dir>" at a reader who has just done exactly that. It is
+// the worst kind of wrong message: specific, actionable, and describing work
+// already finished.
+//
+// Keyed on mtime and size, so installing the data mid-session picks it up, and
+// so does a quarterly refresh over a running gateway. The cost is two stat calls
+// per scrub against a 20 MB table that takes a second to parse.
+interface Stamped<T> {
+  stamp: string;
+  value: T | null;
+}
+
+function fileStamp(name: string): string {
+  try {
+    const s = fs.statSync(path.join(dataDir(), name));
+    return `${s.mtimeMs}:${s.size}`;
+  } catch {
+    return "absent";
+  }
+}
+
+let ncciCache: Stamped<PtpIndex> | null = null;
+let mueCache: Stamped<MueTable> | null = null;
+
+function ncciIndex(): PtpIndex | null {
+  const stamp = fileStamp("ncci-ptp.json");
+  if (!ncciCache || ncciCache.stamp !== stamp) {
+    const raw = loadJson<PtpEdit[] | PtpTable>("ncci-ptp.json");
+    ncciCache = { stamp, value: raw ? indexPtpEdits(raw) : null };
+  }
+  return ncciCache.value;
+}
+
+function mueTable(): MueTable | null {
+  const stamp = fileStamp("mue.json");
+  if (!mueCache || mueCache.stamp !== stamp) mueCache = { stamp, value: loadJson<MueTable>("mue.json") };
+  return mueCache.value;
+}
 
 export function checkNcci(
   _procs: string[],
   lines: Array<{ cpt_hcpcs: string; units: number; modifiers?: string[] }>,
 ): ScrubFinding[] {
-  // Indexed ONCE per process, not per claim. Both on-disk shapes are accepted:
-  // the compact object the fetcher writes, and the array earlier files carry.
-  if (ncciCache === undefined) {
-    const raw = loadJson<PtpEdit[] | PtpTable>("ncci-ptp.json");
-    ncciCache = raw ? indexPtpEdits(raw) : null;
-  }
-  if (mueCache === undefined) mueCache = loadJson("mue.json");
+  // Indexed once and reused, but re-read when the file changes — see above.
+  const ncci = ncciIndex();
+  const mue = mueTable();
 
   return [
-    ...(ncciCache ? checkPtpEdits(ncciCache, lines) : []),
-    ...(mueCache ? checkMueEdits(mueCache, lines) : []),
+    ...(ncci ? checkPtpEdits(ncci, lines) : []),
+    ...(mue ? checkMueEdits(mue, lines) : []),
   ];
 }
 
@@ -67,12 +103,7 @@ export function checkNcci(
  * not about a date group, so it belongs at the claim level and is emitted once.
  */
 export function ncciDataNotice(): ScrubFinding | null {
-  if (ncciCache === undefined) {
-    const raw = loadJson<PtpEdit[] | PtpTable>("ncci-ptp.json");
-    ncciCache = raw ? indexPtpEdits(raw) : null;
-  }
-  if (mueCache === undefined) mueCache = loadJson("mue.json");
-  if (ncciCache || mueCache) return null;
+  if (ncciIndex() || mueTable()) return null;
   return {
     severity: "info",
     rule: "ncci-data",
