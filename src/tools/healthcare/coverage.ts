@@ -9,6 +9,18 @@ async function cms(pathAndQuery: string): Promise<string> {
   return body.slice(0, 12_000);
 }
 
+/**
+ * Same call, parsed instead of truncated.
+ *
+ * `cms()` clips to 12 KB so a large report cannot flood the context, which is
+ * right for text handed to a model and fatal for anything that then parses it —
+ * the clip lands mid-string and JSON.parse throws on a response that was
+ * perfectly valid. Parsing callers need the whole body.
+ */
+async function cmsJson<T>(pathAndQuery: string): Promise<T> {
+  return JSON.parse(await fetchTextGuarded(`${CMS}${pathAndQuery}`)) as T;
+}
+
 export const coverageSearchNationalTool = defineTool({
   name: "coverage_search_national",
   description:
@@ -34,22 +46,89 @@ export const coverageSearchLocalTool = defineTool({
   },
 });
 
+/**
+ * List Medicare contractors.
+ *
+ * This asked `/metadata/contractors?state=XX` for years and got a 400 on every
+ * call: that path does not exist, and the CMS Coverage API has no state→MAC
+ * mapping at all — `/data/contractor` returns all 144 contracts with no state
+ * field on any of them. So the tool no longer claims to answer "which MAC
+ * serves my state", because the data behind that claim was never there.
+ *
+ * The workflow that does work is the other direction: search LCDs for the
+ * service and read the contractor off the results, which is how you find the
+ * policy that actually binds you anyway.
+ */
 export const macLookupTool = defineTool({
   name: "mac_lookup",
-  description: "Find the Medicare Administrative Contractor (MAC) serving a given US state.",
-  schema: z.object({ state: z.string().describe("Two-letter state code, e.g. TX") }),
-  execute: async (input) => ({
-    content: await cms(`/metadata/contractors?state=${encodeURIComponent(input.state.toUpperCase())}`),
+  description:
+    "List the Medicare Administrative Contractors and their contract numbers. Note: the CMS Coverage API does not publish a state-to-MAC mapping, so this cannot answer 'which MAC serves my state' — search LCDs for the service with coverage_search_local and read the contractor from the results instead, which finds the policy that binds you rather than just the company name.",
+  schema: z.object({
+    name: z.string().default("").describe("Optional case-insensitive filter on contractor name, e.g. 'Novitas'"),
   }),
+  execute: async (input) => {
+    const parsed = await cmsJson<{
+      data?: Array<{ contractor_id: number; contractor_name: string; contract_number: string }>;
+    }>("/data/contractor");
+    const rows = (parsed.data ?? []).filter(
+      (r) => !input.name || r.contractor_name.toLowerCase().includes(input.name.toLowerCase()),
+    );
+    if (rows.length === 0) {
+      return { content: `No contractor matches "${input.name}".`, isError: true };
+    }
+    const byName = new Map<string, string[]>();
+    for (const r of rows) {
+      const list = byName.get(r.contractor_name) ?? [];
+      list.push(`${r.contract_number} (id ${r.contractor_id})`);
+      byName.set(r.contractor_name, list);
+    }
+    return {
+      content: [
+        `${rows.length} contract(s) across ${byName.size} contractor(s).`,
+        "",
+        ...[...byName.entries()].map(([n, c]) => `  ${n}\n      ${c.join(", ")}`),
+        "",
+        "The API carries no state field, so this is the contractor list rather than a state lookup. To find the policy that binds a service in your area, run coverage_search_local and read contractor_name off the matching LCDs.",
+      ].join("\n"),
+    };
+  },
 });
 
+/**
+ * The SAD exclusion list is licence-gated, and the failure was opaque.
+ *
+ * `/reports/sad-exclusion-list` does not exist; the real report is
+ * `local-coverage-sad-exclusion-list`, and it answers 401 with the AMA CPT
+ * licence agreement attached. That is not a bug to route around — the list
+ * carries CPT/HCPCS descriptors, and reading them requires accepting the
+ * licence and presenting the resulting token. Saying so is more use than the
+ * bare "HTTP 400" this produced before.
+ */
 export const sadExclusionTool = defineTool({
   name: "sad_exclusion_check",
   description:
-    "Fetch the Medicare Self-Administered Drug (SAD) exclusion list entries — drugs excluded from Part B coverage because they are usually self-administered.",
-  schema: z.object({ keyword: z.string().optional().describe("Optional drug name filter") }),
+    "Check the Medicare Self-Administered Drug (SAD) exclusion list — drugs excluded from Part B because they are usually self-administered, and therefore a Part D question rather than a Part B one. Requires a CMS Coverage API licence token, since the list carries AMA-licensed code descriptors.",
+  schema: z.object({ keyword: z.string().default("").describe("Optional drug name filter") }),
   execute: async (input) => {
-    const q = input.keyword ? `?keyword=${encodeURIComponent(input.keyword)}` : "";
-    return { content: await cms(`/reports/sad-exclusion-list${q}`) };
+    const q = new URLSearchParams();
+    if (input.keyword) q.set("keyword", input.keyword);
+    try {
+      const body = await cms(`/reports/local-coverage-sad-exclusion-list${q.size ? `?${q}` : ""}`);
+      return { content: body };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/401|403/.test(message)) {
+        return {
+          content: [
+            "The SAD exclusion list needs a CMS Coverage API licence token and none is configured.",
+            "The list embeds AMA-licensed CPT/HCPCS descriptors, so CMS gates it behind accepting the licence agreement at https://api.coverage.cms.gov — this is a licensing requirement, not a transient failure, and it will not clear by retrying.",
+            "",
+            "What the answer would tell you: a drug ON this list cannot be billed to Part B, because it is usually self-administered and belongs to Part D. That is a common reason a J-code denies.",
+          ].join("\n"),
+          isError: true,
+        };
+      }
+      throw err;
+    }
   },
 });
