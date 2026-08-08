@@ -4,6 +4,9 @@ import path from "node:path";
 import { loadConfig, configDir, apiKeyFor, envVarFor, resolveProvider } from "../config/config.js";
 import { PROFILES, PROVIDER_TOOL_LIMITS, renderProfiles, selectTools } from "../tools/profiles.js";
 import { resolveOllamaTarget } from "../providers/openai.js";
+import { createProvider } from "../providers/index.js";
+import { CASES } from "../eval/cases.js";
+import { renderReport, runEval } from "../eval/run.js";
 import { MemoryStore } from "../memory/store.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { createShellTool } from "../tools/shell.js";
@@ -368,6 +371,45 @@ program
       `\nActive: provider "${config.provider}", profile "${config.toolProfile}". Override per run with \`serve --provider X --profile Y\`.`,
     );
     store.close();
+  });
+
+program
+  .command("eval")
+  .description("Measure whether the model reaches the right tool — especially the ones deferred behind tool_search")
+  .option("--provider <name>", "anthropic | openai | gemini | ollama")
+  .option("--profile <name>", "tool profile")
+  .option("--case <id>", "run one case by id")
+  .action(async (opts: { provider?: string; profile?: string; case?: string }) => {
+    const config = loadConfig();
+    if (opts.profile) config.toolProfile = opts.profile;
+    const choice = resolveProvider(config, { explicit: opts.provider });
+    if (choice.error) {
+      console.error(choice.error);
+      process.exit(1);
+    }
+    config.provider = choice.provider;
+
+    const store = new MemoryStore(path.join(configDir(), "aetheraclaw.db"));
+    const registry = buildRegistry(config, store);
+    const provider = createProvider(config, config.provider);
+    const cases = opts.case ? CASES.filter((c) => c.id === opts.case) : CASES;
+    if (cases.length === 0) {
+      console.error(`No case "${opts.case}". Available: ${CASES.map((c) => c.id).join(", ")}`);
+      process.exit(2);
+    }
+
+    console.log(`Evaluating ${cases.length} case(s) against ${config.provider} / ${modelFor(config, config.provider)}.`);
+    console.log("Only tool_search and tool_describe execute; every other tool is stubbed.\n");
+    const report = await runEval(
+      { provider, registry, config, services: { store, config, registry } },
+      cases,
+      // Streamed as they finish rather than held to the end: a serial run against
+      // a slow local model takes minutes, and a silent terminal reads as a hang.
+      (r) => console.log(`${r.passed ? "pass" : "FAIL"}  ${r.case.id.padEnd(24)} ${String(r.ms).padStart(6)}ms  ${r.reached.join(" → ") || "(no tool)"}`),
+    );
+    console.log(renderReport(report));
+    store.close();
+    process.exit(report.passed === report.total ? 0 : 1);
   });
 
 program.parseAsync().catch((err) => {
