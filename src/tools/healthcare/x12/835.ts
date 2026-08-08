@@ -31,16 +31,43 @@ export interface EraClaim {
   lines: EraServiceLine[];
 }
 
+/**
+ * A PLB — provider-level adjustment.
+ *
+ * Money in an 835 moves at two levels. The claims explain what was decided about
+ * each bill; the PLB loop explains everything the payer did to the CHECK that has
+ * nothing to do with any one claim on it — a recoupment of something paid three
+ * months ago, interest owed, a levy, a balance carried forward.
+ *
+ * SIGN: a POSITIVE amount REDUCES the payment. That is the opposite of every
+ * intuition about a positive number and it is the single easiest thing to get
+ * backwards here, so it is encoded once, in `checkEffect` (src/reports/
+ * reconcile.ts), and nowhere else.
+ */
+export interface EraProviderAdjustment {
+  /** PLB01 — the provider the adjustment is against. */
+  providerId: string;
+  /** PLB02 — fiscal period end, CCYYMMDD. */
+  fiscalPeriod: string;
+  /** First half of the composite: WO, FB, L6, … */
+  reasonCode: string;
+  /** Second half: usually the claim or account the adjustment traces back to. */
+  referenceId: string;
+  /** As written in the file. Positive reduces the check. */
+  amount: number;
+}
+
 export interface Era {
   payer: string;
   payee: string;
   checkOrEftAmount: number;
   claims: EraClaim[];
+  providerAdjustments: EraProviderAdjustment[];
 }
 
 export function parse835(text: string): Era {
   const segments = parseX12(text);
-  const era: Era = { payer: "", payee: "", checkOrEftAmount: 0, claims: [] };
+  const era: Era = { payer: "", payee: "", checkOrEftAmount: 0, claims: [], providerAdjustments: [] };
   let claim: EraClaim | null = null;
   let line: EraServiceLine | null = null;
   let inPayerLoop = false;
@@ -106,6 +133,32 @@ export function parse835(text: string): Era {
       case "LQ":
         if (line && s.elements[0] === "HE" && s.elements[1]) line.rarcs.push(s.elements[1]);
         break;
+      case "PLB": {
+        // PLB01 provider, PLB02 fiscal period, then up to six
+        // (composite reason:reference, amount) PAIRS. Walking in twos rather
+        // than assuming one adjustment per segment matters: a payer that
+        // recoups four claims in one cheque commonly writes them as four pairs
+        // in a single PLB, and reading only the first would understate the
+        // takeback by three quarters while still producing a plausible number.
+        const providerId = s.elements[0] ?? "";
+        const fiscalPeriod = s.elements[1] ?? "";
+        for (let i = 2; i + 1 < s.elements.length; i += 2) {
+          const composite = s.elements[i];
+          if (!composite) continue;
+          const [reasonCode, ...ref] = composite.split(":");
+          if (!reasonCode) continue;
+          const amount = Number(s.elements[i + 1]);
+          if (!Number.isFinite(amount)) continue;
+          era.providerAdjustments.push({
+            providerId,
+            fiscalPeriod,
+            reasonCode: reasonCode.toUpperCase(),
+            referenceId: ref.join(":"),
+            amount,
+          });
+        }
+        break;
+      }
       default:
         break;
     }
@@ -135,6 +188,20 @@ export function summarizeEra(era: Era): string {
         );
       }
     }
+  }
+
+  // Named here, at the top of what anybody reads after a parse, because a
+  // provider-level adjustment is the one thing on a remittance that moves money
+  // without appearing against any claim. Left unmentioned it is invisible: the
+  // claim list looks complete and the deposit is quietly short.
+  const plb = era.providerAdjustments ?? [];
+  if (plb.length > 0) {
+    const net = plb.reduce((s, a) => s - a.amount, 0);
+    out.push(
+      "",
+      `${plb.length} provider-level adjustment(s) on this remittance, netting ${net < 0 ? "-" : ""}$${Math.abs(net).toFixed(2)} against the cheque: ${plb.map((a) => a.reasonCode).join(", ")}.`,
+      "Run era_reconcile to tie the deposit to the claims — these dollars do not belong to any claim above.",
+    );
   }
   return out.join("\n");
 }

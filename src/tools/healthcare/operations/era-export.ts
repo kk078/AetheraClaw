@@ -1,6 +1,7 @@
 import type { Era } from "../x12/835.js";
 import { baseProcedureCode, procedureModifiers } from "../x12/segments.js";
 import { deriveAllowed } from "../intelligence/variance.js";
+import { checkEffect, describeReason } from "../../../reports/reconcile.js";
 
 // ── Posting export ───────────────────────────────────────────────────────────
 // Parsed remittances into a flat file a practice management or accounting system
@@ -86,6 +87,41 @@ export function toPostingRows(eras: Array<{ era: Era }>): PostingRow[] {
         });
       }
     }
+
+    // Provider-level adjustments are not claim rows, and leaving them out is
+    // what stopped this file balancing to the deposit. A payer recouping $4,000
+    // from a claim paid in March sends a smaller cheque with a PLB explaining
+    // it; without these rows the posting file sums to more than the money that
+    // actually arrived, and the difference has nowhere to go.
+    //
+    // The `paid` column carries the SIGNED effect on the cheque — negative for a
+    // takeback — so summing the column gives the deposit. Nothing else on the
+    // row is populated, because a PLB has no charge, no allowed amount and no
+    // procedure to attribute them to.
+    for (const adj of era.providerAdjustments ?? []) {
+      const reason = describeReason(adj.reasonCode);
+      rows.push({
+        payer: era.payer,
+        claimId: adj.referenceId,
+        payerClaimNumber: "",
+        procedure: `(provider adjustment ${adj.reasonCode})`,
+        modifiers: "",
+        units: 0,
+        charged: 0,
+        allowed: 0,
+        paid: round2(checkEffect(adj)),
+        patientResponsibility: 0,
+        contractual: 0,
+        sequestration: 0,
+        carcs: "",
+        rarcs: "",
+        claimStatus: reason.kind,
+        // Not a balance check — there is no charge to balance against. "n/a"
+        // rather than "yes" so a reader counting balanced rows is not told a
+        // PLB row was verified when nothing about it was.
+        balanced: "n/a",
+      });
+    }
   }
   return rows;
 }
@@ -109,19 +145,31 @@ export interface PostingSummary {
   paid: number;
   patientResponsibility: number;
   unbalanced: number;
+  /** Provider-level adjustment rows, and their net effect on the deposit. */
+  providerAdjustmentRows: number;
+  providerAdjustmentTotal: number;
 }
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+export function isProviderAdjustmentRow(row: PostingRow): boolean {
+  return row.procedure.startsWith("(provider adjustment ");
+}
+
 export function summarize(rows: PostingRow[]): PostingSummary {
+  const plb = rows.filter(isProviderAdjustmentRow);
   return {
     rows: rows.length,
     charged: round2(rows.reduce((s, r) => s + r.charged, 0)),
     allowed: round2(rows.reduce((s, r) => s + r.allowed, 0)),
+    // Includes the signed PLB rows, so this figure IS the deposit rather than
+    // the sum of what the claims said.
     paid: round2(rows.reduce((s, r) => s + r.paid, 0)),
     patientResponsibility: round2(rows.reduce((s, r) => s + r.patientResponsibility, 0)),
     unbalanced: rows.filter((r) => r.balanced === "NO").length,
+    providerAdjustmentRows: plb.length,
+    providerAdjustmentTotal: round2(plb.reduce((s, r) => s + r.paid, 0)),
   };
 }

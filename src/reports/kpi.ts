@@ -1,4 +1,5 @@
 import { claimCharge, computeArAging, earliestServiceDate, type StoredClaim, type StoredEra } from "./aggregate.js";
+import { reconcileEra } from "./reconcile.js";
 
 // ── Executive KPIs ───────────────────────────────────────────────────────────
 // Days in AR, first-pass clean claim rate, net collection rate. Every one of
@@ -190,7 +191,12 @@ export function computeCleanClaimRate(acks: AckRecord[], eras: StoredEra[]): Cle
 
 export interface NetCollectionRate {
   rate: number | null;
+  /** Claim payments MINUS recoupments attributed to cohort claims — net cash. */
   payments: number;
+  /** Recoupments matched to a claim in the cohort and already netted out of `payments`. */
+  recoupments: number;
+  /** Recoupments the payer did not tie to a cohort claim: counted, never silently netted. */
+  unattributedRecoupments: number;
   charges: number;
   contractualAdjustments: number;
   /** Charges minus contractual adjustments — what was actually collectable. */
@@ -255,11 +261,37 @@ export function computeNetCollectionRate(
     }
   }
 
+  // ── Recoupments ────────────────────────────────────────────────────────────
+  // Until PLB was parsed this loop counted payments and not clawbacks, so a
+  // payer that paid $100,000 and took $12,000 back reported as having paid
+  // $100,000. The rate measured gross receipts and called them collections.
+  //
+  // Scope is the trap. A recoupment lands on whatever remittance the payer
+  // chose, but it relates to the claim named in its reference — often one
+  // outside this cohort entirely. Netting every recoupment against a
+  // cohort-scoped numerator would subtract money that was never in it. So only
+  // recoupments that name a MEASURED claim are subtracted; the rest are counted
+  // and reported, never silently absorbed in either direction.
+  let recoupments = 0;
+  let unattributed = 0;
+  for (const { era } of eras) {
+    for (const r of reconcileEra(era).adjustments) {
+      if (r.reason.kind !== "recoupment") continue;
+      const taken = Math.max(0, -r.effect);
+      if (taken === 0) continue;
+      if (seen.has(r.referenceId.trim().toUpperCase())) recoupments += taken;
+      else unattributed += taken;
+    }
+  }
+  payments -= recoupments;
+
   const collectable = round2(charges - contractual);
   if (claimsMeasured < MIN_CLAIMS_FOR_RATE || collectable <= 0) {
     return {
       rate: null,
       payments: round2(payments),
+      recoupments: round2(recoupments),
+      unattributedRecoupments: round2(unattributed),
       charges: round2(charges),
       contractualAdjustments: round2(contractual),
       collectable,
@@ -275,12 +307,22 @@ export function computeNetCollectionRate(
   return {
     rate: round2((payments / collectable) * 100),
     payments: round2(payments),
+    recoupments: round2(recoupments),
+    unattributedRecoupments: round2(unattributed),
     charges: round2(charges),
     contractualAdjustments: round2(contractual),
     collectable,
     claimsMeasured,
     cohortEndsAt,
-    note: `Measured over ${claimsMeasured} claim(s) with a date of service on or before ${new Date(cohortEndsAt).toISOString().slice(0, 10)} — old enough to have finished paying. Patient responsibility stays in the denominator: it is collectable, and excluding it would report a flattering rate for a practice that never chases a patient balance.`,
+    note: [
+      `Measured over ${claimsMeasured} claim(s) with a date of service on or before ${new Date(cohortEndsAt).toISOString().slice(0, 10)} — old enough to have finished paying. Patient responsibility stays in the denominator: it is collectable, and excluding it would report a flattering rate for a practice that never chases a patient balance.`,
+      recoupments > 0 ? `$${round2(recoupments).toFixed(2)} of payer recoupments against cohort claims is netted out of the numerator — a clawback is money that did not stay collected.` : "",
+      unattributed > 0
+        ? `A further $${round2(unattributed).toFixed(2)} was recouped against claims outside this cohort. It is NOT netted out here, because subtracting it from a cohort it was never part of would understate the rate — but it is real cash the practice gave back.`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" "),
   };
 }
 

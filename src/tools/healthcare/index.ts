@@ -60,6 +60,7 @@ import {
   gfeVarianceTool,
   superbillBuildTool,
 } from "./operations/tools.js";
+import { RECONCILE_TOOLS } from "./operations/reconcile-tools.js";
 import {
   denialRiskTool,
   filingProofRecordTool,
@@ -144,6 +145,7 @@ export function registerHealthcareTools(
     credentialingCheckTool,
     superbillBuildTool,
     eraExportTool,
+    ...RECONCILE_TOOLS,
     gfeDeadlineTool,
     gfeGenerateTool,
     gfeVarianceTool,

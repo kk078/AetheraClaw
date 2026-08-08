@@ -322,10 +322,15 @@ export const eraExportTool = defineTool({
       content: [
         `Wrote ${s.rows} posting row(s) to ${input.output_path}.`,
         `Charged $${s.charged.toFixed(2)} · allowed $${s.allowed.toFixed(2)} · paid $${s.paid.toFixed(2)} · patient responsibility $${s.patientResponsibility.toFixed(2)}.`,
+        s.providerAdjustmentRows > 0
+          ? `${s.providerAdjustmentRows} provider-level adjustment row(s) netting ${s.providerAdjustmentTotal < 0 ? "-" : ""}$${Math.abs(s.providerAdjustmentTotal).toFixed(2)} are included, so the paid column sums to the deposit rather than to the claims alone. Run era_reconcile to check it against what the payer says it sent.`
+          : "",
         s.unbalanced > 0
           ? `${s.unbalanced} row(s) do not balance (charge ≠ paid + adjustments) and are marked NO in the balanced column — reconcile those before posting.`
           : "Every row balances.",
-      ].join("\n"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     };
   },
 });
