@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { openDatabase } from "../src/memory/sqlite.js";
-import { classifyTable, readCatalogue, resetCatalogueCache, scanForIdentifiers } from "../src/tools/healthcare/reference-db.js";
+import { catalogueFor, classifyTable, readCatalogue, resetCatalogueCache, scanForIdentifiers } from "../src/tools/healthcare/reference-db.js";
 import { lookupRole, renderRoles, resolveRoute, roleStatuses, searchRole } from "../src/tools/healthcare/reference-routes.js";
 import { explainWithReference } from "../src/tools/healthcare/denial-codes.js";
 import { splitStates } from "../src/tools/healthcare/coverage.js";
@@ -347,5 +347,50 @@ describe("taking the file into the installation", () => {
     const text = describeManifest(installReference(dbFile), "20260808");
     expect(text).toMatch(/no upstream to pull from/);
     expect(text).toMatch(/fetch-cms-data/);
+  });
+});
+
+// ── The path that goes missing ───────────────────────────────────────────────
+// The exact situation after `reference install`: the copy is in place, the
+// original gets deleted, and the old path is still sitting in config.
+describe("a configured path that no longer exists", () => {
+  let home: string;
+  let prevHome: string | undefined;
+
+  beforeEach(() => {
+    prevHome = process.env.AETHERACLAW_HOME;
+    home = fs.mkdtempSync(path.join(os.tmpdir(), "aetheraclaw-gone-"));
+    process.env.AETHERACLAW_HOME = home;
+    resetCatalogueCache();
+  });
+
+  afterAll(() => {
+    if (prevHome === undefined) delete process.env.AETHERACLAW_HOME;
+    else process.env.AETHERACLAW_HOME = prevHome;
+  });
+
+  it("does NOT silently answer from the managed copy instead", async () => {
+    // An explicit path is somebody saying where the data is. Substituting a
+    // different file would return a different edition with nothing to say so.
+    const { installReference } = await import("../src/tools/healthcare/reference-store.js");
+    installReference(dbFile);
+    resetCatalogueCache();
+    expect(lookupRole({ referenceDbPath: path.join(home, "deleted.db") }, "carc", "B7")).toBeNull();
+  });
+
+  it("names the managed copy and the one-line fix", async () => {
+    const { installReference, managedDbPath } = await import("../src/tools/healthcare/reference-store.js");
+    installReference(dbFile);
+    resetCatalogueCache();
+    const out = catalogueFor({ referenceDbPath: path.join(home, "deleted.db") }) as { error: string };
+    expect(out.error).toMatch(/not found/);
+    expect(out.error).toContain(managedDbPath());
+    expect(out.error).toMatch(/Remove healthcare\.referenceDbPath/);
+  });
+
+  it("says nothing about a managed copy when there is none", () => {
+    const out = catalogueFor({ referenceDbPath: path.join(home, "deleted.db") }) as { error: string };
+    expect(out.error).toMatch(/not found/);
+    expect(out.error).not.toMatch(/managed copy/);
   });
 });

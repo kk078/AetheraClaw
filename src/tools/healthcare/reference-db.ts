@@ -310,7 +310,23 @@ export function catalogueFor(cfg: ReferenceDbConfig): ReferenceCatalogue | { err
         "No reference database is attached. Either set healthcare.referenceDbPath to read a SQLite file in place, or take a copy into the installation with `aetheraclaw reference install <file>` — the second survives somebody emptying their Downloads folder.",
     };
   }
-  if (!fs.existsSync(file)) return { error: `Reference database configured but not found at ${file}.` };
+  if (!fs.existsSync(file)) {
+    // Deliberately NOT a silent fallback to the managed copy. An explicit path
+    // is somebody saying where the data is, and quietly answering from a
+    // different file is how a lookup returns the wrong edition without anyone
+    // noticing. But failing while a perfectly good installed copy sits three
+    // directories away, and not mentioning it, is a message that wastes an
+    // afternoon — this is exactly what happens after `reference install` when
+    // the old path is left in config and the original is deleted.
+    const managed = resolveManaged();
+    return {
+      error:
+        `Reference database configured but not found at ${file}.` +
+        (managed && managed !== file
+          ? ` A managed copy IS installed at ${managed}. Remove healthcare.referenceDbPath from your config to use it — it is not substituted automatically, because an explicit path is a choice and answering from a different file would be a different answer.`
+          : ""),
+    };
+  }
   let stamp: string;
   try {
     stamp = stampOf(file);
