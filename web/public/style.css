@@ -480,6 +480,51 @@ tr.detail-row td { border-bottom: 1px solid var(--line-soft); padding: 0 8px 8px
   color: var(--warn); padding-top: 2px;
 }
 
+/* CMS-1500 form. The visual grammar is the paper form: labelled boxes with the
+   box number leading, because the number is what a biller says out loud when
+   they call a payer. */
+.form-head { display: flex; gap: 12px; align-items: baseline; margin-bottom: 10px; flex-wrap: wrap; }
+.form-title { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3); }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.form-box { padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-2); }
+.box-label { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-3); }
+.box-value { font-size: 13px; color: var(--ink); margin-top: 3px; word-break: break-word; }
+.box-finding { font-size: 11.5px; color: var(--ink-2); line-height: 1.45; margin-top: 5px; }
+.form-box.sev-error { border-color: rgba(248,113,113,.55); background: rgba(248,113,113,.06); }
+.form-box.sev-warning { border-color: rgba(251,191,36,.5); background: rgba(251,191,36,.05); }
+.form-box.sev-info { border-color: rgba(96,165,250,.45); }
+
+.form-dx { margin-bottom: 12px; }
+.dx-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
+.dx-cell { display: flex; flex-direction: column; gap: 2px; padding: 6px 9px; border: 1px solid var(--line);
+  border-radius: 6px; background: var(--bg-2); min-width: 92px; }
+.dx-ptr { font-family: var(--mono); font-size: 10px; color: var(--ink-3); }
+.dx-code { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+.dx-note { font-size: 10px; color: var(--ink-3); }
+.dx-cell.sev-error { border-color: rgba(248,113,113,.55); background: rgba(248,113,113,.06); }
+.dx-cell.sev-warning { border-color: rgba(251,191,36,.5); background: rgba(251,191,36,.05); }
+.dx-cell.unused { border-style: dashed; }
+
+table.form-lines td.cell span { font-family: var(--mono); font-size: 12px; }
+table.form-lines td.cell.sev-error { background: rgba(248,113,113,.12); box-shadow: inset 0 0 0 1px rgba(248,113,113,.4); }
+table.form-lines td.cell.sev-warning { background: rgba(251,191,36,.10); box-shadow: inset 0 0 0 1px rgba(251,191,36,.35); }
+table.form-lines td.cell.sev-info { background: rgba(96,165,250,.08); }
+table.form-lines th { font-family: var(--mono); }
+
+.form-total { display: flex; gap: 10px; align-items: baseline; justify-content: flex-end; margin-top: 10px; }
+.form-total .total { font-family: var(--mono); font-size: 14px; font-weight: 600; color: var(--ink); }
+.form-offform { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+
+.appeal-section { margin: 14px 0; }
+.appeal-section h4 { margin: 0 0 5px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); font-weight: 500; }
+.appeal-section p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--ink); }
+.appeal-section ul { margin: 0; padding-left: 18px; }
+.appeal-section li { font-size: 12.5px; line-height: 1.6; color: var(--ink); }
+.appeal-foot { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-top: 16px;
+  padding-top: 10px; border-top: 1px solid var(--line); }
+.appeal-foot code { font-family: var(--mono); font-size: 12px; background: var(--panel-2); padding: 2px 6px; border-radius: 4px; }
+.muted { color: var(--ink-3); font-size: 11.5px; }
+
 /* Waterfall */
 .badge-money { display: inline-flex; gap: 8px; align-items: baseline; padding: 7px 13px; border-radius: 9px;
   background: rgba(52,211,153,.10); border: 1px solid rgba(52,211,153,.30); margin-bottom: 12px; }

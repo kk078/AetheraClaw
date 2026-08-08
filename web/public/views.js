@@ -269,6 +269,183 @@ function kpiTile(t) {
   return cell;
 }
 
+// ── cms1500: the claim as the paper form ─────────────────────────────────────
+// Box numbers, highlighting and the verdict all arrive decided from
+// src/views/cms1500.ts. Nothing here inspects a rule name or works out which
+// field a finding belongs to — that attribution is a domain judgement and it is
+// tested on the server.
+
+V.cms1500 = (d) => {
+  const root = node("div", "toolview view-1500");
+
+  if (d.verdict) {
+    const v = node("div", `verdict verdict-${d.verdict}`);
+    v.append(
+      node("strong", null, { hold: "HOLD", review: "REVIEW", clear: "CLEAR" }[d.verdict]),
+      node("span", null,
+        d.verdict === "hold" ? "Do not submit as it stands."
+        : d.verdict === "review" ? "A biller should look at the highlighted boxes before it goes out."
+        : "No box carries a finding."),
+    );
+    root.append(v);
+  }
+
+  const head = node("div", "form-head");
+  head.append(
+    node("span", "form-title", "CMS-1500 (02/12)"),
+    node("span", "claim-id", d.claimId || "(no claim id)"),
+    node("span", "payer", d.payer || ""),
+  );
+  root.append(head);
+
+  const grid = node("div", "form-grid");
+  for (const c of d.header ?? []) grid.append(formBox(c));
+  root.append(grid);
+
+  // Box 21 — letters, because that is what the form prints and what 24E points at.
+  if (d.diagnoses?.length) {
+    const dx = node("div", "form-dx");
+    dx.append(node("div", "box-label", "21  Diagnosis or nature of illness or injury"));
+    const row = node("div", "dx-row");
+    for (const g of d.diagnoses ?? []) {
+      const cellEl = node("div", `dx-cell sev-${g.severity}${g.unused ? " unused" : ""}`);
+      cellEl.append(node("span", "dx-ptr", g.pointer), node("span", "dx-code", g.code));
+      if (g.unused) cellEl.append(node("span", "dx-note", "no line points here"));
+      for (const m of g.findings ?? []) cellEl.append(node("div", "box-finding", m));
+      row.append(cellEl);
+    }
+    dx.append(row);
+    root.append(dx);
+  }
+
+  const table = node("table", "lines form-lines");
+  const thead = node("thead");
+  const hr = node("tr");
+  for (const h of ["", "24A", "24B", "24D", "24E", "24F", "24G", "24J"]) hr.append(node("th", null, h));
+  thead.append(hr);
+  table.append(thead);
+
+  const tbody = node("tbody");
+  for (const line of d.lines ?? []) {
+    const tr = node("tr", `sev-${line.severity}`);
+    tr.append(node("td", "num", String(line.index)));
+    for (const box of ["24A", "24B", "24D", "24E", "24F", "24G", "24J"]) {
+      const c = (line.cells ?? []).find((x) => x.box === box);
+      const td = node("td", c && c.severity !== "clean" ? `cell sev-${c.severity}` : "cell");
+      td.append(node("span", null, (c && c.value) || "—"));
+      tr.append(td);
+    }
+    tbody.append(tr);
+
+    const flagged = (line.cells ?? []).filter((c) => c.findings?.length);
+    if (flagged.length) {
+      const detail = node("tr", "detail-row");
+      const td = node("td");
+      td.colSpan = 8;
+      for (const c of flagged) {
+        for (const m of c.findings) {
+          const f = node("div", `finding f-${c.severity}`);
+          const fh = node("div", "f-head");
+          fh.append(node("span", "f-rule", `box ${c.box}`), node("span", "f-msg", m));
+          f.append(fh);
+          td.append(f);
+        }
+      }
+      detail.append(td);
+      tbody.append(detail);
+    }
+  }
+  table.append(tbody);
+  root.append(table);
+
+  const total = node("div", "form-total");
+  total.append(node("span", "box-label", "28  Total charge"), node("span", "total", money(d.totalCharge)));
+  root.append(total);
+
+  // Below the form, never inside it. These are facts about the practice or the
+  // installation, and putting one in a box would say the claim is wrong where
+  // it is not.
+  if (d.unattributed?.length) {
+    const off = node("div", "form-offform");
+    off.append(node("div", "bs-head", `${d.unattributed.length} finding(s) that belong to no box on this form`));
+    for (const u of d.unattributed) {
+      const f = node("div", `finding f-${u.severity}`);
+      const fh = node("div", "f-head");
+      fh.append(node("span", "f-rule", u.rule), node("span", "f-msg", u.message));
+      f.append(fh);
+      off.append(f);
+    }
+    root.append(off);
+  }
+
+  return root;
+};
+
+function formBox(c) {
+  const b = node("div", `form-box${c.severity && c.severity !== "clean" ? ` sev-${c.severity}` : ""}`);
+  b.append(node("div", "box-label", `${c.box}  ${c.label}`), node("div", "box-value", c.value || "—"));
+  for (const m of c.findings ?? []) b.append(node("div", "box-finding", m));
+  return b;
+}
+
+// ── appeal_letter: read and print, never edit ────────────────────────────────
+// The editable artifact is the Markdown file appeal_draft wrote into the
+// workspace. This panel is for reading it and sending it to the printer through
+// the existing print stylesheet; it deliberately has no editing affordance,
+// because a browser panel whose changes vanish on refresh loses work silently.
+
+V.appeal_letter = (d) => {
+  const root = node("div", "toolview view-appeal");
+
+  if (d.citationWarning) {
+    const w = node("div", `verdict verdict-${d.citationWarning.severity === "error" ? "hold" : "review"}`);
+    w.append(
+      node("strong", null, d.citationWarning.severity === "error" ? "CITATIONS UNVERIFIED" : "NO POLICY CITED"),
+      node("span", null, d.citationWarning.text),
+    );
+    root.append(w);
+  }
+
+  const meta = node("div", "form-grid");
+  for (const [label, value] of [
+    ["To", d.recipient],
+    ["Re", d.patientReference],
+    ["Claim", `${d.claimId}  ·  DOS ${d.serviceDate}`],
+    ["Denial", d.carcDescription ? `CARC ${d.carc} — ${d.carcDescription}` : `CARC ${d.carc}`],
+  ]) {
+    const b = node("div", "form-box");
+    b.append(node("div", "box-label", label), node("div", "box-value", value || "—"));
+    meta.append(b);
+  }
+  root.append(meta);
+
+  for (const s of d.sections ?? []) {
+    const sec = node("div", "appeal-section");
+    sec.append(node("h4", null, s.heading), node("p", null, s.body));
+    root.append(sec);
+  }
+
+  const cites = node("div", "appeal-section");
+  cites.append(node("h4", null, "Applicable coverage policy"));
+  if ((d.citations ?? []).length === 0) {
+    cites.append(node("p", "muted", "None cited."));
+  } else {
+    const ul = node("ul");
+    for (const c of d.citations) ul.append(node("li", null, c));
+    cites.append(ul);
+  }
+  root.append(cites);
+
+  // Where the real document is. Said plainly so nobody types into this panel
+  // expecting it to stick.
+  const foot = node("div", "appeal-foot");
+  foot.append(node("span", "box-label", "Editable file"), node("code", null, d.filePath));
+  foot.append(node("span", "muted", "Edit the file, not this panel — this view is for reading and printing."));
+  root.append(foot);
+
+  return root;
+};
+
 /** Render a view payload, or null when nothing knows how. */
 function renderView(view) {
   if (!view || !V[view.kind]) return null;

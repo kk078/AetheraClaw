@@ -17,6 +17,7 @@ import { claimScrubTool } from "./claim-scrub.js";
 import { claimAutohealTool } from "./autoheal.js";
 import { emLevelRiskTool, presubmitCheckTool } from "./presubmit-tools.js";
 import { dataStatusTool, hcpcsLookupTool } from "./datasets.js";
+import { claimForm1500Tool } from "./claim-scrub.js";
 import { REFERENCE_DB_TOOLS } from "./reference-db.js";
 import { eligibilityCheckTool } from "./eligibility.js";
 import { worklistAddTool, worklistListTool, worklistUpdateTool } from "./worklist.js";
@@ -112,6 +113,7 @@ export function registerHealthcareTools(
     sadExclusionTool,
     // Claims lifecycle
     claimScrubTool,
+    claimForm1500Tool,
     claimAutohealTool,
     presubmitCheckTool,
     claimBuild837Tool,

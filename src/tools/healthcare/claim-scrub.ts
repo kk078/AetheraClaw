@@ -3,6 +3,7 @@ import { defineTool } from "../registry.js";
 import { npiLuhnValid } from "./npi.js";
 import { ClaimSchema, type ClaimInput } from "./x12/837.js";
 import { buildClaimScrubView } from "../../views/build.js";
+import { boxForRule, buildCms1500View } from "../../views/cms1500.js";
 import { autohealClaim } from "./autoheal.js";
 import { checkNcci, ncciDataNotice } from "./datasets.js";
 import type { ScrubFinding } from "./finding.js";
@@ -145,5 +146,40 @@ export const claimScrubTool = defineTool({
       // a line-item form for the person reading the transcript.
       view: { kind: "claim_scrub", data: buildClaimScrubView(claim, findings, { autoheal: autohealClaim(claim) }) },
     };
+  },
+});
+
+// ── The claim as the paper form ──────────────────────────────────────────────
+
+export const claimForm1500Tool = defineTool({
+  name: "claim_form_1500",
+  description:
+    "Render a claim as the CMS-1500 (02/12) form with every scrub finding attributed to the box it belongs to — 24A dates, 24B place of service, 24D procedure and modifiers, 24E diagnosis pointer, 24G units, 33a billing NPI. The same rules as claim_scrub; this is the layout a biller reads. Findings that belong to no box on the form (credentialing, missing reference data) are listed separately rather than pinned to a plausible-looking field.",
+  schema: ClaimSchema,
+  execute: async (input, ctx) => {
+    const store = ctx.services.store as MemoryStore | undefined;
+    const findings = scrubClaim(input, {
+      telehealthPolicy: loadTelehealthPolicy(store, input.payer_name),
+      policyRules: store ? loadActiveRules(store) : [],
+    });
+    const errors = findings.filter((f) => f.severity === "error").length;
+    const warnings = findings.filter((f) => f.severity === "warning").length;
+    const view = buildCms1500View(input, findings, {
+      verdict: errors > 0 ? "hold" : warnings > 0 ? "review" : "clear",
+    });
+
+    // The model reads the prose, as with every other tool. The box attribution
+    // is for the person, and repeating the whole grid here would pay for it
+    // twice with no benefit.
+    const text = [
+      `CMS-1500 for claim ${view.claimId} (${view.payer}) — ${view.lines.length} service line(s), $${view.totalCharge.toFixed(2)}.`,
+      ...findings.map((f) => {
+        const box = boxForRule(f.rule);
+        return `[${f.severity.toUpperCase()}] ${box ? `box ${box}` : "no box"} — ${f.rule}: ${f.message}`;
+      }),
+      "",
+      errors === 0 ? "No errors. The form is ready as it stands." : `${errors} error(s) must be fixed before submission.`,
+    ];
+    return { content: text.join("\n"), view: { kind: "cms1500", data: view } };
   },
 });

@@ -5,6 +5,7 @@ import { checkCitations } from "./citations.js";
 import { defineTool } from "../registry.js";
 import { confinePath } from "../path-guard.js";
 import { CARC } from "./denial-codes.js";
+import { buildAppealLetterView } from "../../views/appeal.js";
 
 export const appealDraftTool = defineTool({
   name: "appeal_draft",
@@ -65,7 +66,29 @@ _${"{billing office signature block}"}_
     const p = confinePath(ctx.workspaceRoot, input.output_path);
     fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.writeFileSync(p, letter);
-    return { content: `Appeal letter drafted at ${input.output_path}:\n\n${letter.slice(0, 1500)}` };
+    return {
+      content: `Appeal letter drafted at ${input.output_path}:\n\n${letter.slice(0, 1500)}`,
+      // The canvas is for reading and printing. The FILE is the editable
+      // artifact — it persists, it diffs, and it opens in whatever the practice
+      // already uses. A browser panel whose edits vanish on refresh would be a
+      // second copy that quietly loses work.
+      view: {
+        kind: "appeal_letter",
+        data: buildAppealLetterView({
+          claimId: input.claim_id,
+          payer: input.payer_name,
+          serviceDate: input.service_date,
+          carc: input.carc,
+          carcDescription: carcInfo?.desc ?? "",
+          filePath: input.output_path,
+          patientReference: input.patient_reference,
+          serviceDescription: input.service_description,
+          clinicalSummary: input.clinical_summary,
+          citations,
+          citationsVerified: input.citations_verified,
+        }),
+      },
+    };
   },
 });
 

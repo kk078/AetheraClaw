@@ -24,7 +24,7 @@
 
 import type { CardSummary } from "./verdict.js";
 
-export type ViewKind = "claim_scrub" | "money_waterfall" | "em_meter" | "kpi_tiles";
+export type ViewKind = "claim_scrub" | "money_waterfall" | "em_meter" | "kpi_tiles" | "cms1500" | "appeal_letter";
 
 export interface ToolView {
   kind: ViewKind;

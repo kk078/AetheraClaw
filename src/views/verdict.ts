@@ -1,4 +1,6 @@
 import type { ClaimScrubView, EmMeterView, MoneyWaterfallView, ToolView } from "./types.js";
+import type { Cms1500View } from "./cms1500.js";
+import type { AppealLetterView } from "./appeal.js";
 
 // ── Card summaries ───────────────────────────────────────────────────────────
 // The console showed a vertical stack of `tool_invoke` boxes tagged done/error.
@@ -112,6 +114,63 @@ function emCard(v: EmMeterView): CardSummary {
   };
 }
 
+function cms1500Card(v: Cms1500View): CardSummary {
+  const boxed = [
+    ...v.header.filter((c) => c.severity !== "clean"),
+    ...v.lines.flatMap((l) => l.cells.filter((c) => c.severity !== "clean")),
+    ...v.diagnoses.filter((d) => d.severity !== "clean"),
+  ];
+  const errors = boxed.filter((c) => c.severity === "error").length + v.unattributed.filter((u) => u.severity === "error").length;
+  const warnings = boxed.filter((c) => c.severity === "warning").length + v.unattributed.filter((u) => u.severity === "warning").length;
+  const verdict: VerdictLevel = v.verdict ?? (errors > 0 ? "hold" : warnings > 0 ? "review" : "clear");
+
+  return {
+    title: `CMS-1500 — ${v.claimId || "(no claim id)"}`,
+    verdict,
+    verdictLabel: VERDICT_LABELS[verdict],
+    because:
+      errors > 0
+        ? `${errors} finding(s) at error severity. The boxes carrying them are highlighted on the form.`
+        : warnings > 0
+          ? `${warnings} warning(s) on the form — billable as it stands, each a thing a payer may ask about.`
+          : v.unattributed.length > 0
+            ? `Nothing on the form itself. ${v.unattributed.length} finding(s) belong to no box — practice or installation facts rather than claim defects.`
+            : "Every check that applies ran, and no box carries a finding.",
+    facts: [
+      { label: "Billed charge", value: money(v.totalCharge) },
+      { label: "Service lines", value: v.lines.length === 0 ? "none" : `${v.lines.length} (boxes 24A–24J)` },
+      {
+        label: "Boxes flagged",
+        // Counted by BOX, not by finding: the form's unit is the field, and two
+        // findings in one box is one box a biller has to look at.
+        value: boxed.length === 0 ? "none" : [...new Set(boxed.map((c) => ("box" in c ? c.box : `21${c.pointer}`)))].join(", "),
+      },
+    ],
+  };
+}
+
+function appealCard(v: AppealLetterView): CardSummary {
+  // A letter with unverified citations is HOLD, not review. Sending it is the
+  // irreversible step, and the risk is not that the appeal fails — it is that a
+  // fabricated policy identifier goes to a federal payer over the practice's
+  // name.
+  const verdict: VerdictLevel = v.citationWarning?.severity === "error" ? "hold" : v.citationWarning ? "review" : "clear";
+
+  return {
+    title: `Appeal — claim ${v.claimId}`,
+    verdict,
+    verdictLabel: VERDICT_LABELS[verdict],
+    because:
+      v.citationWarning?.text ??
+      "Coverage policy is cited and confirmed against the coverage tools. The letter is ready for the billing office to sign.",
+    facts: [
+      { label: "Payer", value: v.payer || "not stated" },
+      { label: "Denial", value: v.carcDescription ? `CARC ${v.carc} — ${v.carcDescription}` : `CARC ${v.carc}` },
+      { label: "Editable file", value: v.filePath },
+    ],
+  };
+}
+
 function waterfallCard(v: MoneyWaterfallView): CardSummary {
   return {
     title: v.title,
@@ -141,6 +200,10 @@ export function summarize(view: ToolView): CardSummary | null {
       return emCard(view.data as EmMeterView);
     case "money_waterfall":
       return waterfallCard(view.data as MoneyWaterfallView);
+    case "cms1500":
+      return cms1500Card(view.data as Cms1500View);
+    case "appeal_letter":
+      return appealCard(view.data as AppealLetterView);
     case "kpi_tiles":
       // The tiles ARE the summary; a card above them would restate them.
       return null;
