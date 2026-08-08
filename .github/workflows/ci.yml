@@ -1,8 +1,13 @@
 name: CI
 
+# A push to a branch WITH an open pull request fires both events, and the first
+# version of this file listened to both — so every push ran the whole suite twice,
+# on two runners, for one commit. Push is scoped to the long-lived branches;
+# everything else is covered by the pull_request event, which is the run whose
+# result appears on the PR anyway.
 on:
   push:
-    branches: ["**"]
+    branches: [rcm-base, main]
   pull_request:
 
 # A second push to the same branch cancels the first — the older run's result is
