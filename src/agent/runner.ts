@@ -5,7 +5,7 @@ import { selectTools } from "../tools/profiles.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolContext } from "../tools/types.js";
 import type { AgentEvent } from "../shared/events.js";
-import { buildSystemPrompt } from "./system-prompt.js";
+import { buildSystemPrompt, catalogueBlock } from "./system-prompt.js";
 import { truncateToBudget } from "./context-window.js";
 
 const MAX_TOOL_ROUNDS = 40;
@@ -59,14 +59,15 @@ export async function runTurn(deps: RunnerDeps, sessionId: string, userText: str
       // nobody but Anthropic caches the definition block.
       const selection = selectTools(registry.specs(), config.toolProfile, provider.name);
       const toolSpecs = selection.specs;
-      if (rounds === 1) {
-        for (const note of selection.notes) emit({ type: "error", sessionId, message: note });
-      }
+      // Logged rather than emitted as errors: these are notes about how the
+      // turn is configured, and surfacing them as errors makes every start of
+      // every conversation look like something went wrong.
+      if (rounds === 1) for (const note of selection.notes) console.error(`[tools] ${note}`);
       let stopReason = "end_turn";
       let assistant: NormalizedBlock[] = [];
 
       for await (const event of provider.streamTurn({
-        system,
+        system: selection.deferred.length > 0 ? system + catalogueBlock(selection.deferred.length) : system,
         messages,
         tools: toolSpecs,
         maxTokens: config.maxTokens,

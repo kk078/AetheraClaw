@@ -158,7 +158,8 @@ program
     }
     const store = new MemoryStore(path.join(configDir(), "aetheraclaw.db"));
     const registry = buildRegistry(config, store);
-    const sessions = new SessionManager(store, registry, config, { store, config });
+    // The catalogue tools need the registry to search and invoke through it.
+    const sessions = new SessionManager(store, registry, config, { store, config, registry });
     const app = await buildServer({ config, store, sessions });
 
     const email = new EmailChannel({
@@ -176,7 +177,11 @@ program
     console.log(`Provider: ${config.provider} · Workspace: ${config.workspaceRoot}`);
     console.log(`SQLite: ${store.db.driver}`);
     const picked = selectTools(registry.specs(), config.toolProfile, config.provider);
-    console.log(`Tools: ${picked.specs.length} of ${registry.specs().length} (profile "${config.toolProfile}")`);
+    console.log(
+      `Tools: ${picked.specs.length} loaded directly` +
+        (picked.deferred.length > 0 ? ` + ${picked.deferred.length} via tool_search` : "") +
+        ` of ${registry.specs().length} (profile "${config.toolProfile}")`,
+    );
     for (const note of picked.notes) console.log(`  ! ${note}`);
     if (config.email.enabled) console.log(`Email channel: ${config.email.imap.user}@${config.email.imap.host}`);
   });
@@ -249,7 +254,8 @@ program
       const key = apiKeyFor(name) ? " set " : name === "ollama" ? "local" : " --  ";
       const counts = PROFILES.map((p) => {
         const s = selectTools(all, p.name, name);
-        return `${s.specs.length}${s.droppedByLimit.length ? "*" : ""}`.padStart(7);
+        const mark = s.droppedByLimit.length ? "*" : s.deferred.length ? "+" : "";
+        return `${s.specs.length}${mark}`.padStart(7);
       });
       console.log(
         [
@@ -261,7 +267,7 @@ program
         ].join("  "),
       );
     }
-    console.log("\n* some tools were dropped to fit the cap \u2014 pick a narrower profile.\n");
+    console.log("\n+ loaded directly; the rest reachable via tool_search / tool_invoke, so every tool is usable.\n* dropped outright \u2014 not reachable at all.\n");
     console.log(renderProfiles());
     console.log(
       `\nActive: provider "${config.provider}", profile "${config.toolProfile}". Override per run with \`serve --provider X --profile Y\`.`,

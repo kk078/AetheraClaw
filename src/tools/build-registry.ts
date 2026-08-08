@@ -2,6 +2,7 @@ import path from "node:path";
 import type { Config } from "../config/config.js";
 import { MemoryStore } from "../memory/store.js";
 import { ToolRegistry } from "../tools/registry.js";
+import { META_TOOLS } from "../tools/meta.js";
 import { createShellTool } from "../tools/shell.js";
 import { listDirTool, readFileTool, writeFileTool } from "../tools/fs.js";
 import { webFetchTool, webSearchFallbackTool } from "../tools/web-fetch.js";
@@ -125,6 +126,7 @@ export function buildRegistry(config: Config, store: MemoryStore): ToolRegistry 
   const registry = new ToolRegistry();
   registry.register(createShellTool(config.shell));
   registry.registerAll([readFileTool, writeFileTool, listDirTool, webFetchTool]);
+  registry.registerAll(META_TOOLS);
   if (config.provider !== "anthropic") registry.register(webSearchFallbackTool);
   registerHealthcareTools(registry, { config, store });
   registry.registerAll([

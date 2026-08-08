@@ -1,4 +1,5 @@
 import type { ToolSpec } from "../providers/types.js";
+import { META_NAMES } from "./meta.js";
 
 // ── Tool profiles ────────────────────────────────────────────────────────────
 // The registry holds ~173 tools. Sending all of them on every request is fine on
@@ -25,7 +26,8 @@ export interface Profile {
 }
 
 /** Always present: the agent cannot work without files, shell and fetch. */
-const BASE = ["run_command", "read_file", "write_file", "list_dir", "web_fetch", "web_search"];
+const BASE = ["run_command", "read_file", "write_file", "list_dir", "web_fetch", "web_search",
+  "tool_search", "tool_describe", "tool_invoke"];
 
 export const PROFILES: Profile[] = [
   {
@@ -117,6 +119,8 @@ export interface Selection {
   droppedByProfile: number;
   /** Tools cut purely to fit the provider's limit — these are the dangerous ones. */
   droppedByLimit: string[];
+  /** Tools not on the wire but reachable through tool_search / tool_invoke. */
+  deferred: string[];
   notes: string[];
 }
 
@@ -142,18 +146,31 @@ export function selectTools(all: ToolSpec[], profileName: string, provider: stri
   const limit = PROVIDER_TOOL_LIMITS[provider] ?? 128;
   let specs = matched;
   const droppedByLimit: string[] = [];
+  const deferred: string[] = [];
 
   if (matched.length > limit) {
-    // Keep the base tools first — losing read_file leaves the agent unable to do
-    // anything at all — then fill in registry order.
-    const base = matched.filter((s) => BASE.includes(s.name));
-    const rest = matched.filter((s) => !BASE.includes(s.name));
-    specs = [...base, ...rest.slice(0, Math.max(0, limit - base.length))];
-    for (const s of rest.slice(Math.max(0, limit - base.length))) droppedByLimit.push(s.name);
+    const base = matched.filter((s) => BASE.includes(s.name) || META_NAMES.has(s.name));
+    const rest = matched.filter((s) => !BASE.includes(s.name) && !META_NAMES.has(s.name));
+    const room = Math.max(0, limit - base.length);
+    specs = [...base, ...rest.slice(0, room)];
 
-    notes.push(
-      `Profile "${profileName}" has ${matched.length} tools and ${provider} takes at most ${limit}. ${droppedByLimit.length} were dropped: ${droppedByLimit.join(", ")}. Pick a narrower profile — a model cannot ask for a tool it was not given, and it will not say so.`,
-    );
+    // With the catalogue tools loaded, the overflow is DEFERRED rather than
+    // dropped: every one of them is still reachable through tool_search and
+    // tool_invoke. Without them there is no route back, so it is a real loss and
+    // gets named as one.
+    const overflow = rest.slice(room).map((s) => s.name);
+    const catalogueLoaded = all.some((s) => META_NAMES.has(s.name));
+    if (catalogueLoaded) {
+      deferred.push(...overflow);
+      notes.push(
+        `${specs.length} tool(s) are loaded directly and ${deferred.length} more are reachable through tool_search / tool_invoke. ${provider} takes at most ${limit} definitions per request, so the rest are discovered on demand rather than shipped every turn.`,
+      );
+    } else {
+      droppedByLimit.push(...overflow);
+      notes.push(
+        `Profile "${profileName}" has ${matched.length} tools and ${provider} takes at most ${limit}. ${droppedByLimit.length} were dropped: ${droppedByLimit.join(", ")}. Pick a narrower profile — a model cannot ask for a tool it was not given, and it will not say so.`,
+      );
+    }
   }
 
   if (provider !== "anthropic" && specs.length > 60) {
@@ -163,7 +180,7 @@ export function selectTools(all: ToolSpec[], profileName: string, provider: stri
     );
   }
 
-  return { specs, droppedByProfile, droppedByLimit, notes };
+  return { specs, droppedByProfile, droppedByLimit, deferred, notes };
 }
 
 export function renderProfiles(): string {

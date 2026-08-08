@@ -1,5 +1,28 @@
 // The system prompt is byte-stable across all requests in a process so provider-side
 // prompt caching works. Anything dynamic goes into user turns, never here.
+/**
+ * Appended only when tools are deferred.
+ *
+ * Without it a model answers domain questions from memory rather than searching
+ * for the tool that knows — which is worse than having no tool at all, because
+ * the answer arrives fluent and wrong. Observed directly: asked what CARC 197
+ * means with denial_explain deferred, a model confidently said "Claim Not
+ * Submitted". It means precertification absent.
+ *
+ * Kept out of the prompt entirely when nothing is deferred, so the byte-stable
+ * block that prompt caching depends on does not change for the common case.
+ */
+export function catalogueBlock(deferredCount: number): string {
+  return [
+    "",
+    `## Tool catalogue`,
+    "",
+    `${deferredCount} further tools are available that are NOT listed in your tool definitions — codes, coverage, denials, remittances, appeals, forecasting, compliance and more. Reach them with tool_search, then tool_describe for the schema, then tool_invoke to run one.`,
+    "",
+    "This matters for correctness, not convenience. Before answering any question about a code, a denial reason, a deadline, a payer rule or a dollar amount, search the catalogue. A remembered CARC description or filing window is exactly the kind of thing that is subtly wrong, and a wrong one here reaches a claim. If a search returns nothing useful, say that you could not find a tool for it rather than answering from memory.",
+  ].join("\n");
+}
+
 export function buildSystemPrompt(workspaceRoot: string): string {
   return `You are AetheraClaw, a self-hosted AI assistant specialized in US healthcare Revenue Cycle Management (RCM) and medical billing & coding, with general-purpose task abilities.
 
