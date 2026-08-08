@@ -27,7 +27,7 @@ export const MODULES: ModuleDef[] = [
     key: "codes",
     label: "Coding & Lookup",
     blurb: "ICD-10, HCPCS and NPI validation against bundled and live registries.",
-    note: "ICD-10 runs fully offline against bundled FY2026 data. NPI check digits are Luhn-validated without a network call. Place-of-service codes are a table, not a recollection — POS 22 is On Campus-Outpatient Hospital.",
+    note: "ICD-10 search and validation call the NLM Clinical Tables API, so they need network — and say so when they cannot reach it rather than answering from recollection. NPI check digits are Luhn-validated with no network call at all, and place of service is a bundled table rather than a memory: POS 22 is On Campus-Outpatient Hospital.",
     glyph: "◈",
     match: ["icd10_", "hcpcs_", "npi_", "pos_lookup"],
   },

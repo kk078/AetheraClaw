@@ -31,7 +31,15 @@ API keys come from the environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMI
 
 ## Quick start
 
+Requires **Node 22.5 or newer** (`node -v`). Nothing else — no compiler, no Python,
+no system SQLite. `better-sqlite3` ships prebuilt binaries for macOS, Linux and
+Windows on both x64 and arm64, and if it is unavailable for any reason the store
+falls back to Node's built-in `node:sqlite` automatically, which is why it is an
+*optional* dependency rather than a required one.
+
 ```bash
+git clone -b claude/openclaw-functionalities-xljw65 https://github.com/kk078/AetheraClaw.git
+cd AetheraClaw
 npm install
 npm run build
 
@@ -54,7 +62,22 @@ node dist/cli/index.js providers                  # which keys are present here
 
 An explicit `--provider` is honoured or it fails — it is never quietly swapped, because serving a different model than the one named is worse than an error.
 
-`npm run dev` runs the gateway from source via `tsx`.
+`npm run dev` runs the gateway from source via `tsx`. `npm test` runs the whole
+suite offline — no database, no network, no keys — so a green run proves the
+checkout is sound before any provider is configured.
+
+**What a fresh install does and does not fetch.** `npm install` takes ~200 MB and
+no build step. Playwright's browser binaries are *not* downloaded — the payer-portal
+tools need `npx playwright install chromium` first, and every other tool works
+without it. Reference datasets are not bundled either: they live in
+`~/.aetheraclaw/data` and every tool that wants one **degrades and says so** rather
+than guessing, so a first run is fully functional minus NCCI edits, MPFS pricing and
+HCPCS descriptions. `data_status` lists what is missing and what each absence stops
+you from checking.
+
+State lives in `~/.aetheraclaw` — `config.json5`, `aetheraclaw.db`, `data/` — and
+the workspace defaults to `~/aetheraclaw-workspace`. Set `AETHERACLAW_HOME` to put
+it somewhere else; nothing is written outside those two directories.
 
 ## Safety model
 
@@ -318,7 +341,7 @@ Two provider quirks are handled rather than left to bite: **Ollama Cloud** is se
 
 Switching providers mid-session keeps the conversation: history is stored in normalized form, and Anthropic-only blocks (thinking, server-side search results) are dropped rather than replayed to a provider that cannot read them.
 
-**What the live APIs actually give you.** ICD-10 search and validation are fully offline against bundled FY2026 data. NPI validation is an offline Luhn check; NPI lookup hits NPPES, and a non-2xx throws rather than being reported as "no record" — a network outage must not read as "this provider does not exist". NCD and LCD search work against the CMS Coverage API. Two things do not, and both were found by calling them rather than by testing them: **the Coverage API publishes no state-to-MAC mapping at all**, so `mac_lookup` lists contractors and says to find your binding policy by searching LCDs instead of pretending to answer by state; and the **SAD exclusion list is licence-gated** — it embeds AMA CPT descriptors, so CMS answers 401 until you accept the licence agreement and present a token, which the tool now explains instead of surfacing a bare HTTP error.
+**What the live APIs actually give you.** ICD-10 search and validation call the NLM Clinical Tables API, so they need network — billable status is derived from whether the code has children in the returned hierarchy, not asserted from memory. NPI validation is an offline Luhn check; NPI lookup hits NPPES, and a non-2xx throws rather than being reported as "no record" — a network outage must not read as "this provider does not exist". NCD and LCD search work against the CMS Coverage API. Two things do not, and both were found by calling them rather than by testing them: **the Coverage API publishes no state-to-MAC mapping at all**, so `mac_lookup` lists contractors and says to find your binding policy by searching LCDs instead of pretending to answer by state; and the **SAD exclusion list is licence-gated** — it embeds AMA CPT descriptors, so CMS answers 401 until you accept the licence agreement and present a token, which the tool now explains instead of surfacing a bare HTTP error.
 
 Several tools use free public APIs (NLM, NPPES, CMS Coverage) — no keys required. Optional datasets go in `~/.aetheraclaw/data/`: `ncci-ptp.json` and `mue.json` (bundling and unit edits), `hcpcs.json`, `mpfs.json` (RVUs), `global-periods.json` (`{"CODE": 90}`) for global-period lookup, `mpfs-cf.json` (`{"cf": 32.35}`) and `gpci.json` (`{"LOCALITY": {work, pe, mp}}`) for locality-accurate pricing, `em-benchmark.json` (`{"99213": 38.2}` percentages, from the CMS *Medicare Physician & Other Practitioners* public use file) for peer E/M comparison, and `hcc-model.json` (ICD-10→HCC mapping, category definitions with coefficients and hierarchies, demographic terms) from the CMS risk-adjustment model files. `code_update_diff` reads code-set editions from the same directory, either as a bare `{"CODE": "description"}` map or wrapped as `{"label", "effective", "codes"}`. CPT is AMA-licensed and supplied by the user via `healthcare.cptDataPath`. Every dataset is optional — tools that need one say so instead of guessing.
 

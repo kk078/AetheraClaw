@@ -29,7 +29,7 @@ document.querySelectorAll(".navitem").forEach((n) => n.addEventListener("click",
 // ── Overview ───────────────────────────────────────────────────────────
 
 const STARTERS = [
-  ["Is E11.65 billable, and what does it mean?", "◈", "Coding", "Validates against bundled FY2026 ICD-10 — no network needed."],
+  ["Is E11.65 billable, and what does it mean?", "◈", "Coding", "Checks the NLM code set rather than recalling it — billable status comes from the hierarchy."],
   ["I got CARC 197 on a claim. What is it and what do I do?", "▽", "Denials", "Resolves the code rather than recalling it, then gives the remediation path."],
   ["Is a Medicare claim with date of service 20250715 still filable today?", "◷", "Timely filing", "One calendar year by statute, computed so a leap day cannot shift it."],
   ["Scrub this claim and tell me exactly what is wrong with it.", "▣", "Claim scrub", "Severity-ranked findings; a dangling diagnosis pointer is an error, not a warning."],
