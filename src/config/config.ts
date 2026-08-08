@@ -121,6 +121,19 @@ export const ConfigSchema = z.object({
       dollarsPerRaf: z.number().min(0).default(0),
     })
     .default({}),
+  tenancy: z
+    .object({
+      // Off by default, and turning it on cannot move an existing install's
+      // data: single-tenant keeps the old database path, multi-tenant puts each
+      // tenant under tenants/<slug>/. There is no automatic migration because a
+      // migration that guesses which practice owns which row is worse than none.
+      enabled: z.boolean().default(false),
+      // Which tenant a process serves when nothing more specific says otherwise.
+      // A CLI flag or a gateway session binding overrides it. This is the ONLY
+      // place a default tenant can come from — never tool input.
+      defaultTenant: z.string().default(""),
+    })
+    .default({}),
   voice: z
     .object({
       // Defaults to the simulator. Real dialling is opt-in because a payer call

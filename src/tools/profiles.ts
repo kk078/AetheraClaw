@@ -30,7 +30,7 @@ export interface Profile {
 // be asked a question the missing datasets answer, and "I could not check" has to
 // be reachable from all of them.
 const BASE = ["run_command", "read_file", "write_file", "list_dir", "web_fetch", "web_search",
-  "tool_search", "tool_describe", "tool_invoke", "data_status"];
+  "tool_search", "tool_describe", "tool_invoke", "data_status", "tenant_current", "phi_access_record"];
 
 export const PROFILES: Profile[] = [
   {
@@ -81,6 +81,7 @@ export const PROFILES: Profile[] = [
       ...BASE,
       "credentialing_", "policy_", "sentinel_", "audit_", "swarm_", "portal_", "payer_call_",
       "call_", "ivr_map_", "email_", "code_update_", "code_set_register", "a2a_", "report_generate",
+      "phi_access_review",
     ],
   },
   {

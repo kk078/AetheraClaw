@@ -453,6 +453,36 @@ CREATE TABLE IF NOT EXISTS audit_anchors (
   created_at INTEGER NOT NULL
 );
 
+-- ── PHI access log (45 CFR §164.312(b)) ─────────────────────────────────────
+-- Lives in the TENANT's database, so it inherits the same isolation as the data
+-- it describes: there is no cross-tenant access log to leak, and a tenant's log
+-- cannot be read from another tenant's connection.
+--
+-- Every column here is a pointer or a fact about the act. There is deliberately
+-- no column for a patient name, an identifier, or a free-text reason, because a
+-- log about PHI that stores PHI is a second copy of the record with weaker
+-- access control than the first — compliance staff can read the logs.
+--
+-- READ is recorded, not just writes. The characteristic HIPAA incident is a
+-- person with valid credentials looking at a record they had no business
+-- looking at, and that leaves no trace at all in a mutation log.
+CREATE TABLE IF NOT EXISTS phi_access_log (
+  id            TEXT PRIMARY KEY,
+  action        TEXT NOT NULL,        -- read | write | export | print | delete | amend
+  resource_type TEXT NOT NULL,
+  resource_ref  TEXT NOT NULL,        -- internal id ONLY; validated against identifier shapes on write
+  actor         TEXT NOT NULL,
+  tenant_slug   TEXT NOT NULL,
+  source_address TEXT NOT NULL DEFAULT '',
+  record_count  INTEGER NOT NULL DEFAULT 1,
+  -- seq of the audit_chain entry this event was anchored into, so the log row
+  -- and the tamper-evident chain cannot drift apart silently.
+  chain_seq     INTEGER,
+  created_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_phi_access_at ON phi_access_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_phi_access_actor ON phi_access_log(actor, created_at DESC);
+
 -- ── Practice revenue digital twin ───────────────────────────────────────────
 -- Patient balances, for propensity scoring and outreach planning.
 --

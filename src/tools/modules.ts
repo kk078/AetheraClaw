@@ -122,10 +122,18 @@ export const MODULES: ModuleDef[] = [
   {
     key: "audit",
     label: "Audit & Integrity",
-    blurb: "RAC/MAC tracking, appeal ladders, and a hash-chained log.",
-    note: "The chain proves nothing was edited in place; an external anchor is what proves history was not rewritten wholesale.",
+    blurb: "RAC/MAC tracking, appeal ladders, a hash-chained log, and PHI access records.",
+    note: "The chain proves nothing was edited in place; an external anchor is what proves history was not rewritten wholesale. PHI access rows are cross-checked against the chain, because a forged log row is added rather than edited and the chain alone would still verify.",
     glyph: "⛓",
-    match: ["audit_"],
+    match: ["audit_", "phi_access_"],
+  },
+  {
+    key: "tenancy",
+    label: "Tenant Isolation",
+    blurb: "Which practice this session is bound to, and how that boundary is enforced.",
+    note: "SQLite has no row-level security, so a tenant is a database file rather than a column. There is no tool to change tenant — the binding is made outside the conversation and nothing inside it can move.",
+    glyph: "⬚",
+    match: ["tenant_"],
   },
   {
     key: "cob",

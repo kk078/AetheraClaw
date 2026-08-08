@@ -121,6 +121,7 @@ import {
   portalReadTool,
   portalScreenshotTool,
 } from "../tools/browser/tools.js";
+import { TENANCY_TOOLS } from "../tenancy/tools.js";
 
 export function buildRegistry(config: Config, store: MemoryStore): ToolRegistry {
   const registry = new ToolRegistry();
@@ -223,6 +224,7 @@ export function buildRegistry(config: Config, store: MemoryStore): ToolRegistry 
     trainingDrillTool,
     trainingAnswerTool,
     trainingProgressTool,
+    ...TENANCY_TOOLS,
   ]);
   return registry;
 }

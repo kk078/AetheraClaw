@@ -131,6 +131,9 @@ import { SessionManager } from "../gateway/session-manager.js";
 import { buildServer } from "../gateway/server.js";
 import { startChat } from "./chat.js";
 import { buildRegistry } from "../tools/build-registry.js";
+import { resolveStore, tenancyRoot } from "../tenancy/resolve.js";
+import { TenantRegistry } from "../tenancy/registry.js";
+import { checkSlug, tenantDbPath } from "../tenancy/tenant.js";
 
 const program = new Command();
 program.name("aetheraclaw").description("Self-hosted AI assistant for healthcare RCM and medical billing & coding");
@@ -143,7 +146,8 @@ program
   .option("--host <host>", "host to bind (default 127.0.0.1)")
   .option("--provider <name>", "anthropic | openai | gemini | ollama")
   .option("--profile <name>", "tool profile — see `aetheraclaw providers`")
-  .action(async (opts: { port?: string; host?: string; provider?: string; profile?: string }) => {
+  .option("--tenant <slug>", "tenant to serve (multi-tenant installs only)")
+  .action(async (opts: { port?: string; host?: string; provider?: string; profile?: string; tenant?: string }) => {
     const config = loadConfig();
     if (opts.port) config.gateway.port = Number(opts.port);
     if (opts.host) config.gateway.host = opts.host;
@@ -156,10 +160,19 @@ program
       );
       process.exit(1);
     }
-    const store = new MemoryStore(path.join(configDir(), "aetheraclaw.db"));
+    let resolved;
+    try {
+      resolved = resolveStore(config, opts.tenant);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+    const { store, tenant } = resolved;
     const registry = buildRegistry(config, store);
     // The catalogue tools need the registry to search and invoke through it.
-    const sessions = new SessionManager(store, registry, config, { store, config, registry });
+    // `tenant` is passed as a service, not as tool input — nothing the model
+    // emits can reach it, which is the whole point of the binding.
+    const sessions = new SessionManager(store, registry, config, { store, config, registry, tenant });
     const app = await buildServer({ config, store, sessions, registry });
 
     const email = new EmailChannel({
@@ -176,6 +189,7 @@ program
     console.log(`AetheraClaw gateway: http://${config.gateway.host}:${config.gateway.port}`);
     console.log(`Provider: ${config.provider} · Workspace: ${config.workspaceRoot}`);
     console.log(`SQLite: ${store.db.driver}`);
+    if (config.tenancy.enabled) console.log(`Tenant: ${tenant.name} (${tenant.slug}) — isolated database`);
     const picked = selectTools(registry.specs(), config.toolProfile, config.provider);
     console.log(
       `Tools: ${picked.specs.length} loaded directly` +
@@ -213,15 +227,75 @@ program
   });
 
 program
+  .command("tenants")
+  .description("Manage tenants (multi-tenant installs). Each tenant is an isolated database file.")
+  .argument("<action>", "list | create | suspend | activate")
+  .argument("[slug]", "tenant slug — lowercase letters, digits and hyphens")
+  .option("--name <name>", "display name (create only)")
+  .action((action: string, slug: string | undefined, opts: { name?: string }) => {
+    const config = loadConfig();
+    if (!config.tenancy.enabled) {
+      console.error(
+        "Tenancy is disabled. Set tenancy.enabled in config.json5 to turn it on.\n" +
+          "Turning it on does NOT move your existing data: the single-tenant database stays at its current path and tenants get new ones under tenants/<slug>/. There is no automatic migration, because a migration that guesses which practice owns which row is worse than none.",
+      );
+      process.exit(1);
+    }
+    const registry = new TenantRegistry(tenancyRoot());
+    try {
+      switch (action) {
+        case "list": {
+          const rows = registry.list();
+          if (rows.length === 0) {
+            console.log("No tenants. Create one with `aetheraclaw tenants create <slug> --name \"Practice name\"`.");
+            break;
+          }
+          for (const t of rows) console.log(`${t.slug.padEnd(24)} ${t.status.padEnd(10)} ${t.name}`);
+          break;
+        }
+        case "create": {
+          if (!slug) throw new Error("A slug is required: `aetheraclaw tenants create <slug>`.");
+          const check = checkSlug(slug);
+          if (!check.ok) throw new Error(check.reason);
+          const t = registry.create(opts.name ?? slug, check.slug);
+          console.log(`Created ${t.slug} (${t.name}). Its database is at ${tenantDbPath(tenancyRoot(), t.slug)}.`);
+          console.log("Serve it with: aetheraclaw serve --tenant " + t.slug);
+          break;
+        }
+        case "suspend":
+        case "activate": {
+          if (!slug) throw new Error(`A slug is required: \`aetheraclaw tenants ${action} <slug>\`.`);
+          if (!registry.bySlug(slug)) throw new Error(`No tenant with slug "${slug}".`);
+          registry.setStatus(slug, action === "suspend" ? "suspended" : "active");
+          console.log(
+            action === "suspend"
+              ? `${slug} suspended. No data is served for it — not even read-only, because read-only still discloses. Its database file is left on disk untouched.`
+              : `${slug} activated.`,
+          );
+          break;
+        }
+        default:
+          throw new Error(`Unknown action "${action}". Actions: list, create, suspend, activate.`);
+      }
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+    } finally {
+      registry.close();
+    }
+  });
+
+program
   .command("audit")
   .description("Verify the tamper-evident audit log")
   .argument("<action>", "verify")
-  .action((action: string) => {
+  .option("--tenant <slug>", "tenant whose log to verify (multi-tenant installs only)")
+  .action((action: string, opts: { tenant?: string }) => {
     if (action !== "verify") {
       console.error(`Unknown audit action "${action}". The only action is: verify`);
       process.exit(2);
     }
-    const store = new MemoryStore(path.join(configDir(), "aetheraclaw.db"));
+    const { store } = resolveStore(loadConfig(), opts.tenant);
     const anchors = loadAnchors(store);
     const result = verifyChain(loadChain(store), anchors);
     console.log(renderVerify(result, anchors.length));

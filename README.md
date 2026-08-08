@@ -51,6 +51,33 @@ All tool input is treated as untrusted model output:
 - **SSRF guard** — web fetch refuses private/loopback addresses.
 - **Localhost binding** — the gateway binds `127.0.0.1` by default.
 
+### Multi-tenant isolation
+
+Off by default (`tenancy.enabled`). When on, **a tenant is a database file, not a column.**
+
+That is a deliberate departure from the usual `tenant_id` + row-level-security design, for one reason: **SQLite has no row-level security.** There is no `CREATE POLICY`, no `current_setting`, no engine-level predicate. A `tenant_id` column in SQLite is enforced only by every query remembering to write `AND tenant_id = ?` — and with 47 tables and several hundred queries across three dozen tool modules, one forgotten clause is a cross-tenant disclosure with nothing underneath it to catch the mistake. Here a query that forgets its tenant cannot reach one, because the connection it runs on does not physically contain another tenant's rows. The cost is real and worth stating: cross-tenant reporting must open each tenant in turn and aggregate in application code.
+
+**The model cannot choose the tenant.** There is no `tenant_switch` tool and there will not be one — tool input is untrusted model output, and a tool that accepts a tenant id can be argued into accepting a different one by text arriving inside a payer letter or a portal page. The binding is made once at the edge (`--tenant`, or a gateway session) and travels in the tool context. `tenant_current` reports where the session is; nothing can move it.
+
+Enabling tenancy never moves existing data: single-tenant keeps its original database path and tenants get new ones under `tenants/<slug>/`. There is no automatic migration, because a migration that guesses which practice owns which row is worse than none. A suspended tenant is refused outright rather than served read-only — read-only still discloses.
+
+```
+aetheraclaw tenants create acme-health --name "Acme Health Partners"
+aetheraclaw tenants list
+aetheraclaw serve --tenant acme-health
+```
+
+### PHI access logging (45 CFR §164.312(b))
+
+`phi_access_record` / `phi_access_review`, written into the tenant's own hash chain. Two things here are the opposite of the usual design:
+
+- **The log refuses to hold PHI.** A resource reference containing an SSN, MBI, legacy HICN, date-of-birth marker or email address is rejected, not redacted. A log about PHI that stores PHI is a second copy of the record with weaker access control than the first — everyone in compliance can read the logs.
+- **Reads are logged, and exports are marked.** The characteristic HIPAA incident is a person with valid credentials viewing a record they had no business viewing, which leaves no trace at all in a change log. `export` and `print` are flagged as disclosing because they are the actions after which the organisation no longer controls the copy.
+
+`phi_access_review` reports what left the building and which actors moved unusual volume — framed as a question, since a payer audit response, a year-end close and a data migration look identical here to the thing you are watching for. It also cross-checks every log row against the chain: a **forged** log row is *added* rather than edited, so verifying the chain alone would still pass.
+
+> This build remains **not approved for real PHI**. The access log, tenant isolation and identifier refusals are the infrastructure a PHI-approved deployment would need; turning them on does not by itself make this system a covered-entity-ready one, and the no-PHI posture in the system prompt, intake, email and portal paths is unchanged.
+
 ### Grounding
 
 The dangerous failure in a billing assistant is not a crash, it is a fluent wrong answer. Every item here exists because a model running against this system produced one, and each is a countermeasure with a test behind it (`test/grounding.test.ts`).
