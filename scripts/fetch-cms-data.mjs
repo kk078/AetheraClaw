@@ -359,6 +359,12 @@ function localZips(pattern) {
   return files.sort().map((f) => ({ name: f, buf: fs.readFileSync(path.join(FROM_DIR, f)) }));
 }
 
+/** Everything in the folder, for an error that shows what was actually there. */
+function allZipNames() {
+  const all = fs.readdirSync(FROM_DIR).filter((f) => f.toLowerCase().endsWith(".zip"));
+  return all.length === 0 ? "(no .zip files at all)" : all.join(", ");
+}
+
 const DOWNLOAD_HELP = [
   "",
   "CMS refused the request. That is the site's decision about automated access, and this script",
@@ -418,12 +424,20 @@ async function fetchNcci() {
  * installing nothing, because data_status would report the dataset as present.
  */
 function ncciFromDir() {
-  const want = setting === "hospital" ? /hospital-ptp-edits.*-f\d\.zip$/i : /practitioner-ptp-edits.*-f\d\.zip$/i;
+  // Deliberately unanchored. A browser saving a second copy produces
+  // "…-f1 (1).zip", and an anchored /-f\d\.zip$/ would classify that as "not a
+  // PTP file at all" — which surfaces as "no parts found" and sends the reader
+  // looking for a download that is sitting right there.
+  const want = setting === "hospital" ? /hospital-ptp-edits.*-f\d/i : /practitioner-ptp-edits.*-f\d/i;
   const files = localZips(want);
   if (files.length === 0) {
-    throw new Error(`no ${setting} PTP zips in ${FROM_DIR} (looking for names like …-${setting}-ptp-edits-…-f1.zip)`);
+    throw new Error(
+      `no ${setting} PTP zips in ${FROM_DIR}. Looking for names containing "${setting}-ptp-edits" and "-f1".."-f4".\n    Found: ${allZipNames()}`,
+    );
   }
-  const parts = new Set(files.map((f) => (f.name.match(/-f(\d)\./i) ?? [])[1]).filter(Boolean));
+  // Deduplicated by part number, so a duplicate download does not read as a
+  // fifth part or double-count its edits.
+  const parts = new Set(files.map((f) => (f.name.match(/-f(\d)/i) ?? [])[1]).filter(Boolean));
   if (parts.size < 4) {
     throw new Error(
       `only ${parts.size} of 4 PTP parts present (found f${[...parts].sort().join(", f")}). ` +
@@ -435,7 +449,14 @@ function ncciFromDir() {
   const table = {};
   let deleted = 0;
   let kept = 0;
+  const seen = new Set();
   for (const f of files) {
+    const part = (f.name.match(/-f(\d)/i) ?? [])[1];
+    if (seen.has(part)) {
+      console.log(`  ${f.name} — skipped, part f${part} already loaded`);
+      continue;
+    }
+    seen.add(part);
     const { edits, deleted: d } = convertPtp(textFromZip(f.buf, /\.txt$/i));
     deleted += d;
     for (const e of edits) {
@@ -450,9 +471,11 @@ function ncciFromDir() {
 }
 
 function mueFromDir() {
-  const want = setting === "hospital" ? /outpatient-hospital.*mue-table\.zip$/i : /practitioner.*mue-table\.zip$/i;
+  const want = setting === "hospital" ? /outpatient-hospital.*mue-table/i : /practitioner.*mue-table/i;
   const files = localZips(want);
-  if (files.length === 0) throw new Error(`no ${setting} MUE table zip in ${FROM_DIR}`);
+  if (files.length === 0) {
+    throw new Error(`no ${setting} MUE table zip in ${FROM_DIR}. Looking for a name containing "${setting}" and "mue-table".\n    Found: ${allZipNames()}`);
+  }
   const table = convertMue(textFromZip(files[0].buf, /\.csv$/i));
   console.log(`  ${files[0].name} — ${Object.keys(table).length.toLocaleString()} code(s) with a unit limit`);
   write("mue.json", table);
@@ -460,7 +483,9 @@ function mueFromDir() {
 
 function mpfsFromDir() {
   const files = localZips(/rvu\d{2}[a-d]/i);
-  if (files.length === 0) throw new Error(`no RVU zip in ${FROM_DIR} (looking for a name containing rvu26a…rvu26d)`);
+  if (files.length === 0) {
+    throw new Error(`no RVU zip in ${FROM_DIR}. Looking for a name containing rvu26a…rvu26d.\n    Found: ${allZipNames()}`);
+  }
   // Last by name: rvu26c sorts after rvu26b, so the newest quarter present wins.
   const f = files[files.length - 1];
   console.log(`  ${f.name}`);
