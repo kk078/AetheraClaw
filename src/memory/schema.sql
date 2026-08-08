@@ -712,3 +712,64 @@ CREATE TABLE IF NOT EXISTS a2a_negotiations (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
+
+-- ── Clinical documentation integrity ─────────────────────────────────────────
+-- Specificity rules are data so a practice can read and edit every one. A rule
+-- nobody can inspect is a rule nobody can defend when asked why a query went
+-- out.
+CREATE TABLE IF NOT EXISTS cdi_rules (
+  id TEXT PRIMARY KEY,
+  triggers TEXT NOT NULL DEFAULT '[]',
+  dimension TEXT NOT NULL,
+  needs TEXT NOT NULL DEFAULT '',
+  unspecified_code TEXT NOT NULL DEFAULT '',
+  affects_risk INTEGER NOT NULL DEFAULT 0,
+  options_json TEXT NOT NULL DEFAULT '[]',
+  created_at INTEGER NOT NULL
+);
+
+-- Queries are kept whether or not they were answered, and the compliance check
+-- that let each one out is stored with it. "Was this query leading?" is a
+-- question asked years later, by someone who was not there.
+CREATE TABLE IF NOT EXISTS cdi_queries (
+  id TEXT PRIMARY KEY,
+  patient_ref TEXT NOT NULL DEFAULT '',
+  format TEXT NOT NULL DEFAULT 'multiple_choice',
+  query_json TEXT NOT NULL DEFAULT '{}',
+  check_json TEXT NOT NULL DEFAULT '{}',
+  finding_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'draft',
+  response TEXT NOT NULL DEFAULT '',
+  responded_by TEXT NOT NULL DEFAULT '',
+  -- Superseded answers, kept. A record showing only the final response is what
+  -- re-querying until the provider agrees looks like from the outside.
+  history_json TEXT NOT NULL DEFAULT '[]',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- ── Coder training ───────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS training_cases (
+  id TEXT PRIMARY KEY,
+  topic TEXT NOT NULL DEFAULT '',
+  difficulty INTEGER NOT NULL DEFAULT 1,
+  kind TEXT NOT NULL DEFAULT 'diagnosis',
+  case_json TEXT NOT NULL DEFAULT '{}',
+  source TEXT NOT NULL DEFAULT 'synthetic',
+  created_at INTEGER NOT NULL
+);
+
+-- confidence is stored with every attempt because accuracy alone cannot tell a
+-- coder who knows what they do not know from one who does not.
+CREATE TABLE IF NOT EXISTS training_attempts (
+  id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL,
+  learner TEXT NOT NULL DEFAULT '',
+  topic TEXT NOT NULL DEFAULT '',
+  answer TEXT NOT NULL DEFAULT '',
+  confidence REAL NOT NULL DEFAULT 0.5,
+  verdict TEXT NOT NULL DEFAULT '',
+  credit REAL NOT NULL DEFAULT 0,
+  explanation TEXT NOT NULL DEFAULT '',
+  answered_at INTEGER NOT NULL
+);

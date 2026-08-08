@@ -57,6 +57,21 @@ import {
   a2aVerifyTool,
 } from "../a2a/tools.js";
 import {
+  cdiAnalyzeTool,
+  cdiQueryDraftTool,
+  cdiQueryFromFindingTool,
+  cdiQueryListTool,
+  cdiQueryRespondTool,
+  cdiRuleAddTool,
+  greenlightCheckTool,
+} from "../cdi/tools.js";
+import {
+  trainingAnswerTool,
+  trainingCaseAddTool,
+  trainingDrillTool,
+  trainingProgressTool,
+} from "../training/tools.js";
+import {
   hccRecaptureTool,
   qualityMeasuresTool,
   rafCalculateTool,
@@ -206,6 +221,17 @@ export function buildRegistry(config: ReturnType<typeof loadConfig>, store: Memo
     a2aSendTool,
     a2aShowTool,
     a2aReconcileTool,
+    cdiRuleAddTool,
+    cdiAnalyzeTool,
+    cdiQueryDraftTool,
+    cdiQueryFromFindingTool,
+    cdiQueryListTool,
+    cdiQueryRespondTool,
+    greenlightCheckTool,
+    trainingCaseAddTool,
+    trainingDrillTool,
+    trainingAnswerTool,
+    trainingProgressTool,
   ]);
   return registry;
 }
