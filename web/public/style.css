@@ -543,6 +543,12 @@ text.ring-txt { fill: var(--ink); font-size: 15px; font-family: var(--mono); fon
 /* Header. System status moves right and gets quieter; the KPI ticker takes the
    left, because the numbers a biller acts on outrank the driver name. */
 .sysbar { display: flex; gap: 6px; align-items: center; }
+
+/* Live-stream pill. `idle` is neutral on purpose: no session streaming is a
+   resting state, not a fault, and painting it red made a working gateway look
+   broken. Red means something is actually wrong. */
+.dot.idle { background: var(--ink-3); }
+.dot.bad  { background: var(--bad); }
 .ticker { display: flex; gap: 18px; align-items: center; min-width: 0; overflow: hidden; }
 .tick { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
 .tick b { font-family: var(--mono); font-size: 13px; color: var(--ink); font-weight: 600; }

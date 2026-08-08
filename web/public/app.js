@@ -128,7 +128,14 @@ function renderTicker(ov) {
 
 async function loadOverview() {
   const ov = await fetch("/api/overview").then((r) => r.json()).catch(() => null);
-  if (!ov) return;
+  if (!ov) {
+    // This IS the reachability check, and it just failed — the one case where
+    // red is the correct thing to show.
+    setConn("bad", "gateway unreachable");
+    return;
+  }
+  // It answered, so the gateway is up whatever the socket is doing.
+  if (!state.ws || state.ws.readyState !== WebSocket.OPEN) setConn("idle", "no session");
 
   $("#pill-provider").innerHTML =
     `<span class="dot on"></span><b>${ov.model}</b>` + (ov.endpoint ? ` · ${ov.endpoint}` : "");
@@ -155,6 +162,7 @@ async function loadOverview() {
   const labels = {
     sessions: "Sessions", messages: "Messages", claims: "Claims", remittances: "Remittances",
     worklist: "Worklist", suggestions: "Suggestions", audit: "Audit entries",
+    heldMail: "Mail held",
   };
   $("#ov-counts").replaceChildren(
     ...Object.entries(ov.counts).map(([k, v]) => {
@@ -554,8 +562,27 @@ function scroll() {
 
 // ── WebSocket ──────────────────────────────────────────────────────────
 
-function setConn(on, label) {
-  $("#pill-conn").innerHTML = `<span class="dot ${on ? "on" : "off"}"></span><span>${label}</span>`;
+/**
+ * The live-event pill. Three states, because two were a lie.
+ *
+ * It used to be on/off, was only ever called from the WebSocket lifecycle, and
+ * so sat on its hardcoded "offline" until a session opened — meaning a freshly
+ * loaded Overview, full of data the gateway had just served over HTTP, showed a
+ * red dot reading OFFLINE. That is the most alarming thing on the screen and it
+ * was not true of anything.
+ *
+ * "idle" is the honest resting state: the gateway is reachable, there is simply
+ * no session streaming yet. Red is reserved for something actually being wrong.
+ */
+function setConn(kind, label) {
+  const pill = $("#pill-conn");
+  pill.innerHTML = `<span class="dot ${kind}"></span><span>${label}</span>`;
+  pill.title =
+    kind === "ok"
+      ? "Streaming live events for this session."
+      : kind === "idle"
+        ? "Gateway reachable. No session is streaming — open or start one to connect."
+        : "The live event stream is down. Reloading usually restores it.";
 }
 
 // Anything sent before the socket opens is queued rather than thrown away.
@@ -577,14 +604,14 @@ function connect(sessionId) {
   state.ws = ws;
 
   ws.addEventListener("open", () => {
-    setConn(true, sessionId.slice(0, 16));
+    setConn("ok", sessionId.slice(0, 16));
     ws.send(JSON.stringify({ type: "subscribe", sessionId }));
     const queued = outbox;
     outbox = [];
     for (const p of queued) ws.send(JSON.stringify(p));
   });
-  ws.addEventListener("close", () => setConn(false, "offline"));
-  ws.addEventListener("error", () => setConn(false, "error"));
+  ws.addEventListener("close", () => setConn("idle", "no session"));
+  ws.addEventListener("error", () => setConn("bad", "stream error"));
 
   ws.addEventListener("message", (ev) => {
     const e = JSON.parse(ev.data);
