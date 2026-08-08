@@ -557,7 +557,29 @@ async function fetchMpfs() {
 // hcpcs.json is written by fetchMpfs — it comes out of the same RVU file.
 const ALL = { ncci: fetchNcci, mue: fetchMue, mpfs: fetchMpfs };
 
+/**
+ * Reject an argument this script does not understand.
+ *
+ * Silently ignoring one is how a `--from-dir=…` run against a build that
+ * predates the flag went to the network instead, failed with the errors the
+ * flag existed to avoid, and looked for all the world like the flag was broken.
+ * An unknown option is a mistake worth stopping for: the alternative is doing
+ * something other than what was asked, without saying so.
+ */
+const KNOWN_FLAGS = ["--hospital", "--from-dir=", "--only="];
+
+function checkArgs() {
+  const bad = process.argv.slice(2).filter((a) => !KNOWN_FLAGS.some((k) => (k.endsWith("=") ? a.startsWith(k) : a === k)));
+  if (bad.length === 0) return;
+  console.error(`Unknown option(s): ${bad.join(", ")}`);
+  console.error(`Understood: ${KNOWN_FLAGS.join("  ")}`);
+  console.error("");
+  console.error("If you expected --from-dir to work, your checkout may predate it. Run `git pull` and try again.");
+  process.exit(2);
+}
+
 async function main() {
+  checkArgs();
   const only = (process.argv.find((a) => a.startsWith("--only=")) ?? "").slice(7);
   const wanted = only ? only.split(",").map((s) => s.trim()) : Object.keys(ALL);
   const unknown = wanted.filter((w) => !(w in ALL));
