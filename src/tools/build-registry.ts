@@ -125,7 +125,7 @@ import { TENANCY_TOOLS } from "../tenancy/tools.js";
 import { OPS_TOOLS } from "../ops/tools.js";
 import { SUPPORT_TOOLS } from "../support/tools.js";
 import { MAIL_OPS_TOOLS } from "../channels/email/ops-tools.js";
-import { kpiDashboardTool } from "../reports/kpi-tools.js";
+import { kpiDashboardTool, wrvuReportTool } from "../reports/kpi-tools.js";
 import { contractRateListTool, contractRateSetTool } from "../tools/healthcare/intelligence/contract-tools.js";
 
 export function buildRegistry(config: Config, store: MemoryStore): ToolRegistry {
@@ -234,6 +234,7 @@ export function buildRegistry(config: Config, store: MemoryStore): ToolRegistry 
     ...SUPPORT_TOOLS,
     ...MAIL_OPS_TOOLS,
     kpiDashboardTool,
+    wrvuReportTool,
     contractRateSetTool,
     contractRateListTool,
   ]);

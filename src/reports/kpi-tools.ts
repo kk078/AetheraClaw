@@ -7,6 +7,8 @@ import { buildKpiTiles } from "../views/build.js";
 // ids differently would make the report and the KPIs disagree about what is
 // outstanding, which is exactly the kind of discrepancy nobody can explain.
 import { loadClaims, loadEras } from "./tools.js";
+import { computeWrvu, narrowTo, renderWrvu, type RvuTable } from "./wrvu.js";
+import { loadDataJson } from "../tools/healthcare/datasets.js";
 
 /**
  * First-pass acknowledgment outcomes.
@@ -76,5 +78,34 @@ export const kpiDashboardTool = defineTool({
       `Computed from ${claims.length} stored claim(s) and ${eras.length} remittance(s). These describe what is in this database, not the practice — a claim never built here is invisible to all three.`,
     );
     return { content: parts.join("\n"), view: { kind: "kpi_tiles", data: buildKpiTiles(kpis) } };
+  },
+});
+
+// ── Work RVU productivity ────────────────────────────────────────────────────
+
+export const wrvuReportTool = defineTool({
+  name: "wrvu_report",
+  description:
+    "Work RVUs by rendering provider over a date range, from stored claims and the installed Medicare fee schedule. Reports WORK RVU only — compensation formulae use work RVU, and total RVU is roughly double. Codes absent from the fee schedule are excluded and named rather than counted as zero, because unpriced work is still work and a silent zero looks exactly like a quiet month.",
+  schema: z.object({
+    from: z.string().regex(/^\d{8}$/).describe("YYYYMMDD, first date of service to include"),
+    to: z.string().regex(/^\d{8}$/).describe("YYYYMMDD, last date of service to include"),
+    npi: z.string().optional().describe("Limit to one provider NPI"),
+  }),
+  execute: async (input, ctx) => {
+    const store = ctx.services.store as MemoryStore | undefined;
+    if (!store) return { content: "No database configured.", isError: true };
+    if (input.from > input.to) return { content: `from (${input.from}) is after to (${input.to}).`, isError: true };
+
+    const rvu = loadDataJson<RvuTable>("mpfs.json");
+    if (!rvu) return { content: renderWrvu({ from: input.from, to: input.to, providers: [], totalWorkRvu: 0, claimsMeasured: 0, unpricedLines: 0, unpricedCodes: [], technicalLines: 0, unadjustedLines: 0 }, false) };
+
+    const report = computeWrvu(loadClaims(ctx), rvu, input.from, input.to);
+    // narrowTo, not a spread — filtering the provider list while keeping the
+    // original totals printed "27.44 across 1 provider" above a single row
+    // reading 21.91.
+    const wanted = input.npi?.trim();
+    const filtered = wanted ? narrowTo(report, wanted) : report;
+    return { content: renderWrvu(filtered, true) };
   },
 });
