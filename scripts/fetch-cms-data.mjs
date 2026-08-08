@@ -335,7 +335,52 @@ const RVU_PAGE = "https://www.cms.gov/medicare/payment/fee-schedules/physician/p
 /** Which setting's edits to install. Practitioner is the default; a facility passes --hospital. */
 const setting = process.argv.includes("--hospital") ? "hospital" : "practitioner";
 
+/**
+ * Convert ZIPs already on disk instead of downloading them.
+ *
+ * CMS's CDN refuses some clients outright — a plain 403 on the index pages,
+ * from a network where a browser loads the same page fine. That is the site's
+ * decision about automated access and this script does not argue with it: it
+ * does not rotate a User-Agent or pretend to be a browser, because a tool that
+ * defeats a bot rule to fetch AMA-licensed data is doing something nobody
+ * agreed to.
+ *
+ * The honest route is better anyway. Downloading in a browser is the path that
+ * goes THROUGH the AMA licence acceptance page, which the direct-link fetch
+ * quietly skips. So: save the ZIPs, point this at the folder, and the same
+ * validated converters run offline.
+ */
+const fromDirArg = process.argv.find((a) => a.startsWith("--from-dir="));
+const FROM_DIR = fromDirArg ? fromDirArg.slice("--from-dir=".length) : null;
+
+/** Pick local ZIPs by filename. CMS's names carry the setting and the part number. */
+function localZips(pattern) {
+  const files = fs.readdirSync(FROM_DIR).filter((f) => f.toLowerCase().endsWith(".zip") && pattern.test(f));
+  return files.sort().map((f) => ({ name: f, buf: fs.readFileSync(path.join(FROM_DIR, f)) }));
+}
+
+const DOWNLOAD_HELP = [
+  "",
+  "CMS refused the request. That is the site's decision about automated access, and this script",
+  "does not work around it — no User-Agent rotation, no pretending to be a browser.",
+  "",
+  "Download them yourself instead, which is also the route that goes through the AMA licence page:",
+  "",
+  `  NCCI PTP  ${NCCI_PTP_PAGE}`,
+  "            all FOUR practitioner PTP parts (…-f1.zip through …-f4.zip)",
+  `  MUE       ${MUE_PAGE}`,
+  "            the practitioner services MUE table",
+  `  MPFS      ${RVU_PAGE}`,
+  "            the newest RVU quarter (rvu26a…rvu26d)",
+  "",
+  "Then, with every ZIP saved in one folder:",
+  "",
+  "  node scripts/fetch-cms-data.mjs --from-dir=C:\\Users\\you\\Downloads\\cms",
+  "",
+].join("\n");
+
 async function fetchNcci() {
+  if (FROM_DIR) return ncciFromDir();
   // The table is split across four files; all four are needed or the edit set
   // has holes, and a hole reads exactly like "no edit exists for this pair".
   const table = {};
@@ -363,36 +408,67 @@ async function fetchNcci() {
   write("ncci-ptp.json", table);
 }
 
-async function fetchMue() {
-  const url = await newestLink(MUE_PAGE, new RegExp(`${setting === "hospital" ? "outpatient-hospital" : "practitioner"}-services-mue-table\\.zip$`));
-  const zip = await get(url, true);
-  const table = convertMue(textFromZip(zip, /\.csv$/i));
-  console.log(`  ${Object.keys(table).length.toLocaleString()} code(s) with a unit limit`);
+/**
+ * Same converters, local files.
+ *
+ * A MISSING PART IS FATAL, not a warning. Each of the four PTP files holds a
+ * different slice of the code range, so three of four is not "most of the edits"
+ * — it is a table with a silent hole in it, and a pair that falls in the hole
+ * reads exactly like a pair CMS never bundled. Installing that is worse than
+ * installing nothing, because data_status would report the dataset as present.
+ */
+function ncciFromDir() {
+  const want = setting === "hospital" ? /hospital-ptp-edits.*-f\d\.zip$/i : /practitioner-ptp-edits.*-f\d\.zip$/i;
+  const files = localZips(want);
+  if (files.length === 0) {
+    throw new Error(`no ${setting} PTP zips in ${FROM_DIR} (looking for names like …-${setting}-ptp-edits-…-f1.zip)`);
+  }
+  const parts = new Set(files.map((f) => (f.name.match(/-f(\d)\./i) ?? [])[1]).filter(Boolean));
+  if (parts.size < 4) {
+    throw new Error(
+      `only ${parts.size} of 4 PTP parts present (found f${[...parts].sort().join(", f")}). ` +
+        `Each part holds a different slice of the code range, so a missing one is a silent hole in the edit table — ` +
+        `a pair inside it would read as "not bundled" rather than "not checked". Refusing to install a partial table.`,
+    );
+  }
+
+  const table = {};
+  let deleted = 0;
+  let kept = 0;
+  for (const f of files) {
+    const { edits, deleted: d } = convertPtp(textFromZip(f.buf, /\.txt$/i));
+    deleted += d;
+    for (const e of edits) {
+      (table[e.column1] ??= {})[e.column2] = e.modifierIndicator;
+      kept++;
+    }
+    console.log(`  ${f.name} — ${edits.length.toLocaleString()} active`);
+  }
+  console.log(`  ${deleted.toLocaleString()} retired edit(s) dropped — loading them would flag bundling CMS no longer enforces.`);
+  console.log(`  ${kept.toLocaleString()} pair(s) under ${Object.keys(table).length.toLocaleString()} column-1 code(s)`);
+  write("ncci-ptp.json", table);
+}
+
+function mueFromDir() {
+  const want = setting === "hospital" ? /outpatient-hospital.*mue-table\.zip$/i : /practitioner.*mue-table\.zip$/i;
+  const files = localZips(want);
+  if (files.length === 0) throw new Error(`no ${setting} MUE table zip in ${FROM_DIR}`);
+  const table = convertMue(textFromZip(files[0].buf, /\.csv$/i));
+  console.log(`  ${files[0].name} — ${Object.keys(table).length.toLocaleString()} code(s) with a unit limit`);
   write("mue.json", table);
 }
 
-async function fetchMpfs() {
-  // Quarter pages are RVU_PAGE/rvu<yy><a-d>. Probed newest-first rather than
-  // scraped: the index page's own hrefs are malformed (the path separators are
-  // stripped, giving /medicaremedicare-fee-service-payment…), so scraping it
-  // yields links that 404. Probing costs four HEAD-ish requests and cannot be
-  // wrong about which quarter is actually published.
-  const yy = Number(String(new Date().getFullYear()).slice(2));
-  const candidates = [];
-  for (const y of [yy, yy - 1]) for (const q of ["d", "c", "b", "a"]) candidates.push(`rvu${String(y).padStart(2, "0")}${q}`);
-  let zip = null;
-  for (const item of candidates) {
-    try {
-      const url = await newestLink(`${RVU_PAGE}/${item}`, /\.zip$/);
-      zip = await get(url, true);
-      console.log(`  ${item}`);
-      break;
-    } catch {
-      /* try the previous quarter */
-    }
-  }
-  if (!zip) throw new Error(`no usable RVU release found under ${RVU_PAGE}`);
+function mpfsFromDir() {
+  const files = localZips(/rvu\d{2}[a-d]/i);
+  if (files.length === 0) throw new Error(`no RVU zip in ${FROM_DIR} (looking for a name containing rvu26a…rvu26d)`);
+  // Last by name: rvu26c sorts after rvu26b, so the newest quarter present wins.
+  const f = files[files.length - 1];
+  console.log(`  ${f.name}`);
+  writeMpfsFrom(f.buf);
+}
 
+/** Shared by the network and local paths so the two cannot diverge. */
+function writeMpfsFrom(zip) {
   const rvuCsv = textFromZip(zip, /PPRRVU.*nonQPP\.csv$/i);
   const { rows, cf, componentRows } = convertMpfs(rvuCsv);
   console.log(`  ${Object.keys(rows).length.toLocaleString()} priced code(s); ${componentRows.toLocaleString()} 26/TC component row(s) skipped`);
@@ -412,6 +488,45 @@ async function fetchMpfs() {
   write("hcpcs.json", descriptions);
 }
 
+async function fetchMue() {
+  if (FROM_DIR) return mueFromDir();
+  const url = await newestLink(MUE_PAGE, new RegExp(`${setting === "hospital" ? "outpatient-hospital" : "practitioner"}-services-mue-table\\.zip$`));
+  const zip = await get(url, true);
+  const table = convertMue(textFromZip(zip, /\.csv$/i));
+  console.log(`  ${Object.keys(table).length.toLocaleString()} code(s) with a unit limit`);
+  write("mue.json", table);
+}
+
+async function fetchMpfs() {
+  if (FROM_DIR) return mpfsFromDir();
+  // Quarter pages are RVU_PAGE/rvu<yy><a-d>. Probed newest-first rather than
+  // scraped: the index page's own hrefs are malformed (the path separators are
+  // stripped, giving /medicaremedicare-fee-service-payment…), so scraping it
+  // yields links that 404. Probing costs four HEAD-ish requests and cannot be
+  // wrong about which quarter is actually published.
+  const yy = Number(String(new Date().getFullYear()).slice(2));
+  const candidates = [];
+  for (const y of [yy, yy - 1]) for (const q of ["d", "c", "b", "a"]) candidates.push(`rvu${String(y).padStart(2, "0")}${q}`);
+  let zip = null;
+  let lastError = null;
+  for (const item of candidates) {
+    try {
+      const url = await newestLink(`${RVU_PAGE}/${item}`, /\.zip$/);
+      zip = await get(url, true);
+      console.log(`  ${item}`);
+      break;
+    } catch (err) {
+      // Kept, not swallowed. The first version reported "no usable RVU release
+      // found" when every attempt had actually been refused with a 403 — a
+      // message that sent the reader looking for a missing file instead of at
+      // the refusal, which is the one fact that mattered.
+      lastError = err;
+    }
+  }
+  if (!zip) throw new Error(`no RVU release could be retrieved under ${RVU_PAGE} — last attempt: ${lastError?.message ?? "unknown"}`);
+  writeMpfsFrom(zip);
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 // hcpcs.json is written by fetchMpfs — it comes out of the same RVU file.
@@ -426,8 +541,13 @@ async function main() {
     process.exit(2);
   }
 
+  if (FROM_DIR && !fs.existsSync(FROM_DIR)) {
+    console.error(`--from-dir points at ${FROM_DIR}, which does not exist.`);
+    process.exit(2);
+  }
   fs.mkdirSync(dataDir(), { recursive: true });
   console.log(`AetheraClaw reference data → ${dataDir()}`);
+  console.log(FROM_DIR ? `Source: local ZIPs in ${FROM_DIR} (no network)` : "Source: cms.gov");
   console.log(`Setting: ${setting} services${setting === "practitioner" ? "  (pass --hospital for outpatient facility edits)" : ""}`);
   console.log(
     "\nThese files contain CPT codes, copyright the American Medical Association.\n" +
@@ -436,12 +556,14 @@ async function main() {
   );
 
   let failed = 0;
+  let refused = false;
   for (const name of wanted) {
     console.log(`${name}:`);
     try {
       await ALL[name]();
     } catch (err) {
       failed++;
+      if (/HTTP 40[133]/.test(err.message)) refused = true;
       // One dataset failing must not lose the others — they are independent,
       // and a partial install is reported honestly by data_status anyway.
       console.error(`  ! ${name} failed: ${err.message}`);
@@ -454,6 +576,10 @@ async function main() {
       ? "Done. Run `aetheraclaw` and ask for data_status to confirm what is installed."
       : `Done with ${failed} failure(s). data_status will report exactly what is missing and what that stops you checking.`,
   );
+  // A 403 is not a bug to retry into — it is the site declining, and the useful
+  // response is telling the reader the route that works rather than leaving them
+  // to run the same command again.
+  if (refused && !FROM_DIR) console.log(DOWNLOAD_HELP);
   process.exit(failed === 0 ? 0 : 1);
 }
 

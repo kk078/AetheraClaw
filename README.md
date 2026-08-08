@@ -94,6 +94,25 @@ Verified end to end against the July 2026 releases: 1,728,585 active PTP edits,
 15,162 MUE ceilings, 17,095 priced codes, 218 GPCI localities, conversion factor
 33.4009 read out of the RVU file rather than remembered.
 
+**If CMS refuses (HTTP 403), download them yourself.** Its CDN declines some
+clients outright — a plain 403 on pages a browser loads fine from the same
+network. This script does not argue with that: no User-Agent rotation, no
+pretending to be a browser, because defeating a bot rule to pull AMA-licensed
+data is doing something nobody agreed to. The manual route is better anyway,
+since downloading in a browser is the path that goes *through* the AMA licence
+acceptance page that a direct-link fetch quietly skips. Save every ZIP into one
+folder and point the script at it:
+
+```bash
+node scripts/fetch-cms-data.mjs --from-dir=C:\Users\you\Downloads\cms
+```
+
+Same converters, no network. Verified to produce byte-identical output to the
+online path — 1,728,585 pairs either way. **A missing PTP part is fatal, not a
+warning**: each of the four files holds a different slice of the code range, so
+three of four is not "most of the edits" but a table with a silent hole, and a
+pair inside that hole would read as *not bundled* rather than *not checked*.
+
 **Retired edits are dropped, and that is the point.** The published PTP table is
 cumulative — 904,804 of its rows are edits CMS no longer enforces, each carrying a
 deletion date. Loading them would make the scrubber report bundling violations on
