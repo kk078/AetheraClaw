@@ -1,6 +1,7 @@
 import type { Config } from "../config/config.js";
 import type { MemoryStore } from "../memory/store.js";
 import type { ModelProvider, NormalizedBlock, NormalizedMessage } from "../providers/types.js";
+import { selectTools } from "../tools/profiles.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolContext } from "../tools/types.js";
 import type { AgentEvent } from "../shared/events.js";
@@ -54,13 +55,20 @@ export async function runTurn(deps: RunnerDeps, sessionId: string, userText: str
         break;
       }
       const messages = truncateToBudget(loadHistory(store, sessionId), config.contextTokenBudget);
+      // Chosen per provider: OpenAI rejects more than 128 tools outright, and
+      // nobody but Anthropic caches the definition block.
+      const selection = selectTools(registry.specs(), config.toolProfile, provider.name);
+      const toolSpecs = selection.specs;
+      if (rounds === 1) {
+        for (const note of selection.notes) emit({ type: "error", sessionId, message: note });
+      }
       let stopReason = "end_turn";
       let assistant: NormalizedBlock[] = [];
 
       for await (const event of provider.streamTurn({
         system,
         messages,
-        tools: registry.specs(),
+        tools: toolSpecs,
         maxTokens: config.maxTokens,
       })) {
         switch (event.type) {

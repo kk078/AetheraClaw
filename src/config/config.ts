@@ -12,6 +12,9 @@ const ProviderBlock = z.object({
 
 export const ConfigSchema = z.object({
   provider: z.enum(["anthropic", "openai", "gemini", "ollama"]).default("anthropic"),
+  // Which slice of the ~173-tool registry a session is given. "all" only works
+  // on a provider with no tool-count cap that caches the definition block.
+  toolProfile: z.string().default("all"),
   providers: z
     .object({
       anthropic: ProviderBlock.default({ model: "claude-opus-5" }),

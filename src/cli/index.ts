@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import path from "node:path";
-import { loadConfig, configDir } from "../config/config.js";
+import { loadConfig, configDir, apiKeyFor } from "../config/config.js";
+import { PROFILES, PROVIDER_TOOL_LIMITS, renderProfiles, selectTools } from "../tools/profiles.js";
 import { MemoryStore } from "../memory/store.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { createShellTool } from "../tools/shell.js";
@@ -241,10 +242,21 @@ program
   .description("Start the AetheraClaw gateway (HTTP + WebSocket + web UI)")
   .option("--port <port>", "port to listen on")
   .option("--host <host>", "host to bind (default 127.0.0.1)")
-  .action(async (opts: { port?: string; host?: string }) => {
+  .option("--provider <name>", "anthropic | openai | gemini | ollama")
+  .option("--profile <name>", "tool profile — see `aetheraclaw providers`")
+  .action(async (opts: { port?: string; host?: string; provider?: string; profile?: string }) => {
     const config = loadConfig();
     if (opts.port) config.gateway.port = Number(opts.port);
     if (opts.host) config.gateway.host = opts.host;
+    if (opts.provider) config.provider = opts.provider as typeof config.provider;
+    if (opts.profile) config.toolProfile = opts.profile;
+
+    if (!apiKeyFor(config.provider) && config.provider !== "ollama") {
+      console.error(
+        `No API key for provider "${config.provider}". Set ${config.provider.toUpperCase()}_API_KEY, or pass --provider with one you have. \`aetheraclaw providers\` shows what is configured.`,
+      );
+      process.exit(1);
+    }
     const store = new MemoryStore(path.join(configDir(), "aetheraclaw.db"));
     const registry = buildRegistry(config, store);
     const sessions = new SessionManager(store, registry, config, { store, config });
@@ -263,6 +275,9 @@ program
     await app.listen({ host: config.gateway.host, port: config.gateway.port });
     console.log(`AetheraClaw gateway: http://${config.gateway.host}:${config.gateway.port}`);
     console.log(`Provider: ${config.provider} · Workspace: ${config.workspaceRoot}`);
+    const picked = selectTools(registry.specs(), config.toolProfile, config.provider);
+    console.log(`Tools: ${picked.specs.length} of ${registry.specs().length} (profile "${config.toolProfile}")`);
+    for (const note of picked.notes) console.log(`  ! ${note}`);
     if (config.email.enabled) console.log(`Email channel: ${config.email.imap.user}@${config.email.imap.host}`);
   });
 
@@ -308,6 +323,43 @@ program
     // Exit non-zero on failure so this can run in a cron job or a pre-commit
     // hook and actually stop something.
     process.exit(result.ok ? 0 : 1);
+  });
+
+program
+  .command("providers")
+  .description("Show which model providers are usable here, and how many tools each can take")
+  .action(() => {
+    const config = loadConfig();
+    const store = new MemoryStore(path.join(configDir(), "aetheraclaw.db"));
+    const all = buildRegistry(config, store).specs();
+
+    console.log(`Registry: ${all.length} tools.\n`);
+    const width = 11;
+    console.log(
+      ["provider".padEnd(width), "key", "model".padEnd(22), "cap", ...PROFILES.map((p) => p.name.slice(0, 6).padStart(7))].join("  "),
+    );
+    for (const name of ["anthropic", "openai", "gemini", "ollama"] as const) {
+      const key = apiKeyFor(name) ? " set " : name === "ollama" ? "local" : " --  ";
+      const counts = PROFILES.map((p) => {
+        const s = selectTools(all, p.name, name);
+        return `${s.specs.length}${s.droppedByLimit.length ? "*" : ""}`.padStart(7);
+      });
+      console.log(
+        [
+          (config.provider === name ? `\u2192 ${name}` : `  ${name}`).padEnd(width),
+          key,
+          config.providers[name].model.padEnd(22),
+          String(PROVIDER_TOOL_LIMITS[name]).padStart(3),
+          ...counts,
+        ].join("  "),
+      );
+    }
+    console.log("\n* some tools were dropped to fit the cap \u2014 pick a narrower profile.\n");
+    console.log(renderProfiles());
+    console.log(
+      `\nActive: provider "${config.provider}", profile "${config.toolProfile}". Override per run with \`serve --provider X --profile Y\`.`,
+    );
+    store.close();
   });
 
 program.parseAsync().catch((err) => {

@@ -62,7 +62,13 @@ export class GeminiProvider implements ModelProvider {
 
   constructor(model: string) {
     this.model = model;
-    this.ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        'GEMINI_API_KEY is not set. Export it, or switch provider with `provider: "anthropic" | "openai" | "ollama"` in ~/.aetheraclaw/config.json5.',
+      );
+    }
+    this.ai = new GoogleGenAI({ apiKey });
   }
 
   async *streamTurn(req: TurnRequest): AsyncIterable<ProviderEvent> {

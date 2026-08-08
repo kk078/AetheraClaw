@@ -50,12 +50,18 @@ export class OpenAIProvider implements ModelProvider {
   readonly model: string;
   protected client: OpenAI;
 
+  /** Ollama's OpenAI-compatible endpoint reads max_tokens; OpenAI wants max_completion_tokens. */
+  protected legacyMaxTokens = false;
+
   constructor(model: string, opts: { baseURL?: string; apiKey?: string } = {}) {
     this.model = model;
-    this.client = new OpenAI({
-      apiKey: opts.apiKey ?? process.env.OPENAI_API_KEY,
-      ...(opts.baseURL ? { baseURL: opts.baseURL } : {}),
-    });
+    const apiKey = opts.apiKey ?? process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        "OPENAI_API_KEY is not set. Export it, or switch provider with `provider: \"anthropic\" | \"gemini\" | \"ollama\"` in ~/.aetheraclaw/config.json5.",
+      );
+    }
+    this.client = new OpenAI({ apiKey, ...(opts.baseURL ? { baseURL: opts.baseURL } : {}) });
   }
 
   async *streamTurn(req: TurnRequest): AsyncIterable<ProviderEvent> {
@@ -63,7 +69,7 @@ export class OpenAIProvider implements ModelProvider {
       model: this.model,
       stream: true,
       messages: toOpenAIMessages(req.system, req.messages),
-      max_completion_tokens: req.maxTokens,
+      ...(this.legacyMaxTokens ? { max_tokens: req.maxTokens } : { max_completion_tokens: req.maxTokens }),
       ...(req.tools.length > 0
         ? {
             tools: req.tools.map((t) => ({
@@ -116,11 +122,35 @@ export class OpenAIProvider implements ModelProvider {
   }
 }
 
+/** Ollama Cloud's OpenAI-compatible endpoint. */
+export const OLLAMA_CLOUD_URL = "https://ollama.com/v1";
+export const OLLAMA_LOCAL_URL = "http://localhost:11434/v1";
+
+/**
+ * Resolve which Ollama to talk to.
+ *
+ * The trap this exists to close: a user sets OLLAMA_API_KEY meaning "use Ollama
+ * Cloud", the base URL still points at localhost, and the failure is
+ * ECONNREFUSED on port 11434 — which reads as "Ollama is not running" and sends
+ * them off installing a local server they did not want. A key with no explicit
+ * URL means the cloud.
+ */
+export function resolveOllamaBaseUrl(configured: string | undefined, apiKey: string | undefined): string {
+  if (configured && configured !== OLLAMA_LOCAL_URL) return configured;
+  if (apiKey) return OLLAMA_CLOUD_URL;
+  return OLLAMA_LOCAL_URL;
+}
+
 // Ollama speaks the OpenAI-compatible chat completions API — locally (no key) or
 // via Ollama Cloud (OLLAMA_API_KEY). Only the base URL and auth differ.
 export class OllamaProvider extends OpenAIProvider {
   override readonly name = "ollama";
-  constructor(model: string, baseURL = "http://localhost:11434/v1") {
-    super(model, { baseURL, apiKey: process.env.OLLAMA_API_KEY ?? "ollama" });
+
+  constructor(model: string, baseURL?: string) {
+    const key = process.env.OLLAMA_API_KEY;
+    // "ollama" is the placeholder a local server accepts; the SDK requires
+    // something non-empty.
+    super(model, { baseURL: resolveOllamaBaseUrl(baseURL, key), apiKey: key ?? "ollama" });
+    this.legacyMaxTokens = true;
   }
 }

@@ -155,6 +155,25 @@ Attestations are signed with a local Ed25519 key and anchored to the audit chain
 
 **Coder training** — `training_drill` draws cases weighted toward what the practice actually bills, since that is what makes them relevant, and **names what that weighting misses**: a bank shaped by the practice's history cannot ask about anything the practice has never billed, and a fifth of every draw is spread evenly across topics so the rare ones stay genuinely reachable rather than reachable in arithmetic. Cases carry **defensible alternatives**, because real coding has genuine ambiguity and grading one right answer where two coders would both survive an audit teaches a coder to distrust a correct instinct. Every answer is given with a stated confidence, and `training_progress` reports **calibration beside accuracy** — a Brier score, plus the specific list of answers that were wrong at high confidence. That list is the point: the coder who costs a practice money is not the one who gets things wrong, it is the one who gets things wrong confidently, because nobody double-checks a coder who never flags anything. Topics with few attempts show their Wilson interval instead of a number, since three attempts is not a skill level.
 
+## Running on a provider other than Anthropic
+
+`aetheraclaw providers` prints what is usable here — which keys are set, which model each provider is configured for, and how many tools each can actually be sent.
+
+```
+aetheraclaw serve --provider openai --profile claims
+aetheraclaw serve --provider gemini --profile coding
+aetheraclaw serve --provider ollama --profile denials    # local, no key
+OLLAMA_API_KEY=… aetheraclaw serve --provider ollama     # Ollama Cloud
+```
+
+**Tool profiles exist because the registry does not fit.** 173 tools serialize to about 145 KB of definitions — roughly 37,000 tokens. Anthropic prompt-caches that block, so it is paid for once; nobody else does, so on OpenAI or Gemini it is 37k tokens of input on *every turn*, and on a local Ollama model it exhausts an 8k window before the conversation starts. Worse, **OpenAI rejects any request carrying more than 128 tools outright** — not a degradation, a 400 on every turn. So a session picks one of `coding`, `claims`, `denials`, `revenue`, `operations`, or `all`, each a coherent job somebody actually does; every profile fits inside every provider's ceiling except `all`, which is Anthropic-only and says so. This is not purely a workaround: a model choosing among 173 tools chooses worse than one choosing among 35.
+
+When tools *are* cut to fit a cap, every dropped name is printed. A model that quietly lost `claim_scrub` will confidently proceed without it, and the transcript will read as though it decided not to scrub the claim rather than as though it could not.
+
+Two provider quirks are handled rather than left to bite: **Ollama Cloud** is selected automatically when `OLLAMA_API_KEY` is set and no explicit base URL is configured, because otherwise the failure is `ECONNREFUSED` on port 11434 — which reads as "Ollama isn't running" and sends you installing a local server you did not want. And Ollama's OpenAI-compatible endpoint reads `max_tokens` while OpenAI wants `max_completion_tokens`; sending only the latter to Ollama means it is ignored, so generation runs unbounded. A missing API key is caught at startup with the variable name, not as an SDK stack trace mid-turn.
+
+Switching providers mid-session keeps the conversation: history is stored in normalized form, and Anthropic-only blocks (thinking, server-side search results) are dropped rather than replayed to a provider that cannot read them.
+
 Several tools use free public APIs (NLM, NPPES, CMS Coverage) — no keys required. Optional datasets go in `~/.aetheraclaw/data/`: `ncci-ptp.json` and `mue.json` (bundling and unit edits), `hcpcs.json`, `mpfs.json` (RVUs), `global-periods.json` (`{"CODE": 90}`) for global-period lookup, `mpfs-cf.json` (`{"cf": 32.35}`) and `gpci.json` (`{"LOCALITY": {work, pe, mp}}`) for locality-accurate pricing, `em-benchmark.json` (`{"99213": 38.2}` percentages, from the CMS *Medicare Physician & Other Practitioners* public use file) for peer E/M comparison, and `hcc-model.json` (ICD-10→HCC mapping, category definitions with coefficients and hierarchies, demographic terms) from the CMS risk-adjustment model files. `code_update_diff` reads code-set editions from the same directory, either as a bare `{"CODE": "description"}` map or wrapped as `{"label", "effective", "codes"}`. CPT is AMA-licensed and supplied by the user via `healthcare.cptDataPath`. Every dataset is optional — tools that need one say so instead of guessing.
 
 ## Example
