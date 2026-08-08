@@ -160,7 +160,7 @@ program
     const registry = buildRegistry(config, store);
     // The catalogue tools need the registry to search and invoke through it.
     const sessions = new SessionManager(store, registry, config, { store, config, registry });
-    const app = await buildServer({ config, store, sessions });
+    const app = await buildServer({ config, store, sessions, registry });
 
     const email = new EmailChannel({
       config,

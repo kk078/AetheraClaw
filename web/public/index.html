@@ -3,38 +3,163 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>AetheraClaw</title>
-<link rel="stylesheet" href="style.css" />
+<title>AetheraClaw — RCM Console</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-<div id="app">
-  <aside id="sidebar">
-    <header>
-      <h1>🦞 AetheraClaw</h1>
-      <button id="new-session">New session</button>
-    </header>
-    <ul id="session-list"></ul>
-    <footer><span id="status">disconnected</span></footer>
+<div class="app">
+
+  <div class="brand">
+    <div class="mark">A</div>
+    <div>
+      <h1>AetheraClaw</h1>
+      <small>RCM Console</small>
+    </div>
+  </div>
+
+  <div class="topbar">
+    <span class="pill" id="pill-provider"><span class="dot"></span><b>—</b></span>
+    <span class="pill" id="pill-tools">—</span>
+    <span class="pill" id="pill-driver">—</span>
+    <span class="spacer"></span>
+    <span class="pill click" id="btn-palette">Search tools <span class="kbd">Ctrl K</span></span>
+    <span class="pill" id="pill-conn"><span class="dot off"></span><span>offline</span></span>
+  </div>
+
+  <aside class="rail">
+    <nav>
+      <div class="navitem active" data-view="overview"><span class="g">⬡</span> Overview</div>
+      <div class="navitem" data-view="modules"><span class="g">▦</span> Modules <span class="count" id="c-modules"></span></div>
+      <div class="navitem" data-view="console"><span class="g">▶</span> Console</div>
+      <div class="navitem" data-view="workbench"><span class="g">◫</span> Workbench</div>
+    </nav>
+    <div class="sectionlabel">Sessions</div>
+    <div class="scroll" id="session-list"></div>
+    <div class="footer" id="foot">—</div>
   </aside>
-  <main id="chat">
-    <div id="messages"></div>
-    <form id="composer">
-      <textarea id="input" rows="2" placeholder="Ask about codes, coverage, claims… (Enter to send, Shift+Enter for newline)"></textarea>
-      <button type="submit">Send</button>
-    </form>
+
+  <main class="main">
+
+    <!-- Overview ------------------------------------------------------ -->
+    <section class="view active" id="view-overview">
+      <div class="pad">
+        <h2 class="title">Revenue cycle, end to end</h2>
+        <p class="sub">
+          An agent with <b id="ov-total">—</b> deterministic tools across <b id="ov-modcount">—</b> modules: coding and coverage,
+          claim build and scrub, remittance and variance, denials and appeals, forecasting, compliance and audit.
+          Every rule is a tested pure function — the model chooses which to run, it does not invent the answer.
+        </p>
+
+        <div class="banner">
+          <b>Not for real PHI.</b> Coding education, code and policy lookup, and de-identified or synthetic examples only.
+          The agent is instructed to refuse real patient identifiers.
+        </div>
+
+        <h3 class="section">Runtime</h3>
+        <div class="stats" id="ov-runtime"></div>
+
+        <h3 class="section">In this database</h3>
+        <div class="stats" id="ov-counts"></div>
+
+        <h3 class="section">Start here</h3>
+        <div class="grid" id="ov-starters"></div>
+      </div>
+    </section>
+
+    <!-- Modules ------------------------------------------------------- -->
+    <section class="view" id="view-modules">
+      <div class="pad">
+        <h2 class="title">Modules</h2>
+        <p class="sub">Every capability in the system, grouped by the job it belongs to. Select a tool to load a starter prompt into the console.</p>
+        <input class="search" id="module-search" placeholder="Filter modules and tools — try 'denial', 'forecast', 'prior authorization'" />
+        <div id="module-grid"></div>
+      </div>
+    </section>
+
+    <!-- Console ------------------------------------------------------- -->
+    <section class="view" id="view-console">
+      <div class="console">
+        <div class="stream" id="stream">
+          <div class="empty">
+            <div class="big">Ask about codes, coverage, claims, denials or cash.</div>
+            <div>The agent runs real tools and shows every call it makes.</div>
+          </div>
+        </div>
+        <div class="composer">
+          <div class="box">
+            <textarea id="input" rows="1" placeholder="Enter to send · Shift+Enter for a newline"></textarea>
+            <button class="btn" id="send">Send</button>
+          </div>
+          <div class="hint" id="hint">Tool calls appear inline and expand. Anything risky asks first.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Workbench ----------------------------------------------------- -->
+    <section class="view" id="view-workbench">
+      <div class="pad">
+        <h2 class="title">Workbench</h2>
+        <p class="sub">Structured screens that do not need a conversation.</p>
+        <div class="grid">
+          <a class="card click" href="/review.html">
+            <div class="head"><div class="glyph">▦</div><h4>Coding Review Queue</h4></div>
+            <p>Accept, edit or reject suggested codes. A reason is required to change or refuse one, and every decision appends to a log that is never rewritten.</p>
+          </a>
+          <a class="card click" href="/superbill.html">
+            <div class="head"><div class="glyph">▣</div><h4>Charge Capture</h4></div>
+            <p>Build a clean claim from a structured form — diagnosis pointers are derived from the codes each line names, then it is ready to scrub.</p>
+          </a>
+        </div>
+        <h3 class="section">Not yet built</h3>
+        <p class="sub">
+          The analytics dashboard, the forecast fan chart and the swarm supervisor board were planned and never built as pages.
+          Their tools exist and work — <code>analytics_query</code>, <code>forecast_chart</code>, <code>swarm_board</code> — so they are reachable from the console today.
+        </p>
+      </div>
+    </section>
+
   </main>
 </div>
-<div id="approval-modal" class="hidden">
-  <div class="modal-card">
-    <h2>⚠ Approval required</h2>
-    <p id="approval-desc"></p>
-    <pre id="approval-input"></pre>
-    <div class="modal-actions">
-      <button id="approve-btn" class="approve">Approve</button>
-      <button id="deny-btn" class="deny">Deny</button>
+
+<!-- Tool detail ------------------------------------------------------- -->
+<div class="scrim" id="tool-scrim">
+  <div class="modal">
+    <div class="mhead" id="tool-title">tool</div>
+    <div class="mbody">
+      <p id="tool-desc" style="margin:0 0 12px;color:var(--ink-2);line-height:1.6"></p>
+      <pre id="tool-schema"></pre>
+    </div>
+    <div class="mfoot">
+      <button class="btn ghost" data-close>Close</button>
+      <button class="btn" id="tool-use">Use in console</button>
     </div>
   </div>
 </div>
-<script src="app.js"></script>
+
+<!-- Approval ---------------------------------------------------------- -->
+<div class="scrim" id="approve-scrim">
+  <div class="modal">
+    <div class="mhead">Approval required</div>
+    <div class="mbody">
+      <p id="approve-why" style="margin:0 0 12px;color:var(--ink-2);line-height:1.6"></p>
+      <pre id="approve-input"></pre>
+    </div>
+    <div class="mfoot">
+      <button class="btn ghost" id="approve-no">Deny</button>
+      <button class="btn" id="approve-yes">Approve</button>
+    </div>
+  </div>
+</div>
+
+<!-- Palette ----------------------------------------------------------- -->
+<div class="scrim" id="palette-scrim">
+  <div class="modal">
+    <input class="search" id="palette-input" placeholder="Search 176 tools…" autocomplete="off" />
+    <div class="mbody" id="palette-results" style="padding:8px"></div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
 </body>
 </html>

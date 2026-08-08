@@ -8,6 +8,10 @@ import type { Config } from "../config/config.js";
 import type { MemoryStore } from "../memory/store.js";
 import { SessionManager } from "./session-manager.js";
 import { ClientMessageSchema } from "./ws-protocol.js";
+import { groupIntoModules } from "../tools/modules.js";
+import { PROFILES, selectTools } from "../tools/profiles.js";
+import { resolveOllamaTarget } from "../providers/openai.js";
+import type { ToolRegistry } from "../tools/registry.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -22,8 +26,9 @@ export async function buildServer(opts: {
   config: Config;
   store: MemoryStore;
   sessions: SessionManager;
+  registry?: ToolRegistry;
 }) {
-  const { config, store, sessions } = opts;
+  const { config, store, sessions, registry } = opts;
   const app = Fastify({ logger: false });
 
   await app.register(fastifyWebsocket);
@@ -32,6 +37,60 @@ export async function buildServer(opts: {
   app.get("/healthz", async () => ({ ok: true, name: "aetheraclaw" }));
 
   app.get("/api/sessions", async () => store.listSessions());
+
+  /** The module map and the live tool catalogue — what the UI renders as capability. */
+  app.get("/api/modules", async () => {
+    const specs = registry?.specs() ?? [];
+    const selection = selectTools(specs, config.toolProfile, config.provider);
+    const direct = new Set(selection.specs.map((s) => s.name));
+    return {
+      total: specs.length,
+      loadedDirectly: selection.specs.length,
+      deferred: selection.deferred.length,
+      profile: config.toolProfile,
+      profiles: PROFILES.map((p) => ({ name: p.name, description: p.description })),
+      modules: groupIntoModules(specs).map((m) => ({
+        ...m,
+        tools: m.tools.map((t) => ({ ...t, loaded: direct.has(t.name) })),
+      })),
+    };
+  });
+
+  /**
+   * Runtime state plus what is actually in the database.
+   *
+   * The counts matter more than they look: almost every analytic in this system
+   * needs stored claims or parsed remittances, and a practice wondering why the
+   * forecast is empty is usually looking at zeroes here.
+   */
+  app.get("/api/overview", async () => {
+    const count = (table: string): number => {
+      try {
+        return (store.db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as { c: number }).c;
+      } catch {
+        return 0;
+      }
+    };
+    const ollama = resolveOllamaTarget(config.providers.ollama, process.env.OLLAMA_API_KEY);
+    return {
+      provider: config.provider,
+      model: config.provider === "ollama" ? ollama.model : config.providers[config.provider].model,
+      endpoint: config.provider === "ollama" ? (ollama.cloud ? "Ollama Cloud" : "local") : "",
+      driver: store.db.driver,
+      profile: config.toolProfile,
+      approvalPolicy: config.approvalPolicy,
+      workspace: config.workspaceRoot,
+      counts: {
+        sessions: count("sessions"),
+        messages: count("messages"),
+        claims: count("claims"),
+        remittances: count("remittances"),
+        worklist: count("worklist_items"),
+        suggestions: count("code_suggestions"),
+        audit: count("audit_chain"),
+      },
+    };
+  });
 
   app.post("/api/sessions", async (req) => {
     const body = (req.body ?? {}) as { title?: string; provider?: string };

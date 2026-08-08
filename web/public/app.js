@@ -1,128 +1,515 @@
-/* AetheraClaw web UI — vanilla JS over the shared WS protocol */
-let ws = null;
-let sessionId = null;
-let liveAssistant = null;
+// AetheraClaw console. Vanilla JS, no build step.
 
-const $ = (id) => document.getElementById(id);
-const messages = $("messages");
+const $ = (s) => document.querySelector(s);
+const el = (tag, cls, text) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+};
+
+const state = {
+  sessionId: null,
+  ws: null,
+  modules: [],
+  tools: [],
+  turnRunning: false,
+  pendingApproval: null,
+};
+
+// ── Navigation ─────────────────────────────────────────────────────────
+
+function show(view) {
+  document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${view}`));
+  document.querySelectorAll(".navitem").forEach((n) => n.classList.toggle("active", n.dataset.view === view));
+  if (view === "console") $("#input").focus();
+}
+document.querySelectorAll(".navitem").forEach((n) => n.addEventListener("click", () => show(n.dataset.view)));
+
+// ── Overview ───────────────────────────────────────────────────────────
+
+const STARTERS = [
+  ["Is E11.65 billable, and what does it mean?", "◈", "Coding", "Validates against bundled FY2026 ICD-10 — no network needed."],
+  ["I got CARC 197 on a claim. What is it and what do I do?", "▽", "Denials", "Resolves the code rather than recalling it, then gives the remediation path."],
+  ["Is a Medicare claim with date of service 20250715 still filable today?", "◷", "Timely filing", "One calendar year by statute, computed so a leap day cannot shift it."],
+  ["Scrub this claim and tell me exactly what is wrong with it.", "▣", "Claim scrub", "Severity-ranked findings; a dangling diagnosis pointer is an error, not a warning."],
+  ["Draft a compliant physician query for unspecified heart failure.", "◉", "CDI", "Refuses to emit a leading query rather than warning about one."],
+  ["What does the tool catalogue have for prior authorization?", "⌘", "Catalogue", "Searches all tools, including the ones not loaded into this turn."],
+];
+
+async function loadOverview() {
+  const ov = await fetch("/api/overview").then((r) => r.json()).catch(() => null);
+  if (!ov) return;
+
+  $("#pill-provider").innerHTML =
+    `<span class="dot on"></span><b>${ov.model}</b>` + (ov.endpoint ? ` · ${ov.endpoint}` : "");
+  $("#pill-driver").textContent = ov.driver;
+  $("#foot").textContent = ov.workspace;
+
+  const runtime = [
+    ["Provider", ov.provider],
+    ["Model", ov.model],
+    ["Tool profile", ov.profile],
+    ["Approvals", ov.approvalPolicy],
+    ["SQLite", ov.driver],
+  ];
+  $("#ov-runtime").replaceChildren(
+    ...runtime.map(([k, v]) => {
+      const d = el("div", "stat");
+      const val = el("div", "v", String(v));
+      val.style.fontSize = "14px";
+      d.append(val, el("div", "k", k));
+      return d;
+    }),
+  );
+
+  const labels = {
+    sessions: "Sessions", messages: "Messages", claims: "Claims", remittances: "Remittances",
+    worklist: "Worklist", suggestions: "Suggestions", audit: "Audit entries",
+  };
+  $("#ov-counts").replaceChildren(
+    ...Object.entries(ov.counts).map(([k, v]) => {
+      const d = el("div", `stat${v === 0 ? " zero" : ""}`);
+      d.append(el("div", "v", String(v)), el("div", "k", labels[k] ?? k));
+      return d;
+    }),
+  );
+
+  $("#ov-starters").replaceChildren(
+    ...STARTERS.map(([prompt, glyph, tag, why]) => {
+      const c = el("div", "card click");
+      const head = el("div", "head");
+      head.append(el("div", "glyph", glyph), el("h4", null, tag));
+      c.append(head, el("p", null, prompt), el("div", "note", why));
+      c.addEventListener("click", () => {
+        show("console");
+        $("#input").value = prompt;
+        $("#input").focus();
+      });
+      return c;
+    }),
+  );
+}
+
+// ── Modules ────────────────────────────────────────────────────────────
+
+async function loadModules() {
+  const data = await fetch("/api/modules").then((r) => r.json()).catch(() => null);
+  if (!data) return;
+  state.modules = data.modules;
+  state.tools = data.modules.flatMap((m) => m.tools.map((t) => ({ ...t, module: m.label })));
+
+  $("#ov-total").textContent = data.total;
+  $("#ov-modcount").textContent = data.modules.length;
+  $("#c-modules").textContent = data.modules.length;
+  $("#palette-input").placeholder = `Search ${data.total} tools…`;
+  $("#pill-tools").innerHTML =
+    `<b>${data.loadedDirectly}</b> loaded` + (data.deferred ? ` · ${data.deferred} on demand` : "");
+  $("#pill-tools").title = data.deferred
+    ? `${data.deferred} tools are reachable through tool_search rather than sent every turn.`
+    : "Every tool is sent directly.";
+  renderModules("");
+}
+
+function renderModules(filter) {
+  const q = filter.trim().toLowerCase();
+  const grid = $("#module-grid");
+  grid.replaceChildren();
+
+  for (const m of state.modules) {
+    const hits = q
+      ? m.tools.filter((t) => t.name.includes(q) || t.summary.toLowerCase().includes(q))
+      : m.tools;
+    const moduleMatches = !q || m.label.toLowerCase().includes(q) || m.blurb.toLowerCase().includes(q);
+    if (!moduleMatches && hits.length === 0) continue;
+    const tools = moduleMatches && hits.length === 0 ? m.tools : hits;
+
+    const card = el("div", "card");
+    card.style.marginBottom = "12px";
+    const head = el("div", "head");
+    head.append(el("div", "glyph", m.glyph), el("h4", null, m.label), el("div", "n", `${m.tools.length} tools`));
+    card.append(head, el("p", null, m.blurb), el("div", "note", m.note));
+
+    const list = el("div");
+    list.style.marginTop = "10px";
+    for (const t of tools) {
+      const row = el("div", "toolrow");
+      row.append(el("code", null, t.name), el("span", null, t.summary));
+      row.append(el("span", `badge ${t.loaded ? "loaded" : "deferred"}`, t.loaded ? "loaded" : "on demand"));
+      row.addEventListener("click", () => openTool(t));
+      list.append(row);
+    }
+    card.append(list);
+    grid.append(card);
+  }
+  if (!grid.children.length) grid.append(el("p", "sub", `Nothing matches "${filter}".`));
+}
+
+$("#module-search").addEventListener("input", (e) => renderModules(e.target.value));
+
+// ── Tool detail ────────────────────────────────────────────────────────
+
+let currentTool = null;
+function openTool(t) {
+  currentTool = t;
+  $("#tool-title").textContent = t.name;
+  $("#tool-desc").textContent = t.description;
+  $("#tool-schema").textContent = `Module: ${t.module ?? ""}\nLoaded this turn: ${t.loaded ? "yes — sent directly" : "no — reached through tool_search"}`;
+  $("#tool-scrim").classList.add("show");
+}
+$("#tool-use").addEventListener("click", () => {
+  if (!currentTool) return;
+  $("#tool-scrim").classList.remove("show");
+  show("console");
+  $("#input").value = `Use the ${currentTool.name} tool. `;
+  $("#input").focus();
+});
+document.querySelectorAll("[data-close]").forEach((b) =>
+  b.addEventListener("click", () => b.closest(".scrim").classList.remove("show")),
+);
+document.querySelectorAll(".scrim").forEach((s) =>
+  s.addEventListener("click", (e) => {
+    if (e.target === s && s.id !== "approve-scrim") s.classList.remove("show");
+  }),
+);
+
+// ── Command palette ────────────────────────────────────────────────────
+
+function openPalette() {
+  $("#palette-scrim").classList.add("show");
+  $("#palette-input").value = "";
+  renderPalette("");
+  $("#palette-input").focus();
+}
+function renderPalette(q) {
+  const query = q.trim().toLowerCase();
+  const hits = (query
+    ? state.tools.filter((t) => t.name.includes(query) || t.summary.toLowerCase().includes(query))
+    : state.tools
+  ).slice(0, 40);
+  $("#palette-results").replaceChildren(
+    ...hits.map((t) => {
+      const row = el("div", "paletteitem");
+      row.append(el("code", null, t.name), el("span", null, t.summary));
+      row.addEventListener("click", () => {
+        $("#palette-scrim").classList.remove("show");
+        openTool(t);
+      });
+      return row;
+    }),
+  );
+  if (!hits.length) $("#palette-results").append(el("p", "sub", "No tool matches that."));
+}
+$("#palette-input").addEventListener("input", (e) => renderPalette(e.target.value));
+$("#btn-palette").addEventListener("click", openPalette);
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+    e.preventDefault();
+    openPalette();
+  }
+  if (e.key === "Escape") document.querySelectorAll(".scrim.show").forEach((s) => {
+    if (s.id !== "approve-scrim") s.classList.remove("show");
+  });
+});
+
+// ── Sessions ───────────────────────────────────────────────────────────
 
 async function loadSessions() {
-  const rows = await (await fetch("/api/sessions")).json();
-  const list = $("session-list");
-  list.innerHTML = "";
-  for (const row of rows) {
-    const li = document.createElement("li");
-    li.textContent = row.title || "(untitled)";
-    li.dataset.id = row.id;
-    if (row.id === sessionId) li.classList.add("active");
-    li.onclick = () => openSession(row.id);
-    list.appendChild(li);
+  const rows = await fetch("/api/sessions").then((r) => r.json()).catch(() => []);
+  const list = $("#session-list");
+  list.replaceChildren();
+
+  const nu = el("div", "sessionrow", "+ New session");
+  nu.style.color = "var(--accent)";
+  nu.addEventListener("click", newSession);
+  list.append(nu);
+
+  for (const s of rows) {
+    const row = el("div", `sessionrow${s.id === state.sessionId ? " active" : ""}`);
+    row.append(document.createTextNode(s.title || "(untitled)"));
+    row.append(el("small", null, new Date(s.updated_at).toLocaleString()));
+    row.addEventListener("click", () => openSession(s.id));
+    list.append(row);
   }
 }
 
-function addMsg(role, text) {
-  const div = document.createElement("div");
-  div.className = `msg ${role}`;
-  div.textContent = text;
-  messages.appendChild(div);
-  messages.scrollTop = messages.scrollHeight;
-  return div;
-}
-
-function addToolLine(container, text, isError) {
-  const line = document.createElement("div");
-  line.className = "tool" + (isError ? " error" : "");
-  line.textContent = text;
-  container.appendChild(line);
-  messages.scrollTop = messages.scrollHeight;
+async function newSession() {
+  const s = await fetch("/api/sessions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  }).then((r) => r.json());
+  await openSession(s.id);
 }
 
 async function openSession(id) {
-  sessionId = id;
-  messages.innerHTML = "";
-  liveAssistant = null;
-  const history = await (await fetch(`/api/sessions/${id}/messages`)).json();
-  for (const m of history) {
-    const texts = m.content.filter((b) => b.type === "text").map((b) => b.text).join("");
-    if (texts) addMsg(m.role, texts);
-    const container = messages.lastChild;
-    for (const b of m.content) {
-      if (b.type === "tool_use" && container) addToolLine(container, `⚙ ${b.name}`, false);
+  state.sessionId = id;
+  show("console");
+  const stream = $("#stream");
+  stream.replaceChildren();
+
+  const messages = await fetch(`/api/sessions/${id}/messages`).then((r) => r.json()).catch(() => []);
+  for (const m of messages) {
+    for (const block of m.content) {
+      if (block.type === "text" && block.text.trim()) addMessage(m.role, block.text);
+      else if (block.type === "tool_use") addTool(block.name, block.input);
+      else if (block.type === "tool_result") finishTool(block.content, block.isError);
     }
   }
-  connect();
+  connect(id);
   loadSessions();
 }
 
-function connect() {
-  if (ws) ws.close();
-  ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?session=${sessionId}`);
-  ws.onopen = () => ($("status").textContent = `connected · ${sessionId}`);
-  ws.onclose = () => ($("status").textContent = "disconnected");
-  ws.onmessage = (e) => handleEvent(JSON.parse(e.data));
+
+// ── Markdown ───────────────────────────────────────────────────────────
+// Models answer in Markdown, and showing it raw means **bold**, pipe tables and
+// literal <br> in the transcript. This is deliberately small: escape everything
+// first, then re-introduce a fixed set of tags. Escaping before formatting is
+// the whole safety argument — model output is untrusted text, and it reaches
+// this function having passed through a payer's API on the way.
+
+function esc(t) {
+  return t.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
 
-function handleEvent(ev) {
-  switch (ev.type) {
-    case "turn_started":
-      liveAssistant = addMsg("assistant", "");
-      break;
-    case "text_delta":
-      if (!liveAssistant) liveAssistant = addMsg("assistant", "");
-      liveAssistant.append(ev.text);
-      messages.scrollTop = messages.scrollHeight;
-      break;
-    case "tool_call":
-      if (!liveAssistant) liveAssistant = addMsg("assistant", "");
-      addToolLine(liveAssistant, `⚙ ${ev.toolName}: ${JSON.stringify(ev.input).slice(0, 140)}`, false);
-      break;
-    case "tool_result":
-      if (liveAssistant) addToolLine(liveAssistant, `↳ ${ev.isError ? "error: " : ""}${ev.summary.slice(0, 160)}`, ev.isError);
-      break;
-    case "approval_request":
-      $("approval-desc").textContent = ev.description;
-      $("approval-input").textContent = JSON.stringify(ev.input, null, 2);
-      $("approval-modal").classList.remove("hidden");
-      $("approve-btn").onclick = () => resolveApproval(ev.approvalId, true);
-      $("deny-btn").onclick = () => resolveApproval(ev.approvalId, false);
-      break;
-    case "refusal":
-      if (liveAssistant) addToolLine(liveAssistant, "the model declined this request", true);
-      break;
-    case "turn_completed":
-      liveAssistant = null;
-      loadSessions();
-      break;
-    case "error":
-      addMsg("assistant", `[error: ${ev.message}]`);
-      break;
+function inline(t) {
+  return esc(t)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+    // Models emit a literal <br> inside table cells; it is escaped above, so
+    // turn the escaped form back into a real break rather than leaving "&lt;br&gt;".
+    .replace(/&lt;br\s*\/?&gt;/g, "<br>");
+}
+
+function renderMarkdown(text) {
+  const lines = String(text).split("\n");
+  const out = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (/^```/.test(line)) {
+      const body = [];
+      i++;
+      while (i < lines.length && !/^```/.test(lines[i])) body.push(lines[i++]);
+      i++;
+      out.push(`<pre class="md-code">${esc(body.join("\n"))}</pre>`);
+      continue;
+    }
+
+    // A table needs its separator row; without it these are just pipes.
+    if (/\|/.test(line) && i + 1 < lines.length && /^[\s|:-]+$/.test(lines[i + 1]) && /-/.test(lines[i + 1])) {
+      const cells = (r) => r.replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+      const head = cells(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && /\|/.test(lines[i])) rows.push(cells(lines[i++]));
+      out.push(
+        `<table class="md-table"><thead><tr>${head.map((h) => `<th>${inline(h)}</th>`).join("")}</tr></thead><tbody>` +
+          rows.map((r) => `<tr>${r.map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`).join("") +
+          "</tbody></table>",
+      );
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,4})\s+(.*)$/);
+    if (heading) {
+      out.push(`<div class="md-h">${inline(heading[2])}</div>`);
+      i++;
+      continue;
+    }
+
+    if (/^\s*[-*•]\s+/.test(line) || /^\s*\d+\.\s+/.test(line)) {
+      const items = [];
+      const ordered = /^\s*\d+\.\s+/.test(line);
+      while (i < lines.length && (/^\s*[-*•]\s+/.test(lines[i]) || /^\s*\d+\.\s+/.test(lines[i]))) {
+        items.push(inline(lines[i].replace(/^\s*(?:[-*•]|\d+\.)\s+/, "")));
+        i++;
+      }
+      out.push(`<${ordered ? "ol" : "ul"} class="md-list">${items.map((t) => `<li>${t}</li>`).join("")}</${ordered ? "ol" : "ul"}>`);
+      continue;
+    }
+
+    if (line.trim() === "") { out.push(""); i++; continue; }
+
+    const para = [];
+    while (i < lines.length && lines[i].trim() !== "" && !/^(#{1,4}\s|```|\s*[-*•]\s|\s*\d+\.\s)/.test(lines[i])) {
+      para.push(lines[i++]);
+    }
+    out.push(`<p class="md-p">${inline(para.join("\n"))}</p>`);
   }
+  return out.join("");
 }
 
-function resolveApproval(approvalId, approved) {
-  ws.send(JSON.stringify({ type: "approval_response", approvalId, approved }));
-  $("approval-modal").classList.add("hidden");
+// ── Stream rendering ───────────────────────────────────────────────────
+
+let liveBubble = null;
+let liveTool = null;
+
+function addMessage(role, text) {
+  $("#stream").querySelector(".empty")?.remove();
+  const wrap = el("div", `msg ${role}`);
+  const bubble = el("div", "bubble");
+  if (role === "assistant") {
+    bubble.dataset.raw = text;
+    bubble.innerHTML = renderMarkdown(text);
+  } else {
+    bubble.textContent = text;
+  }
+  wrap.append(bubble);
+  $("#stream").append(wrap);
+  scroll();
+  return bubble;
 }
 
-$("new-session").onclick = async () => {
-  const row = await (await fetch("/api/sessions", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).json();
-  openSession(row.id);
-};
+function addTool(name, input) {
+  $("#stream").querySelector(".empty")?.remove();
+  const d = el("details", "tool");
+  const s = el("summary");
+  s.append(el("code", null, name), el("span", "st", "running…"));
+  d.append(s, el("pre", null, JSON.stringify(input ?? {}, null, 2)));
+  $("#stream").append(d);
+  scroll();
+  liveTool = d;
+  return d;
+}
 
-$("composer").onsubmit = (e) => {
-  e.preventDefault();
-  const text = $("input").value.trim();
-  if (!text || !sessionId || !ws || ws.readyState !== 1) return;
-  addMsg("user", text);
-  ws.send(JSON.stringify({ type: "user_message", sessionId, text }));
-  $("input").value = "";
-};
+function finishTool(summary, isError) {
+  const d = liveTool ?? $("#stream").querySelector(".tool:last-of-type");
+  if (!d) return;
+  d.querySelector(".st").textContent = isError ? "error" : "done";
+  if (isError) d.classList.add("err");
+  const out = el("pre", null, String(summary ?? ""));
+  out.style.color = isError ? "var(--bad)" : "var(--ink-2)";
+  d.append(out);
+  liveTool = null;
+  scroll();
+}
 
-$("input").addEventListener("keydown", (e) => {
+function scroll() {
+  const s = $("#stream");
+  s.scrollTop = s.scrollHeight;
+}
+
+// ── WebSocket ──────────────────────────────────────────────────────────
+
+function setConn(on, label) {
+  $("#pill-conn").innerHTML = `<span class="dot ${on ? "on" : "off"}"></span><span>${label}</span>`;
+}
+
+// Anything sent before the socket opens is queued rather than thrown away.
+// Without this the FIRST message of a fresh session is lost: send() creates the
+// session, connect() starts the socket, and the send lands while the socket is
+// still CONNECTING — which throws InvalidStateError and drops the message
+// silently, with the composer already cleared.
+let outbox = [];
+function wsSend(payload) {
+  const ws = state.ws;
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
+  else outbox.push(payload);
+}
+
+function connect(sessionId) {
+  state.ws?.close();
+  outbox = [];
+  const ws = new WebSocket(`${location.origin.replace(/^http/, "ws")}/ws?session=${sessionId}`);
+  state.ws = ws;
+
+  ws.addEventListener("open", () => {
+    setConn(true, sessionId.slice(0, 16));
+    ws.send(JSON.stringify({ type: "subscribe", sessionId }));
+    const queued = outbox;
+    outbox = [];
+    for (const p of queued) ws.send(JSON.stringify(p));
+  });
+  ws.addEventListener("close", () => setConn(false, "offline"));
+  ws.addEventListener("error", () => setConn(false, "error"));
+
+  ws.addEventListener("message", (ev) => {
+    const e = JSON.parse(ev.data);
+    switch (e.type) {
+      case "turn_started":
+        state.turnRunning = true;
+        $("#send").disabled = true;
+        liveBubble = null;
+        break;
+      case "text_delta":
+        if (!liveBubble) liveBubble = addMessage("assistant", "");
+        liveBubble.dataset.raw = (liveBubble.dataset.raw || "") + e.text;
+        liveBubble.innerHTML = renderMarkdown(liveBubble.dataset.raw);
+        scroll();
+        break;
+      case "tool_call":
+        liveBubble = null;
+        addTool(e.toolName, e.input);
+        break;
+      case "tool_result":
+        finishTool(e.summary, e.isError);
+        break;
+      case "approval_request":
+        askApproval(e);
+        break;
+      case "turn_completed":
+        state.turnRunning = false;
+        $("#send").disabled = false;
+        liveBubble = null;
+        loadSessions();
+        break;
+      case "error":
+        addMessage("assistant", `⚠ ${e.message}`);
+        state.turnRunning = false;
+        $("#send").disabled = false;
+        break;
+    }
+  });
+}
+
+// ── Approvals ──────────────────────────────────────────────────────────
+
+function askApproval(e) {
+  state.pendingApproval = e.approvalId;
+  $("#approve-why").textContent = `${e.toolName} — ${e.description || "this action needs confirmation"}`;
+  $("#approve-input").textContent = JSON.stringify(e.input ?? {}, null, 2);
+  $("#approve-scrim").classList.add("show");
+}
+function respondApproval(approved) {
+  if (!state.pendingApproval) return;
+  wsSend({ type: "approval_response", approvalId: state.pendingApproval, approved });
+  state.pendingApproval = null;
+  $("#approve-scrim").classList.remove("show");
+}
+$("#approve-yes").addEventListener("click", () => respondApproval(true));
+$("#approve-no").addEventListener("click", () => respondApproval(false));
+
+// ── Composer ───────────────────────────────────────────────────────────
+
+const input = $("#input");
+input.addEventListener("input", () => {
+  input.style.height = "auto";
+  input.style.height = `${Math.min(input.scrollHeight, 190)}px`;
+});
+input.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
-    $("composer").requestSubmit();
+    send();
   }
 });
+$("#send").addEventListener("click", send);
 
-loadSessions();
+async function send() {
+  const text = input.value.trim();
+  if (!text || state.turnRunning) return;
+  if (!state.sessionId) await newSession();
+  addMessage("user", text);
+  input.value = "";
+  input.style.height = "auto";
+  wsSend({ type: "user_message", sessionId: state.sessionId, text });
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────
+
+(async function boot() {
+  await Promise.all([loadOverview(), loadModules(), loadSessions()]);
+})();
