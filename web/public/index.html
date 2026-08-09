@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AetheraClaw — RCM Console</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<div class="app">
+
+  <div class="brand">
+    <div class="mark">A</div>
+    <div>
+      <h1>AetheraClaw</h1>
+      <small>RCM Console</small>
+    </div>
+  </div>
+
+  <div class="topbar">
+    <div class="ticker" id="ticker"></div>
+    <span class="spacer"></span>
+    <span class="pill click" id="btn-palette">Search tools <span class="kbd">Ctrl K</span></span>
+    <div class="sysbar">
+      <span class="pill" id="pill-provider"><span class="dot"></span><b>—</b></span>
+      <span class="pill" id="pill-tools">—</span>
+      <span class="pill" id="pill-driver">—</span>
+      <span class="pill" id="pill-conn"><span class="dot idle"></span><span>connecting…</span></span>
+    </div>
+  </div>
+
+  <aside class="rail">
+    <nav>
+      <div class="navgroup">Operations</div>
+      <div class="navitem active" data-view="overview"><span class="g">⬡</span> Dashboard</div>
+      <div class="navitem" data-view="console"><span class="g">▶</span> Console</div>
+      <div class="navitem" data-domain="claims"><span class="g">▣</span> Claims queue</div>
+      <div class="navitem" data-domain="worklist"><span class="g">☰</span> Worklist</div>
+      <div class="navitem" data-domain="mail"><span class="g">✉</span> Inbound mail</div>
+
+      <div class="navgroup">Scrub &amp; compliance</div>
+      <div class="navitem" data-domain="presubmit"><span class="g">◫</span> Pre-submit gate</div>
+      <div class="navitem" data-domain="em"><span class="g">◐</span> E/M risk studio</div>
+      <div class="navitem" data-domain="ncci"><span class="g">⛒</span> NCCI / MUE rules</div>
+
+      <div class="navgroup">Financials</div>
+      <div class="navitem" data-domain="money"><span class="g">▤</span> Remittance 835</div>
+      <div class="navitem" data-domain="variance"><span class="g">◊</span> Underpayment variance</div>
+      <div class="navitem" data-domain="denials"><span class="g">▽</span> Denials &amp; appeals</div>
+      <div class="navitem" data-domain="cob"><span class="g">⇉</span> COB engine</div>
+
+      <div class="navgroup">Ops &amp; support</div>
+      <div class="navitem" data-domain="trace"><span class="g">⇢</span> Claim lifecycle trace</div>
+      <div class="navitem" data-domain="fmea"><span class="g">⚙</span> FMEA diagnostics</div>
+      <div class="navitem" data-domain="patch"><span class="g">◔</span> Database patch preview</div>
+      <div class="navitem" data-domain="telemetry"><span class="g">◈</span> System telemetry</div>
+      <div class="navitem" data-view="modules"><span class="g">▦</span> All modules <span class="count" id="c-modules"></span></div>
+      <div class="navitem" data-view="workbench"><span class="g">◫</span> Workbench</div>
+      <div class="navitem" data-view="providers"><span class="g">◉</span> Providers &amp; keys</div>
+
+    </nav>
+    <div class="sectionlabel">Sessions</div>
+    <div class="scroll" id="session-list"></div>
+    <div class="footer" id="foot">—</div>
+  </aside>
+
+  <main class="main">
+
+    <!-- Overview ------------------------------------------------------ -->
+    <section class="view active" id="view-overview">
+      <div class="pad">
+        <h2 class="title">Revenue cycle, end to end</h2>
+        <p class="sub">
+          An agent with <b id="ov-total">—</b> deterministic tools across <b id="ov-modcount">—</b> modules: coding and coverage,
+          claim build and scrub, remittance and variance, denials and appeals, forecasting, compliance and audit.
+          Every rule is a tested pure function — the model chooses which to run, it does not invent the answer.
+        </p>
+
+        <div class="banner">
+          <b>Not for real PHI.</b> Coding education, code and policy lookup, and de-identified or synthetic examples only.
+          The agent is instructed to refuse real patient identifiers.
+        </div>
+
+        <h3 class="section">Runtime</h3>
+        <div class="stats" id="ov-runtime"></div>
+
+        <h3 class="section">In this database</h3>
+        <div class="stats" id="ov-counts"></div>
+
+        <div id="ov-kpi-wrap" hidden>
+          <h3 class="section">Revenue cycle</h3>
+          <div class="stats" id="ov-kpis"></div>
+          <p class="overview-note" id="ov-kpi-note"></p>
+        </div>
+
+        <h3 class="section">Start here</h3>
+        <div class="grid" id="ov-starters"></div>
+      </div>
+    </section>
+
+    <!-- Modules ------------------------------------------------------- -->
+    <section class="view" id="view-modules">
+      <div class="pad">
+        <h2 class="title">Modules</h2>
+        <p class="sub">Every capability in the system, grouped by the job it belongs to. Select a tool to load a starter prompt into the console.</p>
+        <input class="search" id="module-search" placeholder="Filter modules and tools — try 'denial', 'forecast', 'prior authorization'" />
+        <div id="module-grid"></div>
+      </div>
+    </section>
+
+    <!-- Console ------------------------------------------------------- -->
+    <section class="view" id="view-console">
+      <div class="console">
+        <div class="stream" id="stream">
+          <div class="empty">
+            <div class="big">Ask about codes, coverage, claims, denials or cash.</div>
+            <div>The agent runs real tools and shows every call it makes.</div>
+            <div>Drop in a PDF, Word or Excel file and it will read that too.</div>
+          </div>
+        </div>
+        <div class="composer">
+          <div class="attached" id="attached" hidden></div>
+          <div class="box">
+            <button class="attach" id="attach" title="Attach a PDF, Word, Excel, CSV or text file">📎</button>
+            <input type="file" id="file" multiple hidden
+                   accept=".pdf,.docx,.xlsx,.csv,.txt,.doc,.xls,application/pdf,text/csv,text/plain" />
+            <textarea id="input" rows="1" placeholder="Enter to send · Shift+Enter for a newline · drop a file to read it"></textarea>
+            <button class="btn" id="send">Send</button>
+          </div>
+          <div class="hint" id="hint">Verdicts are computed server-side, where they are tested. Raw telemetry is one toggle away. Anything risky asks first.</div>
+        </div>
+      </div>
+
+      <aside class="canvas" id="canvas" hidden>
+        <div class="canvas-head">
+          <h3 id="canvas-title">Canvas</h3>
+          <button class="btn ghost sm" id="canvas-print" title="Print or save as PDF">Print / PDF</button>
+          <button class="btn ghost sm" id="canvas-close" title="Close the canvas">✕</button>
+        </div>
+        <div class="canvas-body" id="canvas-body"></div>
+      </aside>
+    </section>
+
+    <!-- Providers ----------------------------------------------------- -->
+    <section class="view" id="view-providers">
+      <div class="pad">
+        <h2 class="title">Providers &amp; keys</h2>
+        <p class="sub">
+          Enter a key once and it is stored on this machine, owner-readable only — no environment variable to re-export
+          in every shell. An exported variable still wins where one is set, so a temporary key can override without
+          editing anything.
+        </p>
+
+        <div class="banner">
+          <b>Keys are never shown again.</b> This screen displays a mask, and the gateway never sends a stored key back to
+          the browser. Values are also stripped from every tool result, so the agent cannot read them out of the file.
+        </div>
+
+        <div id="prov-warnings"></div>
+
+        <h3 class="section">Configured providers</h3>
+        <div id="prov-list"></div>
+
+        <h3 class="section">Local model server</h3>
+        <p class="sub">
+          Ollama, LM Studio, llama.cpp and vLLM all speak the same API, so any of them works with no key at all —
+          and nothing leaves this machine, which is the reason to prefer one for anything touching a real document.
+        </p>
+        <button class="btn ghost" id="prov-scan">Scan for a local server</button>
+        <div id="prov-local"></div>
+      </div>
+    </section>
+
+    <!-- Workbench ----------------------------------------------------- -->
+    <section class="view" id="view-workbench">
+      <div class="pad">
+        <h2 class="title">Workbench</h2>
+        <p class="sub">Structured screens that do not need a conversation.</p>
+        <div class="grid">
+          <a class="card click" href="/review.html">
+            <div class="head"><div class="glyph">▦</div><h4>Coding Review Queue</h4></div>
+            <p>Accept, edit or reject suggested codes. A reason is required to change or refuse one, and every decision appends to a log that is never rewritten.</p>
+          </a>
+          <a class="card click" href="/superbill.html">
+            <div class="head"><div class="glyph">▣</div><h4>Charge Capture</h4></div>
+            <p>Build a clean claim from a structured form — diagnosis pointers are derived from the codes each line names, then it is ready to scrub.</p>
+          </a>
+        </div>
+        <h3 class="section">Not yet built</h3>
+        <p class="sub">
+          The analytics dashboard, the forecast fan chart and the swarm supervisor board were planned and never built as pages.
+          Their tools exist and work — <code>analytics_query</code>, <code>forecast_chart</code>, <code>swarm_board</code> — so they are reachable from the console today.
+        </p>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- Tool detail ------------------------------------------------------- -->
+<div class="scrim" id="tool-scrim">
+  <div class="modal">
+    <div class="mhead" id="tool-title">tool</div>
+    <div class="mbody">
+      <p id="tool-desc" style="margin:0 0 12px;color:var(--ink-2);line-height:1.6"></p>
+      <pre id="tool-schema"></pre>
+    </div>
+    <div class="mfoot">
+      <button class="btn ghost" data-close>Close</button>
+      <button class="btn" id="tool-use">Use in console</button>
+    </div>
+  </div>
+</div>
+
+<!-- Approval ---------------------------------------------------------- -->
+<div class="scrim" id="approve-scrim">
+  <div class="modal">
+    <div class="mhead">Approval required</div>
+    <div class="mbody">
+      <p id="approve-why" style="margin:0 0 12px;color:var(--ink-2);line-height:1.6"></p>
+      <pre id="approve-input"></pre>
+    </div>
+    <div class="mfoot">
+      <button class="btn ghost" id="approve-no">Deny</button>
+      <button class="btn" id="approve-yes">Approve</button>
+    </div>
+  </div>
+</div>
+
+<!-- Palette ----------------------------------------------------------- -->
+<div class="scrim" id="palette-scrim">
+  <div class="modal">
+    <input class="search" id="palette-input" placeholder="Search tools…" autocomplete="off" />
+    <div class="mbody" id="palette-results" style="padding:8px"></div>
+  </div>
+</div>
+
+<script src="/views.js"></script>
+<script src="/app.js"></script>
+<!-- Loaded last and on purpose: voice.js reads app.js's globals and the
+     `aethera:event` seam. It removes itself quietly when speech is disabled. -->
+<script src="/voice.js"></script>
+</body>
+</html>

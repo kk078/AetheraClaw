@@ -1,0 +1,59 @@
+name: CI
+
+# A push to a branch WITH an open pull request fires both events, and the first
+# version of this file listened to both — so every push ran the whole suite twice,
+# on two runners, for one commit. Push is scoped to the long-lived branches;
+# everything else is covered by the pull_request event, which is the run whose
+# result appears on the PR anyway.
+on:
+  push:
+    branches: [rcm-base, main]
+  pull_request:
+
+# A second push to the same branch cancels the first — the older run's result is
+# about code nobody is looking at any more.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      # `npm ci` rather than `npm install`: it installs the lockfile exactly and
+      # fails if package.json and the lock disagree, which is the difference
+      # between testing what will ship and testing whatever resolved today.
+      - run: npm ci
+        env:
+          # Nothing in this suite drives a browser, and the download is ~150 MB
+          # per run. The payer-portal tools are exercised against a mocked
+          # Playwright, so skipping the binaries costs no coverage.
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+      - run: npx tsc --noEmit
+
+      # Type-check the tests too. The main config excludes test/ (it must not
+      # reach dist), so a test drifting out of sync with the code it exercises
+      # would otherwise stay green — vitest transpiles per file and never checks
+      # types across the project.
+      - run: npm run typecheck:test
+
+      - run: npm test
+
+      # The suite runs against better-sqlite3's prebuilt binary. node:sqlite is
+      # the fallback every install without one lands on, and it has caught real
+      # differences before — a transaction shim that worked on one driver and
+      # not the other. Running both is what makes the fallback a supported path
+      # rather than an untested claim.
+      - run: npm test
+        env:
+          AETHERACLAW_SQLITE: node
+
+      - run: npm run build

@@ -1,0 +1,531 @@
+<title>Voice intelligence roadmap — AetheraClaw</title>
+<style>
+  /* Palette: cool slate neutrals biased toward the teal accent, taken from the
+     product's own console rather than invented for the page. Amber marks the
+     tier rails; a single muted red marks the "not building" list. */
+  :root {
+    --ground: #F5F7F7;
+    --surface: #FFFFFF;
+    --rule: #DBE3E3;
+    --ink: #101A1D;
+    --ink-2: #48595E;
+    --ink-3: #7C8E93;
+    --accent: #0B6F79;
+    --accent-soft: #E2F0F0;
+    --amber: #9A5B08;
+    --amber-soft: #FAF0E0;
+    --stop: #8C3A3A;
+    --shadow: 0 1px 2px rgb(16 26 29 / .05), 0 8px 24px rgb(16 26 29 / .05);
+
+    --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+    --sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --mono: ui-monospace, 'SF Mono', SFMono-Regular, 'Cascadia Code', Menlo, Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0C1315;
+      --surface: #121C1F;
+      --rule: #26363A;
+      --ink: #E8EFEF;
+      --ink-2: #A3B5B9;
+      --ink-3: #6E8288;
+      --accent: #4FD1C5;
+      --accent-soft: #14312F;
+      --amber: #E2A33C;
+      --amber-soft: #2C2211;
+      --stop: #E08585;
+      --shadow: 0 1px 2px rgb(0 0 0 / .3), 0 8px 24px rgb(0 0 0 / .28);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #0C1315;
+    --surface: #121C1F;
+    --rule: #26363A;
+    --ink: #E8EFEF;
+    --ink-2: #A3B5B9;
+    --ink-3: #6E8288;
+    --accent: #4FD1C5;
+    --accent-soft: #14312F;
+    --amber: #E2A33C;
+    --amber-soft: #2C2211;
+    --stop: #E08585;
+    --shadow: 0 1px 2px rgb(0 0 0 / .3), 0 8px 24px rgb(0 0 0 / .28);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 60rem;
+    margin: 0 auto;
+    padding: clamp(2rem, 5vw, 4.5rem) clamp(1.1rem, 4vw, 2.5rem) 5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 3.25rem;
+  }
+
+  /* ── Masthead ─────────────────────────────────────────────────────── */
+  .masthead { display: flex; flex-direction: column; gap: 1.15rem; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: .7rem;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  h1 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: clamp(2rem, 5.5vw, 3.1rem);
+    line-height: 1.08;
+    letter-spacing: -.015em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    font-family: var(--serif);
+    font-size: clamp(1.05rem, 2.1vw, 1.25rem);
+    line-height: 1.5;
+    color: var(--ink-2);
+    max-width: 46ch;
+    margin: 0;
+  }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: .72rem;
+    color: var(--ink-3);
+  }
+  .meta b { color: var(--ink-2); font-weight: 500; }
+
+  /* ── Section scaffolding ──────────────────────────────────────────── */
+  section { display: flex; flex-direction: column; gap: 1.5rem; }
+
+  .sec-head {
+    display: grid;
+    grid-template-columns: 3.25rem 1fr;
+    align-items: baseline;
+    gap: .75rem;
+    padding-bottom: .85rem;
+    border-bottom: 2px solid var(--ink);
+  }
+
+  .tier-no {
+    font-family: var(--mono);
+    font-size: .78rem;
+    font-weight: 600;
+    letter-spacing: .04em;
+    color: var(--accent);
+  }
+
+  h2 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: clamp(1.35rem, 3vw, 1.75rem);
+    line-height: 1.2;
+    margin: 0;
+    letter-spacing: -.01em;
+  }
+
+  .sec-note {
+    grid-column: 2;
+    font-size: .9rem;
+    color: var(--ink-2);
+    max-width: 60ch;
+    margin: 0;
+  }
+
+  /* ── Shipped table ────────────────────────────────────────────────── */
+  .scroller { overflow-x: auto; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .875rem;
+    min-width: 34rem;
+  }
+  thead th {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: .68rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-weight: 500;
+    padding: 0 .9rem .6rem 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  tbody td {
+    padding: .7rem .9rem .7rem 0;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+    color: var(--ink-2);
+  }
+  tbody td:first-child { color: var(--ink); }
+  tbody tr:last-child td { border-bottom: 0; }
+  td code {
+    font-family: var(--mono);
+    font-size: .78rem;
+    color: var(--accent);
+    word-break: break-word;
+  }
+
+  /* ── Item cards ───────────────────────────────────────────────────── */
+  .items { display: flex; flex-direction: column; gap: 1rem; }
+
+  .item {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    border-radius: 3px;
+    padding: 1.2rem 1.35rem;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    gap: .6rem;
+  }
+  .item.amber { border-left-color: var(--amber); }
+
+  .item-head { display: flex; align-items: baseline; gap: .7rem; }
+  .item-no {
+    font-family: var(--mono);
+    font-size: .78rem;
+    font-weight: 600;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+    flex: none;
+  }
+  h3 {
+    font-family: var(--sans);
+    font-size: 1.02rem;
+    font-weight: 600;
+    line-height: 1.35;
+    margin: 0;
+    letter-spacing: -.005em;
+  }
+
+  .item p { margin: 0; font-size: .925rem; color: var(--ink-2); max-width: 68ch; }
+  .item p strong { color: var(--ink); font-weight: 600; }
+
+  .plug {
+    font-family: var(--mono);
+    font-size: .72rem;
+    color: var(--ink-3);
+    padding-top: .55rem;
+    border-top: 1px dashed var(--rule);
+    word-break: break-word;
+  }
+  .plug span { color: var(--accent); }
+
+  /* ── Not building ─────────────────────────────────────────────────── */
+  .stops { display: flex; flex-direction: column; gap: .9rem; }
+  .stop-item {
+    display: grid;
+    grid-template-columns: 1.2rem 1fr;
+    gap: .7rem;
+    font-size: .92rem;
+    color: var(--ink-2);
+    max-width: 72ch;
+  }
+  .stop-mark { color: var(--stop); font-family: var(--mono); font-weight: 600; }
+  .stop-item strong { color: var(--ink); font-weight: 600; }
+
+  footer {
+    border-top: 1px solid var(--rule);
+    padding-top: 1.25rem;
+    font-size: .82rem;
+    color: var(--ink-3);
+    max-width: 68ch;
+  }
+
+  a { color: var(--accent); }
+  a:focus-visible, .item:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  @media (max-width: 34rem) {
+    .sec-head { grid-template-columns: 1fr; gap: .35rem; }
+    .sec-note { grid-column: 1; }
+  }
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <div class="eyebrow">AetheraClaw · voice</div>
+    <h1>Making the voice interface genuinely intelligent</h1>
+    <p class="standfirst">
+      Every item below plugs into a module this codebase already has. The ones that
+      pay off reuse the domain logic that is already written and tested here, rather
+      than bolting a general-purpose assistant onto the side of a billing system.
+    </p>
+    <div class="meta">
+      <span><b>Branch</b> claude/openclaw-functionalities-xljw65</span>
+      <span><b>Commit</b> 7bd4270</span>
+      <span><b>Suite</b> 2,122 tests · both SQLite drivers</span>
+      <span><b>Tools</b> 226</span>
+    </div>
+  </header>
+
+  <section>
+    <div class="sec-head">
+      <div class="tier-no">TIER 0</div>
+      <h2>Shipped in this change</h2>
+      <p class="sec-note">
+        The foundation the rest of the roadmap builds on. Verified live, not just
+        green: the normalization endpoint against real remittance markdown, and
+        deep research against cms.gov.
+      </p>
+    </div>
+    <div class="scroller">
+      <table>
+        <thead>
+          <tr><th scope="col">Capability</th><th scope="col">Where it lives</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Three selectable engines — browser, local Whisper + Piper, cloud vendor</td><td><code>src/speech/providers/</code></td></tr>
+          <tr><td>Push-to-talk default, opt-in wake word, barge-in, Escape to stop</td><td><code>web/public/voice.js</code></td></tr>
+          <tr><td>Codes spoken digit-wise; money, dates, RCM initialisms; markdown to speech</td><td><code>src/speech/speakable.ts</code></td></tr>
+          <tr><td>Spoken transcript back to a canonical code</td><td><code>src/speech/spoken-codes.ts</code></td></tr>
+          <tr><td>Consent naming the real audio destination per engine</td><td><code>web/public/voice.js</code></td></tr>
+          <tr><td>Spoken approvals that fall through to the screen when ambiguous</td><td><code>web/public/voice.js</code></td></tr>
+          <tr><td>Cited multi-source research and payer-policy impact matching</td><td><code>src/research/</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="tier-no">TIER 1</div>
+      <h2>Highest value per unit of work</h2>
+      <p class="sec-note">Ordered by how much each one improves the experience against how much has to be built.</p>
+    </div>
+    <div class="items">
+
+      <article class="item">
+        <div class="item-head"><span class="item-no">01</span><h3>Snap heard codes to codes that actually exist</h3></div>
+        <p>
+          The biggest accuracy win available, and it needs no new data — 74,706 ICD-10
+          codes, 9,435 HCPCS and the MPFS table are <strong>already installed</strong>.
+          When the recognizer returns something code-shaped, validate it against those
+          tables and snap to the nearest valid code, then <strong>refuse when two
+          candidates are equally close</strong> rather than picking one. A silently
+          substituted code is the worst failure this interface can have; "did you mean
+          99213 or 99214?" is the correct behaviour.
+        </p>
+        <div class="plug"><span>plugs into</span> src/speech/spoken-codes.ts → src/tools/healthcare/datasets.ts</div>
+      </article>
+
+      <article class="item">
+        <div class="item-head"><span class="item-no">02</span><h3>Bias the recognizer with the practice's own vocabulary</h3></div>
+        <p>
+          Every engine takes a hint list — Deepgram keyterms, OpenAI's prompt, Whisper's
+          <code>--prompt</code>, SpeechGrammarList in the browser. Build it from the codes
+          this practice actually bills, its payer names and its rendering providers.
+          Generic speech recognition has never heard of "Availity" or "J1885"; a hinted
+          recognizer gets both right.
+        </p>
+        <div class="plug"><span>plugs into</span> claim history in the store → each provider's transcribe call</div>
+      </article>
+
+      <article class="item">
+        <div class="item-head"><span class="item-no">03</span><h3>Speak the first sentence while the rest is still generating</h3></div>
+        <p>
+          Perceived latency is dominated by waiting for a complete answer before any
+          sound. Chunk the <code>text_delta</code> stream by sentence, normalize and speak
+          each chunk as it closes. Turns a six-second silence into a 700 ms one and
+          costs no model change.
+        </p>
+        <div class="plug"><span>plugs into</span> the text_delta handler in web/public/voice.js</div>
+      </article>
+
+      <article class="item">
+        <div class="item-head"><span class="item-no">04</span><h3>Spoken tool narration</h3></div>
+        <p>
+          <code>tool_call</code> already streams. Saying "checking NCCI edits" while a scrub
+          runs is the difference between a system that seems hung and one that seems to be
+          working. One clause, the tool's human label, and never the arguments.
+        </p>
+        <div class="plug"><span>plugs into</span> the tool_call event, already on the wire</div>
+      </article>
+
+      <article class="item amber">
+        <div class="item-head"><span class="item-no">05</span><h3>Run the PHI gate on the transcript, before the model sees it</h3></div>
+        <p>
+          The identifier gate exists for documents and the access log exists. A spoken
+          member ID currently reaches the model unexamined. Run the same scan on every
+          transcript, redact at the same choke point, and log the access. <strong>This is
+          the item that decides whether voice is usable anywhere near real data.</strong>
+        </p>
+        <div class="plug"><span>plugs into</span> src/tenancy/access-log.ts · src/ingest/ identifier scan</div>
+      </article>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="tier-no">TIER 2</div>
+      <h2>Intelligent rather than merely hands-free</h2>
+      <p class="sec-note">Where it stops being dictation and starts being a colleague.</p>
+    </div>
+    <div class="items">
+
+      <article class="item">
+        <div class="item-head"><span class="item-no">06</span><h3>Screen-aware reference resolution</h3></div>
+        <p>
+          "Appeal <strong>that</strong> one." Voice without visual context cannot resolve
+          it. The console already renders structured tool views and a canvas; pass the
+          active view and the current selection into the turn so pronouns resolve to the
+          row on screen. This is the single change that separates conversation from
+          command entry.
+        </p>
+        <div class="plug"><span>plugs into</span> ToolView + canvas state → the turn payload</div>
+      </article>
+
+      <article class="item">
+        <div class="item-head"><span class="item-no">07</span><h3>Worklist mode</h3></div>
+        <p>
+          A denial worklist read one item at a time, with "appeal it", "next", "skip" and
+          "why was it denied" as the entire vocabulary. This is the actual productivity
+          story — a coder with both hands in a chart clearing a worklist by voice — and
+          every underlying tool already exists.
+        </p>
+        <div class="plug"><span>plugs into</span> worklist_ and appeal_draft tools, composed</div>
+      </article>
+
+      <article class="item">
+        <div class="item-head"><span class="item-no">08</span><h3>Brief mode, and knowing when to use it</h3></div>
+        <p>
+          A spoken answer should be the verdict, not the essay. Add a verbosity setting
+          and default spoken replies to headline-plus-number, with "tell me more"
+          expanding. <code>speakableSummary()</code> already does the hard part.
+        </p>
+        <div class="plug"><span>plugs into</span> src/speech/speakable.ts</div>
+      </article>
+
+      <article class="item">
+        <div class="item-head"><span class="item-no">09</span><h3>Speculative lookups while the user is still talking</h3></div>
+        <p>
+          Interim recognition results arrive before the utterance ends. When an interim
+          transcript already contains an unambiguous code, start the read-only lookup
+          immediately and discard it if the final transcript disagrees. Safe by
+          construction, because it is restricted to safe-risk tools.
+        </p>
+        <div class="plug"><span>plugs into</span> interim results → assessRisk === "safe" tools only</div>
+      </article>
+
+      <article class="item">
+        <div class="item-head"><span class="item-no">10</span><h3>Voice-first morning briefing</h3></div>
+        <p>
+          The KPI, aging, timely-filing and policy-watch tools all exist. A spoken
+          two-minute briefing — "three claims hit timely filing inside five days, one
+          payer changed a policy on a code you bill" — is the highest-value proactive use
+          of speech in this product, and it is mostly composition.
+        </p>
+        <div class="plug"><span>plugs into</span> kpi_dashboard · timely_filing_ · research_payer_policy</div>
+      </article>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="tier-no">TIER 3</div>
+      <h2>Larger projects, worth naming</h2>
+      <p class="sec-note">Real scope. Listed so they are decisions rather than surprises.</p>
+    </div>
+    <div class="items">
+
+      <article class="item amber">
+        <div class="item-head"><span class="item-no">11</span><h3>Ambient encounter capture to superbill</h3></div>
+        <p>
+          Listening to a clinical encounter and producing coded output is the most
+          valuable thing voice can do in healthcare, and it is a different product:
+          per-state consent, retention, accuracy liability, and a real PHI mode. The
+          documentation-native CDI module is the right foundation — but do not start here.
+        </p>
+        <div class="plug"><span>plugs into</span> src/voice/consent.ts (all-party states already modelled)</div>
+      </article>
+
+      <article class="item amber">
+        <div class="item-head"><span class="item-no">12</span><h3>Speaker verification before destructive actions</h3></div>
+        <p>
+          A voice interface removes the keyboard as an implicit authentication factor.
+          Anything that submits a claim or writes to a payer should require a confirmed
+          speaker, or fall back to the screen.
+        </p>
+        <div class="plug"><span>plugs into</span> the approval choke point in the tool registry</div>
+      </article>
+
+      <article class="item">
+        <div class="item-head"><span class="item-no">13</span><h3>On-device wake word</h3></div>
+        <p>
+          Continuous speech recognition to detect one phrase is expensive and, off the
+          machine, an exposure. A dedicated wake-word model fixes both, and is what would
+          let always-on mode run under the local and cloud engines instead of browser only.
+        </p>
+        <div class="plug"><span>plugs into</span> the wake-word path in web/public/voice.js</div>
+      </article>
+
+      <article class="item">
+        <div class="item-head"><span class="item-no">14</span><h3>Voice cases in the eval harness</h3></div>
+        <p>
+          The harness already measures tool selection. Extend it to speech: word error
+          rate on a healthcare phrase set, code-recognition accuracy, and tool selection
+          from <em>spoken</em> input. A low score is the finding, not a reason to tune the
+          cases — the same discipline the existing harness already holds.
+        </p>
+        <div class="plug"><span>plugs into</span> src/eval/cases.ts</div>
+      </article>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="tier-no">—</div>
+      <h2>What I would not build</h2>
+    </div>
+    <div class="stops">
+      <div class="stop-item">
+        <span class="stop-mark">✕</span>
+        <span><strong>Reading tables aloud.</strong> Already prevented in the normalizer. A spoken table is noise — say the headline and highlight the row on screen.</span>
+      </div>
+      <div class="stop-item">
+        <span class="stop-mark">✕</span>
+        <span><strong>Voice as the only route to an approval.</strong> The dialog stays the authority; speech is a second way to answer it, never a replacement for seeing what is about to run.</span>
+      </div>
+      <div class="stop-item">
+        <span class="stop-mark">✕</span>
+        <span><strong>Always-on by default.</strong> A hot microphone in a room where patients are discussed records the room, not the request.</span>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    Engine choice decides where audio goes: only the local engine keeps it on the
+    machine. The browser engine sends captured audio to Google and the cloud engine to
+    a vendor — both are fine for the de-identified posture this build declares, and
+    wrong for anything else.
+  </footer>
+
+</div>
