@@ -493,7 +493,20 @@ documents
   .action((opts: { olderThan?: string; session?: string; yes?: boolean }) => {
     const config = loadConfig();
     const { store } = resolveStore(config);
-    const olderThanMs = opts.olderThan ? Date.now() - Number(opts.olderThan) * 86_400_000 : undefined;
+    // Validate before computing a cutoff. A non-numeric value like "30d" made
+    // Number() return NaN, so `!olderThanMs` was true (deleting EVERYTHING) and
+    // the cutoff was dropped as falsy, purging every document during a run meant
+    // to trim ones older than 30 days — an irreversible delete of the only copy.
+    let olderThanMs: number | undefined;
+    if (opts.olderThan !== undefined) {
+      const days = Number(opts.olderThan);
+      if (!Number.isFinite(days) || days < 0) {
+        console.error(`--older-than must be a number of days (e.g. 30), got "${opts.olderThan}". Nothing was deleted.`);
+        process.exitCode = 1;
+        return;
+      }
+      olderThanMs = Date.now() - days * 86_400_000;
+    }
 
     // A dry run by default. This deletes the only copy of text somebody may
     // still need, and the flag costs one word.

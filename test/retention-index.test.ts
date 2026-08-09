@@ -142,16 +142,24 @@ describe("dataset cache invalidation", () => {
       { cpt_hcpcs: "0469T", units: 1, modifiers: [] },
     ];
 
+    const mueFile = path.join(process.env.AETHERACLAW_HOME!, "data", "mue.json");
     expect(checkNcci([], lines)).toEqual([]);
     expect(ncciDataNotice()).not.toBeNull();
 
     fs.writeFileSync(file, JSON.stringify({ "99214": { "0469T": "0" } }));
     expect(checkNcci([], lines).map((f) => f.rule)).toContain("ncci-ptp-no-bypass");
+    // PTP is now installed, but the notice is granular: it still flags the
+    // missing MUE table rather than reporting all-clear.
+    expect(ncciDataNotice()?.message).toMatch(/mue\.json/);
+
+    // With both installed, the notice clears.
+    fs.writeFileSync(mueFile, JSON.stringify({ "99214": { units: 1, mai: "3" } }));
     expect(ncciDataNotice()).toBeNull();
 
     // And back again, so a moved or deleted file does not leave the scrubber
     // reporting edits it can no longer read.
     fs.rmSync(file);
+    fs.rmSync(mueFile);
     expect(checkNcci([], lines)).toEqual([]);
     expect(ncciDataNotice()).not.toBeNull();
   });

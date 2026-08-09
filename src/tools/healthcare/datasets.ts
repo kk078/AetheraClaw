@@ -119,11 +119,21 @@ export function checkNcci(
  * not about a date group, so it belongs at the claim level and is emitted once.
  */
 export function ncciDataNotice(): ScrubFinding | null {
-  if (ncciIndex() || mueTable()) return null;
+  const hasPtp = Boolean(ncciIndex());
+  const hasMue = Boolean(mueTable());
+  if (hasPtp && hasMue) return null;
+  // Granular, not all-or-nothing. checkNcci runs the two families
+  // independently, so with only ncci-ptp.json installed the unit edits were
+  // silently skipped while the notice — suppressed because PTP WAS present —
+  // said nothing, and a unit overage scrubbed to a clean PASS. Name exactly what
+  // could not be checked.
+  const missing: string[] = [];
+  if (!hasPtp) missing.push("ncci-ptp.json (procedure-to-procedure bundling)");
+  if (!hasMue) missing.push("mue.json (medically-unlikely unit edits)");
   return {
     severity: "info",
     rule: "ncci-data",
-    message: `NCCI/MUE data not installed — drop ncci-ptp.json / mue.json (from public CMS files) into ${dataDir()} for bundling & unit edits`,
+    message: `Not installed: ${missing.join(" and ")} — drop the public CMS file(s) into ${dataDir()}. What is missing was NOT checked here; a clean result for it means "not checked", not "no edit".`,
   };
 }
 

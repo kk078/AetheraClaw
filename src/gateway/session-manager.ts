@@ -35,7 +35,13 @@ export class SessionManager {
   }
 
   subscribe(sessionId: string, ws: WebSocket): void {
-    this.state(sessionId).subscribers.add(ws);
+    const subs = this.state(sessionId).subscribers;
+    if (subs.has(ws)) return; // already subscribed — do not stack another close listener
+    subs.add(ws);
+    // One close listener per socket, not one per subscribe. The gateway calls
+    // subscribe on connect, on each "subscribe" message, AND on every
+    // "user_message", so a chatty tab accumulated a listener per message until
+    // Node warned about a leak and memory climbed for the life of the connection.
     ws.on("close", () => this.state(sessionId).subscribers.delete(ws));
   }
 
