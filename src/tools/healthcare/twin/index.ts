@@ -49,7 +49,12 @@ function payerStats(store: MemoryStore, payer: string): { stats: PayerStats | nu
       claims++;
       if (claim.statusCode === "4") denied++;
       for (const line of claim.lines) {
-        if (line.procedure === "(claim level)") continue;
+        // Claim-level adjustments (the synthetic "(claim level)" line) are KEPT:
+        // a payer that denies at claim level — timely-filing CARC 29, CO-16 —
+        // otherwise showed in the playbook as denials with an empty reasons list,
+        // while calibration (actualOutcomes) folds those same claim-level CARCs in
+        // and scored the twin against them. The briefing and the scoring must read
+        // the same remittance the same way.
         for (const a of line.adjustments) {
           if (a.group === "PR") continue;
           const slot = carcs.get(a.carc) ?? { count: 0, amount: 0 };

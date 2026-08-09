@@ -120,6 +120,13 @@ const MATCHERS: Matcher[] = [
       const count = m[1] ? readCount(m[1]) : 1;
       const unitWord = (m[3] ?? "").toLowerCase();
       if (!Number.isFinite(count) || count <= 0) return null;
+      // The interval multiplier ("per 10 years") was captured but never read, so
+      // "one per 10 years" drafted as 1-per-year — a rule 10× more permissive than
+      // the policy. The DSL period is a single day/month/year/lifetime, so a
+      // multi-period limit is genuinely unencodable: return null and let it be
+      // surfaced as an UnparsedObligation rather than silently drafted wrong.
+      const interval = m[2] ? Number(m[2]) : 1;
+      if (Number.isFinite(interval) && interval > 1) return null;
       const period: PolicyRule["period"] | null = /lifetime/.test(unitWord)
         ? "lifetime"
         : /year/.test(unitWord)

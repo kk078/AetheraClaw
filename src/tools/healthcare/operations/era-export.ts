@@ -75,7 +75,10 @@ export function toPostingRows(eras: Array<{ era: Era }>): PostingRow[] {
           modifiers: isClaimLevel ? "" : procedureModifiers(line.procedure).join(" "),
           units: derived.units,
           charged: derived.charged,
-          allowed: derived.allowed,
+          // A claim-level synthetic line has no service, so there is no allowed
+          // amount to compute — deriveAllowed's paid+PR+sequestration formula
+          // would show a spurious positive allowed on a row with no charge.
+          allowed: isClaimLevel ? 0 : derived.allowed,
           paid: derived.paid,
           patientResponsibility: derived.patientResponsibility,
           contractual: derived.contractual,
@@ -83,7 +86,11 @@ export function toPostingRows(eras: Array<{ era: Era }>): PostingRow[] {
           carcs: line.adjustments.map((a) => `${a.group}-${a.carc}`).join(" "),
           rarcs: line.rarcs.join(" "),
           claimStatus: CLAIM_STATUS[claim.statusCode] ?? claim.statusCode,
-          balanced: derived.balanced ? "yes" : "NO",
+          // A claim-level row (charge 0, an adjustment amount) cannot satisfy
+          // charge = paid + adjustments by construction — same as a PLB row. "n/a"
+          // rather than "NO" so era_export does not send the operator hunting to
+          // reconcile a row that was never a balance check.
+          balanced: isClaimLevel ? "n/a" : derived.balanced ? "yes" : "NO",
         });
       }
     }

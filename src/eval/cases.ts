@@ -92,8 +92,8 @@ export const CASES: EvalCase[] = [
   {
     id: "wrvu",
     prompt: "How many work RVUs did Dr Chen generate last month?",
-    expect: ["analytics_query", "kpi_dashboard", "tool_search"],
-    why: "There is no wRVU report yet, so the honest outcome is reaching for the analytics that do exist — or saying it cannot be computed. Answering with a number from prose reasoning is the failure.",
+    expect: ["wrvu_report", "analytics_query", "kpi_dashboard", "tool_search"],
+    why: "W5 shipped wrvu_report, the purpose-built tool — calling it is the best outcome; analytics_query/kpi_dashboard are acceptable fallbacks. Answering with a number from prose reasoning is the failure.",
   },
 
   // ── Codes and coverage ─────────────────────────────────────────────────────

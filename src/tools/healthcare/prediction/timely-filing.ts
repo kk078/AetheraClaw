@@ -82,12 +82,21 @@ export function payerKey(payer: string): string {
 export function resolveWindow(payer: string, table: Record<string, FilingWindow>): FilingWindow | null {
   const key = payerKey(payer);
   if (table[key]) return table[key];
-  // Longest key first so "medicareadvantage" wins over "medicare".
-  const candidates = Object.keys(table).sort((a, b) => b.length - a.length);
-  for (const candidate of candidates) {
-    if (key.includes(payerKey(candidate))) return table[candidate];
+  // Match against the LABEL as well as the key. The seeded keys are
+  // abbreviations ("uhc", "bcbs") that are not substrings of the real payer
+  // names in 835 N1*PR segments ("UnitedHealthcare", "Blue Cross Blue Shield"),
+  // so key-only matching left the two shortest, most dangerous commercial windows
+  // (UHC 90d, BCBS 180d) unreachable by their own names. Each candidate's needles
+  // are its key and its normalized label; the longest matching needle wins so
+  // "medicareadvantage" still beats "medicare".
+  const needlesOf = (w: FilingWindow, k: string) => [payerKey(k), w.label ? payerKey(w.label) : ""].filter(Boolean);
+  let best: { window: FilingWindow; len: number } | null = null;
+  for (const [k, win] of Object.entries(table)) {
+    for (const needle of needlesOf(win, k)) {
+      if (key.includes(needle) && (!best || needle.length > best.len)) best = { window: win, len: needle.length };
+    }
   }
-  return null;
+  return best?.window ?? null;
 }
 
 function toYmd(d: Date): string {

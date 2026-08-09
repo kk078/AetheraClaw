@@ -121,7 +121,13 @@ export function indexHistory(outcomes: LineOutcome[]): HistoryIndex {
     bump(index.byPayerCode, key(o.payer, o.code), o.denied);
     bump(index.byCode, key(o.code), o.denied);
     bump(index.byPayer, key(o.payer), o.denied);
-    if (o.carcs.some((c) => PRIOR_AUTH_CARCS.has(c))) {
+    // Only a DENIED line with a prior-auth CARC is a prior-auth denial. A paid
+    // line carrying CO-197 on a partially-authorized balance is not — counting it
+    // let authDenials (subtracted from the cell's real denials downstream)
+    // exceed, or come from a different population than, those denials, pulling the
+    // risk estimate wrong and rendering "1 of this payer's N denial(s) … were for
+    // a missing authorization" for denials that were not auth-related.
+    if (o.denied && o.carcs.some((c) => PRIOR_AUTH_CARCS.has(c))) {
       bump(index.priorAuthSeen, key(o.payer, o.code), true);
     }
   }

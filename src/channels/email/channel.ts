@@ -88,14 +88,27 @@ export class EmailChannel implements Channel {
     const watermark = this.deps.store.db
       .prepare("SELECT MAX(CAST(uid AS INTEGER)) AS uid FROM inbound_mail WHERE mailbox = ?")
       .get(mailbox) as { uid: number | null } | undefined;
+    const priorValidity = this.deps.store.db
+      .prepare("SELECT uidvalidity FROM mailbox_poll_state WHERE mailbox = ?")
+      .get(mailbox) as { uidvalidity: string | null } | undefined;
 
     const fetcher = this.deps.fetch ?? fetchInbox;
-    const { messages } = await fetcher(creds, {
+    const { messages, uidValidity } = await fetcher(creds, {
       mailbox,
       sinceUid: watermark?.uid ?? undefined,
       limit: email.maxPerPoll,
       fromFilters: email.fromFilters,
+      expectedUidValidity: priorValidity?.uidvalidity ?? undefined,
     });
+    // Record the mailbox's current UIDVALIDITY so the next poll can detect a
+    // reset. If it changed, fetchInbox already re-scanned from the start.
+    if (uidValidity) {
+      this.deps.store.db
+        .prepare(
+          "INSERT INTO mailbox_poll_state (mailbox, uidvalidity, updated_at) VALUES (?, ?, ?) ON CONFLICT(mailbox) DO UPDATE SET uidvalidity = excluded.uidvalidity, updated_at = excluded.updated_at",
+        )
+        .run(mailbox, uidValidity, Date.now());
+    }
     if (messages.length === 0) return 0;
 
     const insert = this.deps.store.db.prepare(

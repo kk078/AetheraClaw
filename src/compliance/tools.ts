@@ -26,9 +26,10 @@ function db(ctx: Ctx) {
 }
 
 
-function insertRule(ctx: Ctx, rule: PolicyRule): void {
+/** Returns true if the row was written; false when the ON CONFLICT guard made it a no-op. */
+function insertRule(ctx: Ctx, rule: PolicyRule): boolean {
   const now = Date.now();
-  db(ctx)
+  const result = db(ctx)
     .prepare(
       `INSERT INTO policy_rules (id, kind, codes_json, diagnoses_json, modifiers_json, pos_json, max_units, period,
          severity, message, payer, status, source_document, source_citation, source_quote, source_effective,
@@ -62,6 +63,7 @@ function insertRule(ctx: Ctx, rule: PolicyRule): void {
       now,
       now,
     );
+  return result.changes > 0;
 }
 
 export const policyCompileTool = defineTool({
@@ -93,27 +95,35 @@ export const policyCompileTool = defineTool({
       idPrefix,
     });
 
+    let stored = 0;
+    const collided: string[] = [];
     if (input.save) {
       for (const draft of result.drafts) {
         const { basis: _basis, ...rule } = draft as DraftRule;
-        insertRule(ctx, rule);
+        // insertRule is a no-op when its id already holds a non-draft (accepted)
+        // rule. Because ids are positional, a revised document with an inserted
+        // paragraph shifts every later rule onto an id an accepted rule holds — so
+        // a genuinely new obligation would be dropped while the tool claimed it
+        // was stored. Count what actually landed and name what collided.
+        if (insertRule(ctx, rule)) stored++;
+        else collided.push(rule.id);
       }
       appendAudit(ctx.services.store as MemoryStore, {
         kind: "rule_change",
         actor: "policy_compile",
-        summary: `Drafted ${result.drafts.length} rule(s) from ${input.document}`,
-        payload: { document: input.document, ids: result.drafts.map((d) => d.id) },
+        summary: `Drafted ${stored} rule(s) from ${input.document}`,
+        payload: { document: input.document, ids: result.drafts.map((d) => d.id), stored, collided },
       });
     }
 
+    const savedLine = !input.save
+      ? "Nothing was stored. Re-run with save: true to queue these for review."
+      : collided.length === 0
+        ? `${stored} draft(s) stored. Review them with policy_rule_list, then policy_rule_review to accept or reject each one.`
+        : `${stored} of ${result.drafts.length} draft(s) stored. ${collided.length} were NOT stored because their id already holds an accepted rule (ids: ${collided.join(", ")}) — most likely the document was revised and paragraphs shifted. Those obligations were NOT captured; re-run with a fresh idPrefix, or review the accepted rules against this revision by hand.`;
+
     return {
-      content: [
-        renderCompileResult(result, input.document),
-        "",
-        input.save
-          ? `${result.drafts.length} draft(s) stored. Review them with policy_rule_list, then policy_rule_review to accept or reject each one.`
-          : "Nothing was stored. Re-run with save: true to queue these for review.",
-      ].join("\n"),
+      content: [renderCompileResult(result, input.document), "", savedLine].join("\n"),
     };
   },
 });

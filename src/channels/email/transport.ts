@@ -45,11 +45,22 @@ export interface FetchOptions {
   limit: number;
   /** Restrict to senders matching any of these substrings. */
   fromFilters: string[];
+  /**
+   * The UIDVALIDITY the stored watermark was recorded under. IMAP UIDs are only
+   * monotonic within a fixed UIDVALIDITY; a mailbox recreation/restore/migration
+   * bumps it and resets UIDs to low numbers. When it no longer matches, the old
+   * watermark points at UIDs that no longer exist and would filter out every
+   * genuinely-new (low-UID) message forever — so a mismatch re-scans from the
+   * start.
+   */
+  expectedUidValidity?: string;
 }
 
 export interface FetchResult {
   messages: InboundMessage[];
   highestUid: number;
+  /** The mailbox's current UIDVALIDITY, for the caller to persist alongside the watermark. */
+  uidValidity: string;
 }
 
 function senderAllowed(from: string, filters: string[]): boolean {
@@ -72,15 +83,28 @@ export async function fetchInbox(creds: MailboxCredentials, opts: FetchOptions):
 
   await client.connect();
   const lock = await client.getMailboxLock(opts.mailbox);
+  let uidValidity = "";
   try {
-    const range = `${(opts.sinceUid ?? 0) + 1}:*`;
+    const mb = client.mailbox as { uidValidity?: unknown } | boolean;
+    uidValidity = mb && typeof mb === "object" && mb.uidValidity != null ? String(mb.uidValidity) : "";
+    // If UIDVALIDITY changed since the watermark was recorded, the watermark is
+    // meaningless — start over from UID 1 and do not filter on the stale sinceUid.
+    const validityChanged =
+      opts.expectedUidValidity !== undefined &&
+      opts.expectedUidValidity !== "" &&
+      uidValidity !== "" &&
+      opts.expectedUidValidity !== uidValidity;
+    const sinceUid = validityChanged ? undefined : opts.sinceUid;
+    if (validityChanged) highestUid = 0;
+
+    const range = `${(sinceUid ?? 0) + 1}:*`;
     for await (const msg of client.fetch({ uid: range }, { uid: true, source: true }, { uid: true })) {
       if (typeof msg.uid === "number" && msg.uid > highestUid) highestUid = msg.uid;
       if (!msg.source) continue;
       // A `uid: n:*` range always returns at least the newest message even when
       // nothing is newer than n, so anything at or below the watermark is a
       // message we have already seen.
-      if (opts.sinceUid !== undefined && typeof msg.uid === "number" && msg.uid <= opts.sinceUid) continue;
+      if (sinceUid !== undefined && typeof msg.uid === "number" && msg.uid <= sinceUid) continue;
 
       const parsed = await simpleParser(msg.source);
       const from = parsed.from?.text ?? "";
@@ -100,7 +124,7 @@ export async function fetchInbox(creds: MailboxCredentials, opts: FetchOptions):
     await client.logout();
   }
 
-  return { messages, highestUid };
+  return { messages, highestUid, uidValidity };
 }
 
 export interface OutboundMessage {

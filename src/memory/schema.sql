@@ -236,6 +236,15 @@ CREATE TABLE IF NOT EXISTS inbound_mail (
 
 CREATE INDEX IF NOT EXISTS idx_inbound_mail_status ON inbound_mail(status, received_at);
 
+-- Per-mailbox poll state. UIDVALIDITY is tracked so a mailbox recreation/restore
+-- (which resets IMAP UIDs to low numbers) is detected: without it the stale
+-- high-water UID silently filtered out every fresh low-UID message forever.
+CREATE TABLE IF NOT EXISTS mailbox_poll_state (
+  mailbox TEXT PRIMARY KEY,
+  uidvalidity TEXT NOT NULL DEFAULT '',
+  updated_at INTEGER NOT NULL DEFAULT 0
+);
+
 -- Outbound replies are drafted, approved, and only then sent. The draft is kept
 -- so what was sent is recoverable independently of the mail server.
 CREATE TABLE IF NOT EXISTS outbound_mail (
