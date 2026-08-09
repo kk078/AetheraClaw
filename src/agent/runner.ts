@@ -7,6 +7,7 @@ import type { ToolContext } from "../tools/types.js";
 import { withCard } from "../views/verdict.js";
 import { isPlumbing, previewCard } from "../views/workflow.js";
 import type { AgentEvent } from "../shared/events.js";
+import { knownSecretValues } from "../config/credentials.js";
 import { buildSystemPrompt, catalogueBlock } from "./system-prompt.js";
 import { truncateToBudget } from "./context-window.js";
 
@@ -60,6 +61,10 @@ export async function runTurn(deps: RunnerDeps, sessionId: string, userText: str
 
   const ctx: ToolContext = {
     workspaceRoot: config.workspaceRoot,
+    // Resolved once per turn rather than per call: the values do not change
+    // mid-turn, and reading the credentials file on every tool execution would
+    // be a file read per call for a list that is almost always empty.
+    secrets: knownSecretValues().map((value) => ({ value, label: "api-key" })),
     sessionId,
     approvalPolicy: config.approvalPolicy,
     requestApproval: deps.requestApproval,

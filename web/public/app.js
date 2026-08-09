@@ -23,6 +23,10 @@ function show(view) {
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${view}`));
   document.querySelectorAll(".navitem").forEach((n) => n.classList.toggle("active", n.dataset.view === view));
   if (view === "console") $("#input").focus();
+  // Loaded on open rather than at boot: it reads the credentials file, and
+  // there is no reason to touch that on every page load of a console nobody
+  // opened the settings screen from.
+  if (view === "providers") loadProviders();
 }
 /**
  * Domain nav items load a starter prompt into the console.
@@ -1005,3 +1009,108 @@ $("#canvas-close")?.addEventListener("click", () => {
 // reproduce something every browser already does well would be a dependency
 // earning nothing, and the print stylesheet already isolates the artifact.
 $("#canvas-print")?.addEventListener("click", () => window.print());
+
+// ── Providers & keys ───────────────────────────────────────────────────────
+// Entering a key in the console rather than a terminal. The screen shows a
+// MASK and nothing else: the gateway never sends a stored key back, so there is
+// no value in the DOM to end up in a screenshot or a browser's memory.
+
+async function loadProviders() {
+  const data = await fetch("/api/providers").then((r) => r.json()).catch(() => null);
+  if (!data) return;
+
+  const warn = $("#prov-warnings");
+  warn.replaceChildren();
+  for (const w of data.warnings || []) warn.append(el("div", "banner warn", w));
+
+  const list = $("#prov-list");
+  list.replaceChildren();
+  for (const p of data.providers) {
+    const row = el("div", `provrow${p.active ? " active" : ""}`);
+
+    const head = el("div", "provhead");
+    head.append(el("b", null, p.name));
+    if (p.active) head.append(el("span", "vbadge clear", "ACTIVE"));
+    head.append(el("span", "provmodel", p.model));
+    head.append(el("span", "provcap", `${p.toolCap} tools direct`));
+    row.append(head);
+
+    const state = el("div", "provstate");
+    if (p.source === "env") {
+      state.append(el("span", "provkey", p.masked));
+      // Named explicitly: a key entered here would be silently ignored while
+      // the variable is exported, and the only symptom is a 401.
+      state.append(el("span", "provnote", `from ${p.envVar} — the environment wins, so a key entered here stays unused until you unset it`));
+    } else if (p.source === "file") {
+      state.append(el("span", "provkey", p.masked));
+      state.append(el("span", "provnote", "stored on this machine"));
+    } else {
+      state.append(el("span", "provnote", p.name === "ollama" ? "no key needed for a local server" : "no key configured"));
+    }
+    row.append(state);
+
+    const form = el("div", "provform");
+    const input = el("input", "search");
+    input.type = "password";
+    input.placeholder = p.source === "none" ? `Paste a ${p.name} API key` : `Replace the ${p.name} key`;
+    input.autocomplete = "off";
+    const save = el("button", "btn sm", "Save");
+    const msg = el("span", "provmsg");
+
+    save.addEventListener("click", async () => {
+      const key = input.value.trim();
+      if (!key) return;
+      save.disabled = true;
+      const res = await fetch("/api/providers/key", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider: p.name, key }),
+      });
+      const out = await res.json();
+      // Cleared immediately whatever happened — a key left in an input is a key
+      // in the DOM for as long as the tab is open.
+      input.value = "";
+      save.disabled = false;
+      msg.textContent = res.ok ? `saved ${out.masked}${out.warning ? ` — ${out.warning}` : ""}` : `failed: ${out.error}`;
+      if (res.ok) setTimeout(loadProviders, 900);
+    });
+    form.append(input, save, msg);
+
+    if (p.source === "file") {
+      const del = el("button", "btn ghost sm", "Remove");
+      del.addEventListener("click", async () => {
+        await fetch(`/api/providers/key/${p.name}`, { method: "DELETE" });
+        loadProviders();
+      });
+      form.append(del);
+    }
+    row.append(form);
+    list.append(row);
+  }
+
+  const foot = el("p", "sub");
+  foot.textContent = `Stored in ${data.credentialsPath} (mode 600). Changing the ACTIVE provider needs a restart: aetheraclaw serve --provider <name>.`;
+  list.append(foot);
+}
+
+$("#prov-scan")?.addEventListener("click", async () => {
+  const box = $("#prov-local");
+  box.replaceChildren(el("p", "sub", "Scanning 127.0.0.1…"));
+  const { servers } = await fetch("/api/providers/local").then((r) => r.json()).catch(() => ({ servers: [] }));
+  box.replaceChildren();
+  if (!servers.length) {
+    box.append(el("p", "sub", "Nothing listening on the Ollama, LM Studio, llama.cpp, vLLM or text-generation-webui ports. Start one — `ollama serve` is the usual choice."));
+    return;
+  }
+  for (const s of servers) {
+    const row = el("div", "provrow");
+    const head = el("div", "provhead");
+    head.append(el("b", null, s.name), el("span", "provmodel", s.baseUrl));
+    row.append(head);
+    row.append(el("div", "provnote", s.models.length ? s.models.join(", ") : (s.note || "no models reported")));
+    const cmd = el("code", "provcmd", `aetheraclaw auth local --base-url ${s.baseUrl}${s.models[0] ? ` --model ${s.models[0]}` : ""}`);
+    row.append(cmd);
+    box.append(row);
+  }
+  box.append(el("p", "sub", "Run the command above, then restart the gateway. It is a CLI step because switching the active provider restarts the agent loop, and a settings screen that silently does that loses whatever turn was in flight."));
+});

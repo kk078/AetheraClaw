@@ -9,7 +9,7 @@ import type { MemoryStore } from "../memory/store.js";
 import { SessionManager } from "./session-manager.js";
 import { ClientMessageSchema } from "./ws-protocol.js";
 import { groupIntoModules } from "../tools/modules.js";
-import { PROFILES, selectTools } from "../tools/profiles.js";
+import { PROFILES, PROVIDER_TOOL_LIMITS, selectTools } from "../tools/profiles.js";
 import { resolveOllamaTarget } from "../providers/openai.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { computeExecutiveKpis } from "../reports/kpi.js";
@@ -17,6 +17,9 @@ import { loadAcks } from "../reports/kpi-tools.js";
 import { loadClaims, loadEras } from "../reports/tools.js";
 import { extractDocument } from "../ingest/extract.js";
 import { saveDocument } from "../ingest/store.js";
+import { credentialsPath, loadCredentials, maskKey, removeCredential, resolveKey, setCredential, shapeWarning } from "../config/credentials.js";
+import { discoverLocal } from "../providers/discover.js";
+import type { ProviderName } from "../config/config.js";
 
 /**
  * Above this many rows, the overview does not compute KPIs.
@@ -250,6 +253,59 @@ export async function buildServer(opts: {
       notes: doc.notes,
     };
   });
+
+
+  // ── Providers and keys ─────────────────────────────────────────────────────
+  // Entering a key in the console rather than a terminal. Two rules hold here:
+  // a key is never sent BACK (the mask is all the UI ever sees), and the routes
+  // exist only because the gateway binds 127.0.0.1 — this is a local settings
+  // screen, not an admin API.
+
+  app.get("/api/providers", async () => {
+    const { credentials, warnings } = loadCredentials();
+    const rows = (["anthropic", "openai", "gemini", "ollama"] as const).map((name) => {
+      const r = resolveKey(name, { store: credentials });
+      return {
+        name,
+        source: r.source,
+        masked: r.key ? maskKey(r.key) : "",
+        envVar: r.envVar,
+        model: name === "ollama" ? resolveOllamaTarget(config.providers.ollama, process.env.OLLAMA_API_KEY).model : config.providers[name].model,
+        active: config.provider === name,
+        // Stated per provider because it is the one thing that genuinely differs
+        // between them, and the UI should not imply otherwise.
+        toolCap: PROVIDER_TOOL_LIMITS[name],
+      };
+    });
+    return { providers: rows, warnings, credentialsPath: credentialsPath() };
+  });
+
+  app.post("/api/providers/key", async (req, reply) => {
+    const body = (req.body ?? {}) as { provider?: string; key?: string; note?: string };
+    const name = String(body.provider ?? "") as ProviderName;
+    if (!["anthropic", "openai", "gemini", "ollama"].includes(name)) {
+      return reply.code(400).send({ error: "unknown provider" });
+    }
+    const key = String(body.key ?? "").trim();
+    if (!key) return reply.code(400).send({ error: "empty key" });
+
+    const warning = shapeWarning(name, key);
+    setCredential(name, key, body.note);
+    // The mask goes back, never the key. A settings screen that echoes the
+    // value it just stored puts it in the DOM, in a screenshot, and in the
+    // browser's memory for as long as the tab is open.
+    return { ok: true, masked: maskKey(key), warning: warning ?? "" };
+  });
+
+  app.delete("/api/providers/key/:provider", async (req, reply) => {
+    const { provider } = req.params as { provider: string };
+    if (!["anthropic", "openai", "gemini", "ollama"].includes(provider)) {
+      return reply.code(400).send({ error: "unknown provider" });
+    }
+    return { ok: true, removed: removeCredential(provider as ProviderName) };
+  });
+
+  app.get("/api/providers/local", async () => ({ servers: await discoverLocal() }));
 
   app.get("/ws", { websocket: true }, (socket, req) => {
     const url = new URL(req.url ?? "/ws", "http://localhost");

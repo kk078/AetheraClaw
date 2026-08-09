@@ -2,7 +2,7 @@
 import { Command } from "commander";
 import path from "node:path";
 import fs from "node:fs";
-import { loadConfig, configDir, apiKeyFor, envVarFor, expandHome, resolveProvider } from "../config/config.js";
+import { loadConfig, configDir, apiKeyFor, envVarFor, expandHome, resolveProvider, type ProviderName } from "../config/config.js";
 import { PROFILES, PROVIDER_TOOL_LIMITS, renderProfiles, selectTools } from "../tools/profiles.js";
 import { resolveOllamaTarget } from "../providers/openai.js";
 import { createProvider } from "../providers/index.js";
@@ -135,6 +135,11 @@ import {
 import { SessionManager } from "../gateway/session-manager.js";
 import { buildServer } from "../gateway/server.js";
 import { listDocuments, purgeDocuments } from "../ingest/store.js";
+import { ALL_PROVIDERS, evaluateSet, importFromEnv, promptHidden, renderList } from "./auth.js";
+import { credentialsPath, knownSecretValues, maskKey, removeCredential, setCredential } from "../config/credentials.js";
+import { redactSecrets } from "../config/secrets.js";
+import { discoverLocal, renderDiscovery } from "../providers/discover.js";
+import { writeLocalProvider } from "../config/write.js";
 import { startChat } from "./chat.js";
 import { buildRegistry } from "../tools/build-registry.js";
 import { resolveStore, tenancyRoot } from "../tenancy/resolve.js";
@@ -498,6 +503,170 @@ documents
     const r = purgeDocuments(store, { ...(olderThanMs ? { olderThanMs } : {}), ...(opts.session ? { sessionId: opts.session } : {}) });
     console.log(`Deleted ${r.deleted} document(s), ${r.charactersRemoved.toLocaleString()} characters of extracted text.`);
     console.log("Each delete is recorded in the PHI access log and anchored to the audit chain.");
+  });
+
+
+// ── auth ─────────────────────────────────────────────────────────────────────
+// Keys used to arrive only as environment variables, which means re-exporting
+// them in every shell and on every reboot — and the commonest way people make
+// that stick is pasting a key into a dotfile that later gets committed.
+
+const auth = program.command("auth").description("Provider API keys and local model servers");
+
+auth
+  .command("set [provider]")
+  .description("Store an API key for a provider (prompts without echoing)")
+  .option("--key <key>", "the key, non-interactively — WARNING: this lands in your shell history")
+  .option("--note <text>", "a reminder of which key this is")
+  .option("--all", "walk through every provider in turn")
+  .action(async (provider: string | undefined, opts: { key?: string; note?: string; all?: boolean }) => {
+    const targets = opts.all ? ALL_PROVIDERS : provider ? [provider as ProviderName] : [];
+    if (targets.length === 0) {
+      console.error("Name a provider, or pass --all. Choices: " + ALL_PROVIDERS.join(", "));
+      process.exit(2);
+    }
+    for (const p of targets) {
+      if (!ALL_PROVIDERS.includes(p)) {
+        console.error(`Unknown provider "${p}". Choices: ${ALL_PROVIDERS.join(", ")}`);
+        process.exit(2);
+      }
+    }
+    if (opts.key && targets.length > 1) {
+      console.error("--key sets one provider; drop --all or set them one at a time.");
+      process.exit(2);
+    }
+
+    for (const p of targets) {
+      let key = opts.key ?? "";
+      if (opts.key) {
+        console.log("! --key was given on the command line, so this key is now in your shell history.");
+        console.log(`  Clear it, or prefer the prompt: aetheraclaw auth set ${p}`);
+      } else {
+        if (p === "ollama") {
+          console.log("Ollama needs a key ONLY for Ollama Cloud. For a local server leave this blank and press Enter.");
+        }
+        key = await promptHidden(`${p} API key (input hidden, Enter to skip): `);
+        if (!key) {
+          console.log(`  skipped ${p}`);
+          continue;
+        }
+      }
+      const outcome = evaluateSet(p, key);
+      for (const m of outcome.messages) console.log(`  ${m}`);
+      if (!outcome.stored) continue;
+      setCredential(p, key, opts.note);
+      console.log(`  stored ${p} (${maskKey(key)}) in ${credentialsPath()}`);
+    }
+    console.log("\nNothing above printed your key back. `aetheraclaw auth list` shows the mask.");
+  });
+
+auth
+  .command("list")
+  .description("Which providers have a key, where it came from, and nothing more of it")
+  .action(() => console.log(renderList()));
+
+auth
+  .command("remove <provider>")
+  .description("Delete a stored key")
+  .action((provider: string) => {
+    if (!ALL_PROVIDERS.includes(provider as ProviderName)) {
+      console.error(`Unknown provider "${provider}". Choices: ${ALL_PROVIDERS.join(", ")}`);
+      process.exit(2);
+    }
+    const gone = removeCredential(provider as ProviderName);
+    console.log(gone ? `Removed the stored ${provider} key.` : `No stored key for ${provider}.`);
+    const still = process.env[provider === "anthropic" ? "ANTHROPIC_API_KEY" : `${provider.toUpperCase()}_API_KEY`];
+    if (still) console.log("Note: an environment variable still provides a key for this provider in this shell.");
+  });
+
+auth
+  .command("import-env")
+  .description("Store every key already exported in this shell, so you can delete the exports")
+  .action(() => {
+    const { imported, skipped } = importFromEnv();
+    if (imported.length === 0) {
+      console.log("No provider keys are exported in this shell, so nothing was imported.");
+      return;
+    }
+    console.log(`Imported: ${imported.join(", ")}`);
+    if (skipped.length) console.log(`Not set in this environment: ${skipped.join(", ")}`);
+    console.log(`\nStored in ${credentialsPath()} (mode 600).`);
+    console.log("The environment still WINS while those variables are exported — remove them from your shell profile to use the stored copies.");
+  });
+
+auth
+  .command("discover")
+  .description("Find a local model server — Ollama, LM Studio, llama.cpp, vLLM")
+  .option("--host <host>", "host to probe (default 127.0.0.1)")
+  .action(async (opts: { host?: string }) => {
+    const servers = await discoverLocal(opts.host ?? "127.0.0.1");
+    console.log(renderDiscovery(servers));
+  });
+
+auth
+  .command("local")
+  .description("Point AetheraClaw at a local model server and make it the active provider")
+  .option("--base-url <url>", "OpenAI-compatible base URL, e.g. http://127.0.0.1:11434/v1")
+  .option("--model <name>", "model the server should serve")
+  .action(async (opts: { baseUrl?: string; model?: string }) => {
+    let baseUrl = opts.baseUrl;
+    let model = opts.model;
+
+    // Discover rather than demand: if the user did not say, look, and only ask
+    // when looking found nothing.
+    if (!baseUrl) {
+      const servers = await discoverLocal();
+      if (servers.length === 0) {
+        console.error(renderDiscovery(servers));
+        process.exit(1);
+      }
+      baseUrl = servers[0].baseUrl;
+      model = model ?? servers[0].models[0];
+      console.log(`Found ${servers[0].name} at ${baseUrl}.`);
+    }
+    if (!model) {
+      console.error("No model named, and the server reported none. Pull or load a model, then pass --model.");
+      process.exit(1);
+    }
+
+    writeLocalProvider(baseUrl, model);
+    console.log(`Config updated: provider "ollama", model "${model}", baseUrl "${baseUrl}".`);
+    console.log("No key is stored — a local server needs none, and nothing leaves this machine.");
+    console.log("\nStart it with: aetheraclaw serve");
+  });
+
+auth
+  .command("test [provider]")
+  .description("Actually call the provider and report what came back")
+  .action(async (provider: string | undefined) => {
+    const config = loadConfig();
+    const targets = provider ? [provider as ProviderName] : ALL_PROVIDERS.filter((p) => Boolean(apiKeyFor(p)) || p === "ollama");
+    if (targets.length === 0) {
+      console.log("No provider has a key. Add one with `aetheraclaw auth set <provider>`.");
+      return;
+    }
+    for (const p of targets) {
+      const started = Date.now();
+      try {
+        const prov = createProvider({ ...config, provider: p }, p);
+        let text = "";
+        for await (const ev of prov.streamTurn({
+          system: "Reply with the single word: ready",
+          messages: [{ role: "user", content: [{ type: "text", text: "ready?" }] }],
+          tools: [],
+          maxTokens: 32,
+        })) {
+          if (ev.type === "text_delta") text += ev.text;
+        }
+        console.log(`  ${p.padEnd(10)} OK    ${Date.now() - started}ms  ${JSON.stringify(text.trim().slice(0, 40))}`);
+      } catch (err) {
+        // The message can carry the key in a URL or a header echo, so it goes
+        // through the same scrub that protects tool output.
+        const raw = err instanceof Error ? err.message : String(err);
+        const msg = redactSecrets(raw, knownSecretValues().map((value) => ({ value, label: "api-key" })));
+        console.log(`  ${p.padEnd(10)} FAIL  ${Date.now() - started}ms  ${msg.slice(0, 160)}`);
+      }
+    }
   });
 
 const reference = program.command("reference").description("Manage the attached reference code database");

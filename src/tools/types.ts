@@ -29,6 +29,15 @@ export interface ToolContext {
    * context; two concurrent turns get two contexts.
    */
   callDepth?: number;
+  /**
+   * Secret values to scrub from every tool result before it reaches the model.
+   *
+   * Carried on the context rather than read from disk inside the registry, so
+   * the registry keeps no config dependency and a test can supply its own.
+   * Empty or absent means no scrubbing — which is correct for a deployment that
+   * stores no keys, and is why this is optional rather than defaulted.
+   */
+  secrets?: Array<{ value: string; label: string }>;
   services: Record<string, unknown>; // shared handles (db, config, …) for domain tools
 }
 

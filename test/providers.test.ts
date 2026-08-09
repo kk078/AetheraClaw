@@ -408,7 +408,10 @@ describe("provider resolution", () => {
     // than failing.
     const r = resolveProvider(cfg("ollama"), { explicit: "openai", env: { OLLAMA_API_KEY: "k" } });
     expect(r.provider).toBe("openai");
-    expect(r.error).toMatch(/OPENAI_API_KEY is not set/);
+    // Both ways in, because a key can now be stored as well as exported and an
+    // error naming only the variable sends the user to the harder of the two.
+    expect(r.error).toMatch(/auth set openai/);
+    expect(r.error).toMatch(/OPENAI_API_KEY/);
   });
 
   it("accepts an explicit provider that does have a key", () => {

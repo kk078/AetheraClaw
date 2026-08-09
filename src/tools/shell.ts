@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { z } from "zod";
 import { defineTool } from "./registry.js";
+import { mentionsSecretFile } from "../config/secrets.js";
 
 // Read-only command prefixes that are auto-approved under "unsafe-only" policy.
 const SAFE_PREFIXES = [
@@ -27,6 +28,15 @@ export function assessCommandRisk(command: string): { level: "safe" | "confirm";
   const trimmed = command.trim();
   for (const pattern of DANGEROUS_PATTERNS) {
     if (pattern.test(trimmed)) return { level: "confirm", reason: `potentially destructive command: ${trimmed}` };
+  }
+
+  // `cat` is on the auto-approved list below, so `cat ~/.aetheraclaw/credentials.json`
+  // used to run with no prompt at all. The VALUES are redacted from the result
+  // either way (see config/secrets.ts), which is the control that actually
+  // holds — but redaction is silent, and a credential read should be something
+  // a person finds out about rather than something contained quietly.
+  if (mentionsSecretFile(trimmed)) {
+    return { level: "confirm", reason: `command names a credentials file: ${trimmed.slice(0, 200)}` };
   }
   const isSafe = SAFE_PREFIXES.some(
     (p) => trimmed === p || (trimmed.startsWith(p) && /[\s]/.test(trimmed.charAt(p.length))),

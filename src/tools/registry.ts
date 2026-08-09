@@ -4,6 +4,7 @@ import { buildCatalog, searchCatalog } from "./catalog.js";
 import type { ToolContext, ToolDefinition, ToolResult } from "./types.js";
 import type { ToolSpec } from "../providers/types.js";
 import { inputShapeOf, outcomeOf, scrubErrorText } from "../support/tool-log.js";
+import { redactSecrets } from "../config/secrets.js";
 
 // ── Unknown-tool recovery ────────────────────────────────────────────────────
 // A model that has been told about `web_search` will sometimes call `search`.
@@ -56,6 +57,16 @@ export class ToolRegistry {
       result = await this.run(name, rawInput, ctx);
     } finally {
       ctx.callDepth = depth;
+    }
+
+    // The one place every tool result passes through, which is why the secret
+    // scrub lives here rather than in the tools that seem likeliest to leak.
+    // `cat` is on the auto-approved list, so before this a credentials file was
+    // readable with no prompt at all — and blocking that one command would only
+    // have moved the problem to `env`, `grep`, or a script that echoes the value.
+    // Redacting the VALUE closes every path at once, including unknown ones.
+    if (ctx.secrets && ctx.secrets.length > 0) {
+      result = { ...result, content: redactSecrets(result.content, ctx.secrets) };
     }
     if (ctx.onToolCall) {
       try {

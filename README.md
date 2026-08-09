@@ -45,10 +45,12 @@ cd AetheraClaw
 npm install
 npm run build
 
-# Set ONE provider key — whichever you have. No provider is privileged.
-export OLLAMA_API_KEY=...                  # Ollama Cloud
-#   or ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY
-#   or none at all, if a local Ollama server is running
+# Add a key — stored on this machine, owner-readable only, entered once.
+node dist/cli/index.js auth set anthropic  # prompts without echoing
+node dist/cli/index.js auth set --all      # walk through every provider
+node dist/cli/index.js auth import-env     # or adopt keys already exported
+node dist/cli/index.js auth discover       # or find a local server and use no key at all
+#   Environment variables still work and still WIN, so a temporary export overrides.
 
 node dist/cli/index.js serve               # starts the gateway + web UI
 # open http://127.0.0.1:4180  — or, in another terminal:
@@ -79,6 +81,69 @@ does.
 `npm run dev` runs the gateway from source via `tsx`. `npm test` runs the whole
 suite offline — no database, no network, no keys — so a green run proves the
 checkout is sound before any provider is configured.
+
+
+### Provider keys, and using a local model
+
+Keys can be entered once and stored, rather than re-exported in every shell:
+
+```bash
+aetheraclaw auth set openai        # hidden prompt; nothing is echoed
+aetheraclaw auth set --all         # every provider in turn
+aetheraclaw auth import-env        # adopt whatever is already exported, then delete the exports
+aetheraclaw auth list              # masks only — a stored key is never printed back
+aetheraclaw auth test              # actually call each configured provider
+aetheraclaw auth remove gemini
+```
+
+They live in `~/.aetheraclaw/credentials.json` at mode 600, **not** in `config.json5`.
+That split is deliberate: `config.json5` is a file people paste into a chat window
+to ask what a setting does, and a key that lived there would go with it. The mode
+is re-checked on every read, because a permission that drifted is the interesting
+case — one that was correct once protects nothing.
+
+An **environment variable always beats a stored key**. The stored one is the
+durable default; an export is a per-run override for CI or a rotation. If the file
+won, an exported key would be silently ignored and the only symptom would be a 401
+from a key the user can see is correct — so `auth set` says so when it detects the
+collision.
+
+**Storing keys on disk creates a path that did not exist when they lived only in
+the environment**, and closing it is part of this feature rather than a follow-up.
+`cat` is on the shell tool's auto-approved list, so `cat ~/.aetheraclaw/credentials.json`
+used to run with **no approval prompt at all**. Blocking that one command would only
+have moved the problem to `env`, `grep -r sk-ant ~`, or a script that echoes the
+value. So the control is on the VALUE, at the single point every tool result passes
+through: a string equal to a live key is replaced with `[REDACTED:api-key]` before
+the model ever sees it. Verified against the real registry with the approval gate
+set to `never` — `cat`, `grep`, `env` and a Python one-liner all came back redacted.
+Commands that name a credentials file are additionally escalated to needing
+approval, because redaction is silent and a credential read should be something a
+person finds out about.
+
+**Local models need no key.** `auth discover` probes Ollama, LM Studio, llama.cpp,
+vLLM and text-generation-webui on their usual ports and reports what each is
+serving; `auth local` points the config at one:
+
+```bash
+aetheraclaw auth discover
+aetheraclaw auth local --base-url http://127.0.0.1:11434/v1 --model qwen3
+```
+
+All five speak the OpenAI-compatible API, which is why they cost a row in a table
+rather than a provider adapter. Nothing leaves the machine — the reason to prefer
+one for anything touching a real document.
+
+The same is available in the console under **Providers & keys**, which shows a mask
+and never receives a stored key back from the gateway.
+
+**Switching providers does not change answers.** Tool results are pure functions of
+their input, so `timely_filing_check`, `denial_explain` and the rest return byte-identical
+output under all four — verified by running them through four separately-built
+registries. What genuinely differs is how many tool definitions fit in one request:
+Anthropic takes 512, OpenAI and Gemini 128, Ollama 64. The overflow is **deferred, not
+dropped** — reachable through `tool_search` / `tool_invoke` — so all 224 tools are usable
+on every provider, and a regression test asserts no provider ever drops one outright.
 
 ### Reference data
 

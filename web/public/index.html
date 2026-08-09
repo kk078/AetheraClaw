@@ -57,6 +57,7 @@
       <div class="navitem" data-domain="telemetry"><span class="g">◈</span> System telemetry</div>
       <div class="navitem" data-view="modules"><span class="g">▦</span> All modules <span class="count" id="c-modules"></span></div>
       <div class="navitem" data-view="workbench"><span class="g">◫</span> Workbench</div>
+      <div class="navitem" data-view="providers"><span class="g">◉</span> Providers &amp; keys</div>
 
     </nav>
     <div class="sectionlabel">Sessions</div>
@@ -139,6 +140,36 @@
         </div>
         <div class="canvas-body" id="canvas-body"></div>
       </aside>
+    </section>
+
+    <!-- Providers ----------------------------------------------------- -->
+    <section class="view" id="view-providers">
+      <div class="pad">
+        <h2 class="title">Providers &amp; keys</h2>
+        <p class="sub">
+          Enter a key once and it is stored on this machine, owner-readable only — no environment variable to re-export
+          in every shell. An exported variable still wins where one is set, so a temporary key can override without
+          editing anything.
+        </p>
+
+        <div class="banner">
+          <b>Keys are never shown again.</b> This screen displays a mask, and the gateway never sends a stored key back to
+          the browser. Values are also stripped from every tool result, so the agent cannot read them out of the file.
+        </div>
+
+        <div id="prov-warnings"></div>
+
+        <h3 class="section">Configured providers</h3>
+        <div id="prov-list"></div>
+
+        <h3 class="section">Local model server</h3>
+        <p class="sub">
+          Ollama, LM Studio, llama.cpp and vLLM all speak the same API, so any of them works with no key at all —
+          and nothing leaves this machine, which is the reason to prefer one for anything touching a real document.
+        </p>
+        <button class="btn ghost" id="prov-scan">Scan for a local server</button>
+        <div id="prov-local"></div>
+      </div>
     </section>
 
     <!-- Workbench ----------------------------------------------------- -->

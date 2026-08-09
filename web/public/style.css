@@ -830,3 +830,19 @@ text.ring-txt { fill: var(--ink); font-size: 15px; font-family: var(--mono); fon
 .view-doc .doc-section summary { cursor: pointer; padding: 9px 11px; font-size: 12px; color: var(--ink-2); }
 .view-doc .doc-text { margin: 0; padding: 0 12px 12px; font: 12px/1.6 var(--mono); color: #cbd5e1;
   white-space: pre-wrap; word-break: break-word; max-height: 460px; overflow: auto; }
+
+/* ── Providers & keys ─────────────────────────────────────────────────────── */
+.provrow { border: 1px solid var(--line); border-radius: 9px; padding: 12px 14px; margin-bottom: 10px; background: rgb(15 23 42 / .35); }
+.provrow.active { border-color: rgb(6 95 70 / .55); }
+.provhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.provhead b { font-size: 13.5px; color: var(--ink); }
+.provmodel { font: 11px var(--mono); color: #94a3b8; }
+.provcap { font: 10px var(--mono); color: #64748b; border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; }
+.provstate { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 9px; }
+.provkey { font: 12px var(--mono); color: #34d399; }
+.provnote { font-size: 12px; color: #94a3b8; line-height: 1.5; }
+.provform { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.provform .search { flex: 1 1 260px; margin: 0; }
+.provmsg { font: 11px var(--mono); color: #fbbf24; }
+.provcmd { display: block; margin-top: 8px; font: 11.5px var(--mono); color: #22d3ee; word-break: break-all; }
+.banner.warn { border-color: rgb(180 83 9 / .55); background: rgb(69 26 3 / .35); color: #fde68a; }

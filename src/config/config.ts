@@ -4,6 +4,7 @@ import path from "node:path";
 import JSON5 from "json5";
 import { z } from "zod";
 import { DEFAULT_CONFIG_JSON5 } from "./defaults.js";
+import { resolveKey } from "./credentials.js";
 
 const ProviderBlock = z.object({
   model: z.string(),
@@ -249,7 +250,7 @@ export function resolveProvider(
       return { provider: config.provider, error: `Unknown provider "${opts.explicit}". Choose one of: ${SUBSTITUTION_ORDER.join(", ")}.` };
     }
     if (!usable(p)) {
-      return { provider: p, error: `--provider ${p} was given but ${envVarFor(p)} is not set. Set it, or name a provider you have a key for.` };
+      return { provider: p, error: `--provider ${p} was given but no key is configured for it. Run \`aetheraclaw auth set ${p}\`, or export ${envVarFor(p)}, or name a provider you have a key for.` };
     }
     return { provider: p, error: "" };
   }
@@ -263,7 +264,7 @@ export function resolveProvider(
   if (!substitute) {
     return {
       provider: config.provider,
-      error: `No provider can run. Set one of ${SUBSTITUTION_ORDER.map(envVarFor).join(", ")}, or start a local Ollama server and run with --provider ollama.`,
+      error: `No provider can run. Add a key with \`aetheraclaw auth set <provider>\` (or export one of ${SUBSTITUTION_ORDER.map(envVarFor).join(", ")}), or start a local model server — \`aetheraclaw auth discover\` will find one.`,
     };
   }
   return { provider: substitute, substitutedFrom: config.provider, error: "" };
@@ -273,19 +274,19 @@ export function envVarFor(provider: ProviderName): string {
   return provider === "anthropic" ? "ANTHROPIC_API_KEY" : `${provider.toUpperCase()}_API_KEY`;
 }
 
+/**
+ * A provider's key from EITHER place: the environment, or the stored file.
+ *
+ * Named `keyFromEnv` historically, when the environment was the only source.
+ * It now consults both, because a key entered once with `auth set` has to count
+ * as configured everywhere the environment did — otherwise the provider table
+ * says "--" for a provider that works, and substitution passes over it.
+ */
 function keyFromEnv(provider: ProviderName, env: NodeJS.ProcessEnv): string | undefined {
-  return env[envVarFor(provider)];
+  return resolveKey(provider, { env }).key;
 }
 
+/** A provider's key, from the environment first and the stored file second. */
 export function apiKeyFor(provider: Config["provider"]): string | undefined {
-  switch (provider) {
-    case "anthropic":
-      return process.env.ANTHROPIC_API_KEY;
-    case "openai":
-      return process.env.OPENAI_API_KEY;
-    case "gemini":
-      return process.env.GEMINI_API_KEY;
-    case "ollama":
-      return process.env.OLLAMA_API_KEY; // optional for local
-  }
+  return resolveKey(provider).key;
 }
