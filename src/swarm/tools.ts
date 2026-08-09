@@ -79,7 +79,7 @@ const STAGE_KEYS = Object.keys(STAGES) as [Stage, ...Stage[]];
 export const swarmTrackTool = defineTool({
   name: "swarm_track",
   description:
-    "Put a claim on the swarm blackboard, or move one already there. One row per claim, so there is a single answer to where it is rather than a stage inferred from whichever table was written last.",
+    "Put a claim on the swarm blackboard, or correct its payer/amount/note. One row per claim, so there is a single answer to where it is. This places and edits — it does not move a claim through the pipeline; use swarm_advance for that, which enforces the transition graph and the human checkpoints.",
   schema: z.object({
     claim_ref: z.string(),
     stage: z.enum(STAGE_KEYS).default("captured"),
@@ -92,25 +92,38 @@ export const swarmTrackTool = defineTool({
     const existing = db(ctx).prepare("SELECT * FROM blackboard WHERE claim_ref = ?").get(input.claim_ref) as
       | Row
       | undefined;
+
+    if (existing) {
+      // A stage change here would bypass everything swarm_advance enforces: it
+      // could jump captured→submitted (skipping coding, scrub, twin review and
+      // the human release checkpoint) in one call, and its unconditional
+      // `attempts = 0` silently un-parked a claim held for a person and erased
+      // the failure signature the systematic-failure halt keys on. So this edits
+      // metadata only and refuses to move the claim.
+      if (input.stage !== existing.stage) {
+        return {
+          content: `${input.claim_ref} is at ${STAGES[existing.stage as Stage].label}. swarm_track does not move claims — use swarm_advance to go to ${STAGES[input.stage].label}, which checks the transition is legal and stops for a person where one is required.`,
+          isError: true,
+        };
+      }
+      db(ctx)
+        .prepare("UPDATE blackboard SET payer = ?, amount_cents = ?, note = ?, updated_at = ? WHERE claim_ref = ?")
+        .run(input.payer, Math.round(input.amount * 100), input.note, now, input.claim_ref);
+      return {
+        content: `${input.claim_ref} updated (still at ${STAGES[existing.stage as Stage].label}). attempts and error state left as they were.`,
+      };
+    }
+
     db(ctx)
       .prepare(
         `INSERT INTO blackboard (id, claim_ref, payer, stage, amount_cents, attempts, last_error, note, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 0, '', ?, ?, ?)
-         ON CONFLICT(claim_ref) DO UPDATE SET
-           payer = excluded.payer, stage = excluded.stage, amount_cents = excluded.amount_cents,
-           attempts = 0, last_error = '', note = excluded.note, updated_at = excluded.updated_at`,
+         VALUES (?, ?, ?, ?, ?, 0, '', ?, ?, ?)`,
       )
-      .run(
-        newId("bb"),
-        input.claim_ref,
-        input.payer,
-        input.stage,
-        Math.round(input.amount * 100),
-        input.note,
-        now,
-        now,
-      );
-    logEvent(ctx, input.claim_ref, existing?.stage ?? "", input.stage, "manual", false, input.note);
+      .run(newId("bb"), input.claim_ref, input.payer, input.stage, Math.round(input.amount * 100), input.note, now, now);
+    // "track" not "manual": this event records a placement, which the model can
+    // initiate — claiming a human authored it would falsify the very log that
+    // exists to say who did.
+    logEvent(ctx, input.claim_ref, "", input.stage, "track", false, input.note);
     return {
       content: `${input.claim_ref} is at ${STAGES[input.stage].label} (owner: ${STAGES[input.stage].owner}). Next: ${STAGES[input.stage].action}`,
     };
@@ -182,11 +195,31 @@ export const swarmAdvanceTool = defineTool({
         isError: true,
       };
     }
-    if (transition.requiresHuman && input.automated) {
-      return {
-        content: `That move needs a person: ${transition.reason} It cannot be taken as an automated step in any mode.`,
-        isError: true,
-      };
+    if (transition.requiresHuman) {
+      // The enforcement used to be `requiresHuman && input.automated` — but
+      // `automated` is a model-supplied flag defaulting to false, so the model
+      // took the ready_to_submit→submitted checkpoint (and every other
+      // person-required move) simply by omitting it, and the event log recorded
+      // a fabricated human authorization. A checkpoint asks a real person, in
+      // every mode: an explicitly automated call is refused outright, and any
+      // other call must clear an approval prompt rather than the model's word.
+      if (input.automated) {
+        return {
+          content: `That move needs a person: ${transition.reason} It cannot be taken as an automated step in any mode.`,
+          isError: true,
+        };
+      }
+      const approved = await ctx.requestApproval({
+        toolName: "swarm_advance",
+        description: `Checkpoint — ${STAGES[from].label} → ${STAGES[input.to_stage].label}. ${transition.reason} This is a decision with a name on it.`,
+        input,
+      });
+      if (!approved) {
+        return {
+          content: `Not advanced: ${STAGES[input.to_stage].label} needs a person to authorize it, and that authorization was declined.`,
+          isError: true,
+        };
+      }
     }
     if (!transition.requiresHuman && input.automated && !mayAutomate(transition, mode(ctx))) {
       return {
