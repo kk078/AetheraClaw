@@ -66,7 +66,7 @@ export async function runCase(deps: EvalDeps, c: EvalCase): Promise<CaseResult> 
   const { provider, registry, config } = deps;
   const started = Date.now();
   const system = buildSystemPrompt(config.workspaceRoot);
-  const selection = selectTools(registry.specs(), config.toolProfile, provider.name);
+  const selection = selectTools(registry.specs(), config.toolProfile, provider.name, config.toolLimits[provider.name]);
   const messages: NormalizedMessage[] = [{ role: "user", content: [{ type: "text", text: c.prompt }] }];
   const reached: string[] = [];
 
@@ -138,7 +138,7 @@ export interface EvalReport {
 }
 
 export async function runEval(deps: EvalDeps, cases: EvalCase[] = CASES, onCase?: (r: CaseResult) => void): Promise<EvalReport> {
-  const selection = selectTools(deps.registry.specs(), deps.config.toolProfile, deps.provider.name);
+  const selection = selectTools(deps.registry.specs(), deps.config.toolProfile, deps.provider.name, deps.config.toolLimits[deps.provider.name]);
   const results: CaseResult[] = [];
   // Serial, not parallel: a rate-limited provider turning concurrent requests
   // into 429s would score as capability failures, which is the one thing a

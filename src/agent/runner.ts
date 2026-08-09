@@ -85,7 +85,7 @@ export async function runTurn(deps: RunnerDeps, sessionId: string, userText: str
       const messages = truncateToBudget(loadHistory(store, sessionId), config.contextTokenBudget);
       // Chosen per provider: OpenAI rejects more than 128 tools outright, and
       // nobody but Anthropic caches the definition block.
-      const selection = selectTools(registry.specs(), config.toolProfile, provider.name);
+      const selection = selectTools(registry.specs(), config.toolProfile, provider.name, config.toolLimits[provider.name]);
       const toolSpecs = selection.specs;
       // Logged rather than emitted as errors: these are notes about how the
       // turn is configured, and surfacing them as errors makes every start of

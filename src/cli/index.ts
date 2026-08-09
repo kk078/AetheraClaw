@@ -3,7 +3,8 @@ import { Command } from "commander";
 import path from "node:path";
 import fs from "node:fs";
 import { loadConfig, configDir, apiKeyFor, envVarFor, expandHome, resolveProvider, type ProviderName } from "../config/config.js";
-import { PROFILES, PROVIDER_TOOL_LIMITS, renderProfiles, selectTools } from "../tools/profiles.js";
+import { PROFILES, PROVIDER_TOOL_LIMITS, renderProfiles, resolveToolLimit, selectTools } from "../tools/profiles.js";
+import { buildBudget, renderBudget } from "../tools/budget.js";
 import { resolveOllamaTarget } from "../providers/openai.js";
 import { createProvider } from "../providers/index.js";
 import { CASES } from "../eval/cases.js";
@@ -240,7 +241,7 @@ program
       );
     }
     if (config.tenancy.enabled) console.log(`Tenant: ${tenant.name} (${tenant.slug}) — isolated database`);
-    const picked = selectTools(registry.specs(), config.toolProfile, config.provider);
+    const picked = selectTools(registry.specs(), config.toolProfile, config.provider, config.toolLimits[config.provider]);
     console.log(
       `Tools: ${picked.specs.length} loaded directly` +
         (picked.deferred.length > 0 ? ` + ${picked.deferred.length} via tool_search` : "") +
@@ -389,21 +390,26 @@ program
       // actually get.
       const forProvider = buildRegistry({ ...config, provider: name }, store).specs();
       const counts = PROFILES.map((p) => {
-        const s = selectTools(forProvider, p.name, name);
+        const s = selectTools(forProvider, p.name, name, config.toolLimits[name]);
         const mark = s.droppedByLimit.length ? "*" : s.deferred.length ? "+" : "";
         return `${s.specs.length}${mark}`.padStart(7);
       });
+      // The EFFECTIVE limit, not the shipped default. Once toolLimits exists the
+      // two differ, and a table whose "cap" column said 64 beside an "all"
+      // column reading 224 is a table contradicting itself.
+      const decided = resolveToolLimit(name, config.toolLimits[name]);
+      const capCell = `${decided.limit}${decided.note ? "!" : config.toolLimits[name] ? "\u00b7" : ""}`;
       console.log(
         [
           (config.provider === name ? `\u2192 ${name}` : `  ${name}`).padEnd(width),
           key,
           modelFor(config, name).padEnd(22),
-          String(PROVIDER_TOOL_LIMITS[name]).padStart(3),
+          capCell.padStart(4),
           ...counts,
         ].join("  "),
       );
     }
-    console.log("\n+ loaded directly; the rest reachable via tool_search / tool_invoke, so every tool is usable.\n* dropped outright \u2014 not reachable at all.\n");
+    console.log("\n+ loaded directly; the rest reachable via tool_search / tool_invoke, so every tool is usable.\n* dropped outright \u2014 not reachable at all.\n\u00b7 cap raised in config; ! requested above the provider's hard API limit and clamped.\n");
     console.log(renderProfiles());
     console.log(
       `\nActive: provider "${config.provider}", profile "${config.toolProfile}". Override per run with \`serve --provider X --profile Y\`.`,
@@ -510,6 +516,28 @@ documents
 // Keys used to arrive only as environment variables, which means re-exporting
 // them in every shell and on every reboot — and the commonest way people make
 // that stick is pasting a key into a dotfile that later gets committed.
+
+
+// ── tools ────────────────────────────────────────────────────────────────────
+
+const toolsCmd = program.command("tools").description("The tool catalogue and what sending it costs");
+
+toolsCmd
+  .command("budget")
+  .description("What each tool-limit setting costs in context, measured from the real registry")
+  .option("--provider <name>", "which provider's limits to report against")
+  .option("--context <tokens>", "the model's context window (default 128000)")
+  .action((opts: { provider?: string; context?: string }) => {
+    const config = loadConfig();
+    const provider = (opts.provider ?? config.provider) as ProviderName;
+    const contextWindow = Number(opts.context ?? 128000);
+    const store = new MemoryStore(path.join(configDir(), "aetheraclaw.db"));
+    const specs = buildRegistry({ ...config, provider }, store).specs();
+    const decision = resolveToolLimit(provider, config.toolLimits[provider]);
+    console.log(renderBudget(buildBudget(specs, contextWindow), { provider, contextWindow, current: decision.limit }));
+    if (decision.note) console.log(`\n! ${decision.note}`);
+    store.close();
+  });
 
 const auth = program.command("auth").description("Provider API keys and local model servers");
 

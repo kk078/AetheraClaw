@@ -145,6 +145,51 @@ Anthropic takes 512, OpenAI and Gemini 128, Ollama 64. The overflow is **deferre
 dropped** — reachable through `tool_search` / `tool_invoke` — so all 224 tools are usable
 on every provider, and a regression test asserts no provider ever drops one outright.
 
+
+### How many tools go on the wire
+
+The registry holds **224 tools**, and all 224 are reachable on every provider.
+What differs is how many are sent as definitions in each request versus reached
+through `tool_search` / `tool_invoke` — an extra round trip, not a missing
+capability.
+
+The defaults are 512 for Anthropic (headroom; 224 is the whole registry), 128 for
+OpenAI and Gemini, 64 for Ollama. Only one of those is physics:
+
+| Provider | Cap | What kind of limit |
+|---|---|---|
+| Anthropic | 512 | Headroom — every tool already ships directly |
+| OpenAI | **128** | **Hard API limit.** More is rejected, not truncated |
+| Gemini | 128 | Practical — large declaration sets degrade selection |
+| Ollama | 64 | Context, not an API cap — sized for an 8k local window |
+
+Three of the four are now overridable, because the right number depends on the
+model's context window and nothing here can know that:
+
+```json5
+toolLimits: { ollama: 224, gemini: 224 }
+```
+
+OpenAI is clamped to 128 whatever the config says, and reports the clamp — a
+larger number there would not buy a bigger tool set, it would error on every turn.
+
+**Raising it is not free**, and `aetheraclaw tools budget` prints the measured
+cost rather than leaving it to intuition:
+
+```
+ direct      bytes    ~tokens    window
+     64     74,148     18,537     14.5%
+    128    133,500     33,375     26.1%
+    224    210,818     52,705     41.2%
+```
+
+That block is re-sent **every turn** on any provider that does not cache it. All
+224 tools on a 128k window is 41% of the context gone before the conversation
+starts. And more is not automatically better: large tool sets measurably degrade
+which tool a model picks, which is what `aetheraclaw eval` measures on your own
+model — it scored 10/14 at 64 tools, and that number is the thing to re-measure
+after changing this, not assume improves.
+
 ### Reference data
 
 `node scripts/fetch-cms-data.mjs` downloads the current CMS files and converts them

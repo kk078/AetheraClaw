@@ -16,7 +16,8 @@ import { MIN_REDACTABLE, containsSecret, mentionsSecretFile, redactSecrets } fro
 import { evaluateSet, renderList } from "../src/cli/auth.js";
 import { LOCAL_CANDIDATES, parseModelList, renderDiscovery } from "../src/providers/discover.js";
 import { assessCommandRisk } from "../src/tools/shell.js";
-import { PROVIDER_TOOL_LIMITS, selectTools } from "../src/tools/profiles.js";
+import { HARD_TOOL_LIMITS, PROVIDER_TOOL_LIMITS, resolveToolLimit, selectTools } from "../src/tools/profiles.js";
+import { budgetAt, buildBudget, renderBudget, wireBytes } from "../src/tools/budget.js";
 import { META_NAMES } from "../src/tools/meta.js";
 
 let dir: string;
@@ -314,5 +315,97 @@ describe("same execution results, whichever provider", () => {
 
   it("caps differ, which is the honest part of the answer", () => {
     expect(PROVIDER_TOOL_LIMITS.ollama).toBeLessThan(PROVIDER_TOOL_LIMITS.anthropic);
+  });
+});
+
+// ── Raising the tool limit ───────────────────────────────────────────────────
+
+describe("how many tools go on the wire", () => {
+  it("uses the provider default when nothing is configured", () => {
+    expect(resolveToolLimit("ollama").limit).toBe(PROVIDER_TOOL_LIMITS.ollama);
+    expect(resolveToolLimit("anthropic").limit).toBe(512);
+  });
+
+  it("honours an override where the provider has no hard cap", () => {
+    // Ollama's default is about CONTEXT, not an API limit — sized for an 8k
+    // local window. On a large-context cloud model it leaves most of the
+    // catalogue behind tool_search for no reason.
+    const d = resolveToolLimit("ollama", 224);
+    expect(d.limit).toBe(224);
+    expect(d.note).toBeUndefined();
+  });
+
+  it("clamps a request above a hard API limit, and says it clamped", () => {
+    // OpenAI rejects more than 128 definitions outright. A config asking for
+    // 224 would not get a bigger tool set, it would get an error every turn.
+    const d = resolveToolLimit("openai", 224);
+    expect(d.limit).toBe(HARD_TOOL_LIMITS.openai);
+    expect(d.note).toMatch(/rejects more than 128/);
+  });
+
+  it("allows a request at or below the hard limit", () => {
+    expect(resolveToolLimit("openai", 100).limit).toBe(100);
+    expect(resolveToolLimit("openai", 128).note).toBeUndefined();
+  });
+
+  it("ignores a nonsense override rather than sending zero tools", () => {
+    for (const bad of [0, -5, Number.NaN]) {
+      expect(resolveToolLimit("ollama", bad).limit).toBe(PROVIDER_TOOL_LIMITS.ollama);
+    }
+  });
+
+  it("actually changes what selectTools puts on the wire", () => {
+    const specs = [...META_NAMES, ...Array.from({ length: 224 }, (_, i) => `tool_${i}`)].map((name) => ({
+      name,
+      description: "d",
+      inputSchema: { type: "object" as const, properties: {} },
+    }));
+    const before = selectTools(specs, "all", "ollama");
+    const after = selectTools(specs, "all", "ollama", 300);
+    expect(before.deferred.length).toBeGreaterThan(0);
+    expect(after.deferred).toHaveLength(0);
+    expect(after.specs.length).toBe(specs.length);
+  });
+
+  it("reports the clamp through selectTools too, not only in isolation", () => {
+    const specs = [...META_NAMES, ...Array.from({ length: 224 }, (_, i) => `tool_${i}`)].map((name) => ({
+      name,
+      description: "d",
+      inputSchema: { type: "object" as const, properties: {} },
+    }));
+    const s = selectTools(specs, "all", "openai", 224);
+    expect(s.notes.join(" ")).toMatch(/rejects more than 128/);
+    expect(s.specs.length).toBeLessThanOrEqual(128);
+  });
+});
+
+describe("what a tool block costs", () => {
+  const specs = Array.from({ length: 224 }, (_, i) => ({
+    name: `tool_${i}`,
+    description: "a description long enough to be realistic for a domain tool",
+    inputSchema: { type: "object" as const, properties: { a: { type: "string" } } },
+  }));
+
+  it("counts bytes in the encoding the wire actually carries", () => {
+    expect(wireBytes(specs[0])).toBeGreaterThan(100);
+  });
+
+  it("grows with the number sent, which is the whole point", () => {
+    const rows = budgetAt(specs, [16, 64, 224]);
+    expect(rows[0].tokens).toBeLessThan(rows[1].tokens);
+    expect(rows[1].tokens).toBeLessThan(rows[2].tokens);
+  });
+
+  it("says plainly that a lower limit loses no capability", () => {
+    // The distinction the whole feature rests on: deferred is a round trip, not
+    // a missing tool.
+    const out = renderBudget(buildBudget(specs, 128000), { provider: "ollama", contextWindow: 128000, current: 64 });
+    expect(out).toMatch(/NOTHING IS LOST/);
+    expect(out).toMatch(/tool_search/);
+  });
+
+  it("names a hard API cap as a limit rather than a preference", () => {
+    const out = renderBudget(buildBudget(specs, 128000), { provider: "openai", contextWindow: 128000, current: 128 });
+    expect(out).toMatch(/API limit, not a setting/);
   });
 });

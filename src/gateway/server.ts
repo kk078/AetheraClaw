@@ -125,7 +125,7 @@ export async function buildServer(opts: {
   /** The module map and the live tool catalogue — what the UI renders as capability. */
   app.get("/api/modules", async () => {
     const specs = registry?.specs() ?? [];
-    const selection = selectTools(specs, config.toolProfile, config.provider);
+    const selection = selectTools(specs, config.toolProfile, config.provider, config.toolLimits[config.provider]);
     const direct = new Set(selection.specs.map((s) => s.name));
     return {
       total: specs.length,

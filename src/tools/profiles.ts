@@ -102,13 +102,18 @@ export const PROFILES: Profile[] = [
 ];
 
 /**
- * How many tools each provider can actually be sent.
+ * How many tools each provider is sent by DEFAULT.
  *
- * OpenAI's 128 is a hard API limit. Gemini's is a practical one — large
- * declaration sets degrade selection badly before they error. Ollama's is about
- * context, not an API cap: whatever window the local model has, the tool block
- * is competing with the conversation for it, and 64 definitions is already a
- * large fraction of an 8k window.
+ * These are starting points, not physics — see HARD_TOOL_LIMITS for the ones
+ * that are. Anthropic's 512 is headroom rather than usage: the registry holds
+ * 224, so every tool already ships directly there.
+ *
+ * Ollama's 64 is the conservative one, and deliberately so: it is about
+ * CONTEXT, not an API cap. The tool block competes with the conversation for
+ * whatever window the model has, and 64 definitions is already a large fraction
+ * of an 8k local window. On a large-context cloud model it is far too low, which
+ * is exactly why it is now overridable per install — the right number depends on
+ * the model's window, and the tool cannot know that without being told.
  */
 export const PROVIDER_TOOL_LIMITS: Record<string, number> = {
   anthropic: 512,
@@ -116,6 +121,50 @@ export const PROVIDER_TOOL_LIMITS: Record<string, number> = {
   gemini: 128,
   ollama: 64,
 };
+
+/**
+ * Ceilings that configuration CANNOT raise, because the API rejects the request.
+ *
+ * OpenAI refuses more than 128 function definitions outright — a config that
+ * asked for 224 would not get a bigger tool set, it would get an error on every
+ * turn. Letting the number be set anyway would be handing somebody a switch
+ * whose only effect is to break their install, so the override is clamped and
+ * says it clamped.
+ *
+ * Anthropic, Gemini and Ollama are absent on purpose: their practical limits are
+ * about context and selection quality, which vary by model, so those are the
+ * user's to choose.
+ */
+export const HARD_TOOL_LIMITS: Record<string, number> = {
+  openai: 128,
+};
+
+export interface LimitDecision {
+  limit: number;
+  /** Set when the requested number could not be honoured. */
+  note?: string;
+}
+
+/**
+ * The tool limit actually used: the requested override, clamped to any hard cap.
+ *
+ * Pure, so the clamping rule is testable without a provider or a config file.
+ */
+export function resolveToolLimit(provider: string, requested?: number): LimitDecision {
+  const base = PROVIDER_TOOL_LIMITS[provider] ?? 128;
+  const hard = HARD_TOOL_LIMITS[provider];
+
+  if (requested === undefined || !Number.isFinite(requested) || requested <= 0) {
+    return { limit: hard ? Math.min(base, hard) : base };
+  }
+  if (hard && requested > hard) {
+    return {
+      limit: hard,
+      note: `toolLimits.${provider} asks for ${requested}, but ${provider} rejects more than ${hard} tool definitions per request — the API errors rather than truncating. Using ${hard}.`,
+    };
+  }
+  return { limit: requested };
+}
 
 export function profileByName(name: string): Profile | undefined {
   return PROFILES.find((p) => p.name === name);
@@ -146,7 +195,7 @@ export interface Selection {
  * `claim_scrub` will confidently do without it, and the transcript will look
  * like it decided not to scrub the claim rather than like it could not.
  */
-export function selectTools(all: ToolSpec[], profileName: string, provider: string): Selection {
+export function selectTools(all: ToolSpec[], profileName: string, provider: string, limitOverride?: number): Selection {
   const profile = profileByName(profileName);
   const notes: string[] = [];
 
@@ -157,7 +206,9 @@ export function selectTools(all: ToolSpec[], profileName: string, provider: stri
   const matched = all.filter((s) => matches(s.name, include));
   const droppedByProfile = all.length - matched.length;
 
-  const limit = PROVIDER_TOOL_LIMITS[provider] ?? 128;
+  const decision = resolveToolLimit(provider, limitOverride);
+  const limit = decision.limit;
+  if (decision.note) notes.push(decision.note);
   let specs = matched;
   const droppedByLimit: string[] = [];
   const deferred: string[] = [];

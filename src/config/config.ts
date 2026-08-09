@@ -34,6 +34,21 @@ export const ConfigSchema = z.object({
       }),
     })
     .default({}),
+  /**
+   * How many tool definitions to send directly, per provider. Absent = the
+   * built-in default.
+   *
+   * Exists because the right number depends on the MODEL'S CONTEXT WINDOW, and
+   * nothing here can know that. The shipped Ollama default of 64 is sized for an
+   * 8k local window; on a large-context cloud model it leaves most of the
+   * catalogue behind tool_search for no reason. Raising it is not free — the
+   * whole block is re-sent every turn on any provider that does not cache — so
+   * `aetheraclaw tools budget` prints the measured cost before you choose.
+   *
+   * A value above a provider's hard API limit is clamped and reported, never
+   * silently honoured: OpenAI errors on more than 128 rather than truncating.
+   */
+  toolLimits: z.record(z.number().int().positive()).default({}),
   workspaceRoot: z.string().default("~/aetheraclaw-workspace"),
   approvalPolicy: z.enum(["always", "unsafe-only", "never"]).default("unsafe-only"),
   gateway: z
