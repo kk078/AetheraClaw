@@ -17,7 +17,7 @@
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:test": "tsc -p tsconfig.test.json",
-    "start": "node dist/cli/index.js serve"
+    "start": "node scripts/start.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

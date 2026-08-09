@@ -42,42 +42,24 @@ falls back to Node's built-in `node:sqlite` automatically, which is why it is an
 ```bash
 git clone -b claude/openclaw-functionalities-xljw65 https://github.com/kk078/AetheraClaw.git
 cd AetheraClaw
-npm run setup
+npm start
 ```
 
-That is the whole build. It installs dependencies, compiles, runs the suite,
-fetches the CMS datasets, **downloads the prerequisites `npm install` does not
-bring**, and then prints what is still missing with the exact command for each.
-It is idempotent — safe to re-run after fixing whatever it reported.
+That is the whole thing. `npm start` installs dependencies, compiles, starts the
+gateway, and opens on `127.0.0.1:4180`. It is idempotent — the second run skips
+straight to serving — and it needs **no key and no configuration** to start:
+the provider is set up **inside the application**, on the "Providers & keys"
+screen, which is also where the model, the endpoint and which provider is
+active now live. Nothing has to be exported in a shell or edited in a file, and
+a change applies to the next session without restarting anything.
 
-The prerequisites are the reason it exists. Two of them fail late and blame the
-wrong thing:
-
-- **Playwright's Chromium.** `playwright` is an ordinary dependency, so the module
-  installs and `import("playwright")` resolves — but the browser binary is a
-  separate ~170 MB download, skipped entirely whenever `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD`
-  is set, which CI and corporate images routinely set. Setup downloads it and then
-  **actually launches it**, because a file check is not enough to know: a headless
-  launch runs `chrome-headless-shell`, a *different* binary from the one
-  `chromium.executablePath()` names, and a tree missing only the shell passes an
-  existence check and then fails at run time. So the launch is the authority, and a
-  failed launch triggers an install rather than just a complaint. If it still will
-  not start — on Linux, usually system libraries no npm package can supply — that is
-  reported with the one command that fixes it, and it is **not** fatal: payer-portal
-  browsing is one module, and everything else works without it.
-- **A working SQLite driver.** Nothing breaks either way, but setup states which one
-  you got rather than leaving it to be inferred later from a transaction that
-  behaves differently.
-
-It deliberately does **not** install Node (that needs root and replaces a runtime
-the rest of the machine depends on — it prints the exact command for your platform,
-preferring `nvm`/`fnm`/`volta` if one is already there), and does **not** prompt for
-an API key (a setup script that asks for a secret invites pasting one into a
-screen-shared terminal; `auth set` does it properly).
-
-```bash
-npm run setup -- --skip-tests --skip-data --skip-browser   # each step is skippable
-```
+`npm run setup` is the fuller version, and the one to run before going offline:
+it additionally runs the test suite, downloads Playwright's Chromium for the
+payer-portal tools, and fetches the CMS datasets (~30 MB — NCCI, MUE, MPFS,
+GPCI, HCPCS, ICD-10). `npm start` deliberately does NOT pull those; a start
+command that silently downloads tens of megabytes is a surprise, so it names
+what is missing in one line and carries on. Everything works without them and
+says so where a dataset would have changed the answer.
 
 Then configure a provider and start it:
 

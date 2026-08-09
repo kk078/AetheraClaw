@@ -19,6 +19,7 @@ import { extractDocument } from "../ingest/extract.js";
 import { saveDocument } from "../ingest/store.js";
 import { credentialsPath, loadCredentials, maskKey, removeCredential, resolveKey, setCredential, shapeWarning } from "../config/credentials.js";
 import { discoverLocal } from "../providers/discover.js";
+import { configPath as providerConfigPath, writeProviderSettings } from "../config/write.js";
 import type { ProviderName } from "../config/config.js";
 import { createSpeechProvider, speechStatus } from "../speech/providers/index.js";
 import { speakableSummary, toSpeakable } from "../speech/speakable.js";
@@ -689,7 +690,75 @@ export async function buildServer(opts: {
         toolCap: PROVIDER_TOOL_LIMITS[name],
       };
     });
-    return { providers: rows, warnings, credentialsPath: credentialsPath() };
+    return {
+      providers: rows,
+      warnings,
+      credentialsPath: credentialsPath(),
+      active: config.provider,
+      // The ollama slot alone has an endpoint and a second catalogue, and both
+      // are things somebody setting this up on their own machine has to be able
+      // to change without a text editor.
+      ollama: {
+        baseUrl: config.providers.ollama.baseUrl ?? "",
+        cloudModel: config.providers.ollama.cloudModel ?? "",
+        model: config.providers.ollama.model,
+      },
+      configPath: providerConfigPath(),
+    };
+  });
+
+  /**
+   * Change which provider is active, and what model each one uses.
+   *
+   * Written to config.json5 AND applied to the running gateway. Applying it
+   * live is possible because SessionManager builds a provider per turn from
+   * this same config object rather than holding one from startup — so the next
+   * turn uses the new setting, and nobody has to restart a server to try a
+   * different model.
+   *
+   * Existing sessions keep the provider they were created with. That is
+   * deliberate: a conversation whose model changes underneath it produces a
+   * transcript where two different models answered, and no way to tell which
+   * said what.
+   */
+  app.post("/api/providers/settings", async (req, reply) => {
+    const body = (req.body ?? {}) as {
+      provider?: string;
+      models?: Record<string, string>;
+      ollama?: { baseUrl?: string; cloudModel?: string };
+    };
+    const names: ProviderName[] = ["anthropic", "openai", "gemini", "ollama"];
+    if (body.provider && !names.includes(body.provider as ProviderName)) {
+      return reply.code(400).send({ error: `unknown provider "${body.provider}"` });
+    }
+    for (const name of Object.keys(body.models ?? {})) {
+      if (!names.includes(name as ProviderName)) return reply.code(400).send({ error: `unknown provider "${name}"` });
+    }
+
+    try {
+      writeProviderSettings(body);
+    } catch (err) {
+      return reply.code(500).send({ error: `could not write config: ${err instanceof Error ? err.message : String(err)}` });
+    }
+
+    // Mutate the live object too. Re-reading the file here would also pick up
+    // any hand edits made since startup, which is a different and larger
+    // change than the one the user asked for.
+    for (const [name, model] of Object.entries(body.models ?? {})) {
+      if (model.trim()) config.providers[name as ProviderName].model = model.trim();
+    }
+    if (body.ollama?.baseUrl !== undefined) config.providers.ollama.baseUrl = body.ollama.baseUrl.trim();
+    // Empty is meaningful rather than missing: resolveOllamaTarget falls back
+    // to `model` when cloudModel is falsy, which is exactly what "use the same
+    // model on the cloud" should do.
+    if (body.ollama?.cloudModel !== undefined) config.providers.ollama.cloudModel = body.ollama.cloudModel.trim();
+    if (body.provider) config.provider = body.provider as ProviderName;
+
+    return {
+      ok: true,
+      active: config.provider,
+      applied: "New sessions use this immediately. Sessions already open keep the provider they started with.",
+    };
   });
 
   app.post("/api/providers/key", async (req, reply) => {

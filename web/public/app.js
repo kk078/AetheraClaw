@@ -1128,11 +1128,77 @@ async function loadProviders() {
       form.append(del);
     }
     row.append(form);
+
+    // ── Model, endpoint, and which provider is actually active ──────────────
+    // These used to require hand-editing config.json5, which meant sharing this
+    // repo also meant talking somebody through a text editor. They are settings,
+    // not secrets, so unlike the key they are shown and editable.
+    const cfg = el("div", "provform");
+    const model = el("input", "search");
+    model.type = "text";
+    model.value = p.name === "ollama" ? data.ollama.model : p.model;
+    model.placeholder = `Model for ${p.name}`;
+    model.autocomplete = "off";
+
+    let baseUrl = null;
+    let cloudModel = null;
+    if (p.name === "ollama") {
+      baseUrl = el("input", "search");
+      baseUrl.type = "text";
+      baseUrl.value = data.ollama.baseUrl || "";
+      baseUrl.placeholder = "http://localhost:11434/v1";
+      cloudModel = el("input", "search");
+      cloudModel.type = "text";
+      cloudModel.value = data.ollama.cloudModel || "";
+      cloudModel.placeholder = "cloud model (used when OLLAMA_API_KEY is set)";
+    }
+
+    const apply = el("button", "btn sm", "Save settings");
+    const cmsg = el("span", "provmsg");
+    const postSettings = async (body, button) => {
+      button.disabled = true;
+      try {
+        const res = await fetch("/api/providers/settings", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const out = await res.json();
+        cmsg.textContent = res.ok ? out.applied || "saved" : `failed: ${out.error}`;
+        if (res.ok) setTimeout(loadProviders, 700);
+      } catch (err) {
+        cmsg.textContent = `failed: ${err.message}`;
+      } finally {
+        button.disabled = false;
+      }
+    };
+
+    apply.addEventListener("click", () => {
+      const body = { models: { [p.name]: model.value } };
+      if (p.name === "ollama") body.ollama = { baseUrl: baseUrl.value, cloudModel: cloudModel.value };
+      postSettings(body, apply);
+    });
+
+    cfg.append(model);
+    if (baseUrl) cfg.append(baseUrl, cloudModel);
+    cfg.append(apply);
+
+    if (!p.active) {
+      const use = el("button", "btn ghost sm", "Use this provider");
+      use.addEventListener("click", () => postSettings({ provider: p.name }, use));
+      cfg.append(use);
+    }
+    cfg.append(cmsg);
+    row.append(cfg);
+
     list.append(row);
   }
 
   const foot = el("p", "sub");
-  foot.textContent = `Stored in ${data.credentialsPath} (mode 600). Changing the ACTIVE provider needs a restart: aetheraclaw serve --provider <name>.`;
+  foot.textContent =
+    `Keys are stored in ${data.credentialsPath} (mode 600); models and the active provider in ${data.configPath}. ` +
+    "Changes apply to new sessions immediately — no restart. A conversation already open keeps the provider it started with, " +
+    "so a transcript is never half one model and half another.";
   list.append(foot);
 }
 
