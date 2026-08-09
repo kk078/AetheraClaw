@@ -166,6 +166,17 @@ export function renderReport(report: EvalReport): string {
     "",
   ];
 
+  // A run the provider failed is not a capability measurement. Said before the
+  // failures so nobody reads a rate-limited run as a finding about the model.
+  const errored = report.results.filter((r) => r.error);
+  if (errored.length > 0) {
+    out.push(
+      `${errored.length} of ${report.results.length} case(s) ERRORED — the provider failed, so this score measures availability, not capability.`,
+      `First error: ${errored[0].error}`,
+      "",
+    );
+  }
+
   const failures = report.results.filter((r) => !r.passed);
   for (const r of failures) {
     out.push(
@@ -174,6 +185,11 @@ export function renderReport(report: EvalReport): string {
       `      reached: ${r.reached.length > 0 ? r.reached.join(" → ") : "(no tool called)"}`,
       `      wanted:  ${isRefusalCase(r.case) ? "no tool call at all" : r.case.expect.join(" | ")}`,
       `      why:     ${r.case.why}`,
+      // Same blind spot as the voice report: a provider error scores as a
+      // failure with no tool reached, which reads as "the model chose not to"
+      // when the request never completed. Naming it keeps a flaky run from
+      // being recorded as a capability finding.
+      ...(r.error ? [`      ERROR:   ${r.error} — the provider failed; this is not a behavioural result`] : []),
       ...(r.error ? [`      error:   ${r.error}`] : []),
       "",
     );

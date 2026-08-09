@@ -327,6 +327,17 @@ export function renderVoiceReport(report: VoiceEvalReport): string {
 
   // ── Tools ──────────────────────────────────────────────────────────────────
   out.push(`SPOKEN TOOL SELECTION  ${report.tools.passed}/${report.tools.total} reached a tool that can answer.`);
+  // A run where the provider fell over is NOT a capability measurement, and
+  // printing a score for it invites exactly the wrong conclusion — a
+  // rate-limited run once read as "the prompt change made it worse". Errors are
+  // counted and called out before the score is interpreted.
+  const errored = report.tools.results.filter((r) => r.error).length;
+  if (errored > 0) {
+    out.push(
+      `  ${errored} of ${report.tools.total} case(s) ERRORED — the provider failed, so this score measures availability, not capability.`,
+      "  Fix the provider and re-run before drawing any conclusion from the number above.",
+    );
+  }
   for (const r of report.tools.results.filter((x) => !x.passed)) {
     const spec = report.tools.cases.find((c) => c.id === r.case.id);
     out.push(
@@ -335,6 +346,12 @@ export function renderVoiceReport(report: VoiceEvalReport): string {
       `      sent:    "${r.case.prompt}"`,
       `      reached: ${r.reached.length > 0 ? r.reached.join(" → ") : "(no tool called)"}`,
       `      wanted:  ${isRefusalCase(r.case) ? "no tool call at all" : r.case.expect.join(" | ")}`,
+      // An errored case reaches no tool and scores false, which on a REFUSAL
+      // case is indistinguishable from the correct answer — it prints "(no tool
+      // called)" against "wanted: no tool call at all" and is still marked
+      // failed. Without this line the reader concludes the scoring is broken, or
+      // worse, that the model refused when the provider actually fell over.
+      ...(r.error ? [`      ERROR:   ${r.error} — the provider failed; this is not a behavioural result`] : []),
       ...(spec?.typedId ? [`      typed twin: ${spec.typedId} — compare against the same id in the typed report.`] : []),
       `      why:     ${r.case.why}`,
       ...(r.error ? [`      error:   ${r.error}`] : []),
