@@ -263,6 +263,14 @@ export const MODULES: ModuleDef[] = [
     glyph: "⌘",
     match: ["run_command", "read_file", "write_file", "list_dir", "web_fetch", "web_search", "tool_", "data_status", "reference_db_", "reference_lookup", "reference_roles"],
   },
+  {
+    key: "research",
+    label: "Research",
+    blurb: "Multi-source web research with citations, and payer policy changes matched to the codes you bill.",
+    note: "A claim with no source is not reported as a claim — it is listed as unsupported. Sources are tiered, so a CMS page and a vendor blog do not carry the same weight.",
+    glyph: "🔎",
+    match: ["research_"],
+  },
 ];
 
 const OTHER: ModuleDef = {

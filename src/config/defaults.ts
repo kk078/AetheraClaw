@@ -84,5 +84,25 @@ export const DEFAULT_CONFIG_JSON5 = `{
   },
 
   swarm: { mode: "off" }, // "off" | "assist" | "autopilot-with-checkpoints"
+
+  // Talking to AetheraClaw at your desk. Distinct from 'voice' above, which is
+  // the telephony carrier used to call payers.
+  speech: {
+    enabled: false,
+    // "browser" needs nothing installed, but Chrome sends the audio to Google.
+    // "local" runs whisper.cpp + Piper here and nothing leaves the machine.
+    // "cloud" is fastest and most natural, and ships audio to a vendor.
+    engine: "browser",
+    // "push-to-talk" (hold the mic, or Ctrl+Space) or "always-on" with a wake word.
+    mode: "push-to-talk",
+    wakeWord: "hey aethera",
+    speakReplies: true,
+    maxSpokenChars: 1200,
+    // local: { whisperBin: 'whisper-cli', whisperModel: '/path/ggml-base.en.bin',
+    //          piperBin: 'piper', piperVoice: '/path/en_US-amy-medium.onnx' },
+    // cloud: { sttVendor: 'openai', ttsVendor: 'openai', ttsVoice: 'alloy',
+    //          sttKeyEnv: 'OPENAI_API_KEY', ttsKeyEnv: 'OPENAI_API_KEY' },
+    consent: { requireAcknowledgement: true, retainAudio: false },
+  },
 }
 `;

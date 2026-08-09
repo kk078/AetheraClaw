@@ -177,6 +177,59 @@ export const ConfigSchema = z.object({
       maxCallMinutes: z.number().int().positive().default(45),
     })
     .default({}),
+  // Deliberately a sibling of `voice` rather than a field inside it. `voice`
+  // already means "which telephony carrier places an outbound payer call";
+  // this is the operator talking to AetheraClaw at their own desk. They share
+  // the word "voice" in English and nothing else — same config key would make
+  // `voice.provider: "twilio"` and a browser microphone one setting.
+  speech: z
+    .object({
+      // Off until asked for. A microphone that turns itself on because a
+      // package was installed is the wrong default anywhere, and doubly so on
+      // a workstation inside a clinic.
+      enabled: z.boolean().default(false),
+      // browser = Web Speech API, zero install, but Chrome ships the audio to
+      // Google. local = whisper.cpp + Piper, nothing leaves the machine.
+      // cloud = a vendor API, best latency, worst PHI posture.
+      engine: z.enum(["browser", "local", "cloud"]).default("browser"),
+      // Push-to-talk is the default because a hot microphone in a room where
+      // patients are discussed records the room, not the request.
+      mode: z.enum(["push-to-talk", "always-on"]).default("push-to-talk"),
+      wakeWord: z.string().default("hey aethera").describe("Only used when mode is always-on"),
+      speakReplies: z.boolean().default(true),
+      /** Spoken replies are cut at a sentence boundary past this; a five-minute monologue is not an answer. */
+      maxSpokenChars: z.number().int().positive().default(1200),
+      local: z
+        .object({
+          whisperBin: z.string().default("whisper-cli"),
+          whisperModel: z.string().default("").describe("Path to a ggml Whisper model file"),
+          piperBin: z.string().default("piper"),
+          piperVoice: z.string().default("").describe("Path to a Piper .onnx voice"),
+        })
+        .default({}),
+      cloud: z
+        .object({
+          sttVendor: z.enum(["openai", "deepgram"]).default("openai"),
+          ttsVendor: z.enum(["openai", "elevenlabs"]).default("openai"),
+          sttModel: z.string().default("whisper-1"),
+          ttsModel: z.string().default("tts-1"),
+          ttsVoice: z.string().default("alloy"),
+          // The env var NAME, never the key — same convention as Twilio above
+          // and the payer portals.
+          sttKeyEnv: z.string().default("OPENAI_API_KEY"),
+          ttsKeyEnv: z.string().default("OPENAI_API_KEY"),
+        })
+        .default({}),
+      consent: z
+        .object({
+          /** The browser asks once per session before the microphone is first opened. */
+          requireAcknowledgement: z.boolean().default(true),
+          /** Off: captured audio is transcribed and dropped, never written to disk. */
+          retainAudio: z.boolean().default(false),
+        })
+        .default({}),
+    })
+    .default({}),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

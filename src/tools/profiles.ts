@@ -29,8 +29,14 @@ export interface Profile {
 // `data_status` is here rather than in a domain profile because every profile can
 // be asked a question the missing datasets answer, and "I could not check" has to
 // be reachable from all of them.
+// `research_deep` joins them for the same reason: every profile gets asked
+// something the installed datasets do not cover — a payer's own policy, a rule
+// that changed last month — and the honest answer to those is a cited one, not
+// a guess. `research_payer_policy` is narrower and stays in the profiles that
+// deal with payer behaviour rather than costing every profile a slot.
 const BASE = ["run_command", "read_file", "write_file", "list_dir", "web_fetch", "web_search",
-  "tool_search", "tool_describe", "tool_invoke", "data_status", "tenant_current", "phi_access_record"];
+  "tool_search", "tool_describe", "tool_invoke", "data_status", "tenant_current", "phi_access_record",
+  "research_deep"];
 
 export const PROFILES: Profile[] = [
   {
@@ -58,6 +64,7 @@ export const PROFILES: Profile[] = [
     description: "Work denials: explain them, predict them, fight them, and run the payer twin.",
     include: [
       ...BASE,
+      "research_payer_policy",
       "denial_", "appeal_draft", "worklist_", "twin_", "payer_twin_adjudicate", "claim_gauntlet",
       "audit_track", "audit_list", "audit_update", "audit_response_draft", "audit_deadline_calculator",
       "coverage_", "timely_filing_", "ack_parse_277ca", "era_parse_835",
@@ -68,6 +75,7 @@ export const PROFILES: Profile[] = [
     description: "Money: variance, fee schedules, forecasting, market rates, value-based care.",
     include: [
       ...BASE,
+      "research_payer_policy",
       "payment_variance", "reimbursement_estimate", "fee_schedule_drift", "analytics_query",
       "kpi_dashboard", "contract_rate_",
       "revenue_model_fit", "cash_forecast", "simulate_scenario", "forecast_", "patient_",
@@ -80,6 +88,7 @@ export const PROFILES: Profile[] = [
     description: "Run the practice: credentialing, compliance, audit chain, swarm, portals, calls, email.",
     include: [
       ...BASE,
+      "research_payer_policy",
       "credentialing_", "policy_", "sentinel_", "audit_", "swarm_", "portal_", "payer_call_",
       "call_", "ivr_map_", "email_", "mail_", "code_update_", "code_set_register", "a2a_", "report_generate",
       "phi_access_review",

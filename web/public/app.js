@@ -810,6 +810,11 @@ function connect(sessionId) {
 
   ws.addEventListener("message", (ev) => {
     const e = JSON.parse(ev.data);
+    // One seam for anything that wants to observe the stream without being
+    // wired into this switch. voice.js listens here rather than wrapping the
+    // socket, so the transcript layer stays a separate file that can be deleted
+    // without touching the chat client.
+    window.dispatchEvent(new CustomEvent("aethera:event", { detail: e }));
     switch (e.type) {
       case "turn_started":
         state.turnRunning = true;

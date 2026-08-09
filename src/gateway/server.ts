@@ -20,6 +20,8 @@ import { saveDocument } from "../ingest/store.js";
 import { credentialsPath, loadCredentials, maskKey, removeCredential, resolveKey, setCredential, shapeWarning } from "../config/credentials.js";
 import { discoverLocal } from "../providers/discover.js";
 import type { ProviderName } from "../config/config.js";
+import { createSpeechProvider, speechStatus } from "../speech/providers/index.js";
+import { toSpeakable } from "../speech/speakable.js";
 
 /**
  * Above this many rows, the overview does not compute KPIs.
@@ -263,6 +265,94 @@ export async function buildServer(opts: {
     };
   });
 
+  // ── Speech ─────────────────────────────────────────────────────────────────
+  // Three engines sit behind one interface, and which one runs decides WHERE the
+  // audio goes. The browser engine never reaches these routes at all — it
+  // captures, recognises and speaks entirely in the page — so a request arriving
+  // here under `engine: "browser"` is a misconfiguration worth naming rather
+  // than quietly serving.
+
+  /**
+   * What the browser needs to know before it opens a microphone.
+   *
+   * Deliberately includes the PHI posture as a field rather than leaving the UI
+   * to infer it from the engine name. The browser engine ships audio to Google,
+   * and a console that does not say so on the screen where consent is given is
+   * not obtaining consent to the thing that actually happens.
+   */
+  app.get("/api/speech/config", async () => {
+    const s = config.speech;
+    return {
+      enabled: s.enabled,
+      engine: s.engine,
+      // The browser only does capture/playback itself for the browser engine;
+      // otherwise it posts audio here and plays back what it gets.
+      runsInBrowser: s.engine === "browser",
+      mode: s.mode,
+      wakeWord: s.wakeWord,
+      speakReplies: s.speakReplies,
+      maxSpokenChars: s.maxSpokenChars,
+      requireAcknowledgement: s.consent.requireAcknowledgement,
+      retainAudio: s.consent.retainAudio,
+      status: speechStatus(s, process.env),
+    };
+  });
+
+  app.post("/api/speech/transcribe", async (req, reply) => {
+    if (!config.speech.enabled) return reply.code(400).send({ error: "speech is disabled — set speech.enabled in config.json5" });
+    const raw = req.body;
+    const audio = Buffer.isBuffer(raw) ? raw : null;
+    if (!audio || audio.length === 0) return reply.code(400).send({ error: "empty body" });
+    const q = req.query as { mime?: string };
+    try {
+      const provider = createSpeechProvider(config.speech);
+      if (provider.runsInBrowser) {
+        return reply.code(400).send({ error: "engine is 'browser' — recognition happens in the page and must not be posted here" });
+      }
+      const result = await provider.transcribe(audio, String(q.mime ?? "audio/webm"));
+      if (result.error) return reply.code(502).send({ error: result.error });
+      return { text: result.text };
+    } catch (err) {
+      return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post("/api/speech/synthesize", async (req, reply) => {
+    if (!config.speech.enabled) return reply.code(400).send({ error: "speech is disabled — set speech.enabled in config.json5" });
+    const raw = req.body;
+    const text = Buffer.isBuffer(raw) ? raw.toString("utf8") : typeof raw === "string" ? raw : "";
+    if (!text.trim()) return reply.code(400).send({ error: "empty body" });
+    try {
+      const provider = createSpeechProvider(config.speech);
+      if (provider.runsInBrowser) {
+        return reply.code(400).send({ error: "engine is 'browser' — speech synthesis happens in the page" });
+      }
+      // Speak the SPOKEN form, not the markdown. Reading "**99213**" aloud as
+      // "star star ninety-nine thousand two hundred thirteen" is the failure
+      // this normalization exists to prevent.
+      const spoken = toSpeakable(text, { maxChars: config.speech.maxSpokenChars });
+      const result = await provider.synthesize(spoken.text);
+      if ("error" in result) return reply.code(502).send({ error: result.error });
+      return reply.header("content-type", result.mimeType).send(result.audio);
+    } catch (err) {
+      return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  /**
+   * Markdown in, speech-ready text out — with no audio involved.
+   *
+   * The browser engine synthesises locally but must not speak raw markdown, and
+   * the normalization is domain logic (a CPT code is read digit by digit) that
+   * belongs on the server beside its tests rather than reimplemented in JS in
+   * the page where nothing checks it.
+   */
+  app.post("/api/speech/speakable", async (req, reply) => {
+    const raw = req.body;
+    const text = Buffer.isBuffer(raw) ? raw.toString("utf8") : typeof raw === "string" ? raw : "";
+    if (!text.trim()) return reply.code(400).send({ error: "empty body" });
+    return toSpeakable(text, { maxChars: config.speech.maxSpokenChars });
+  });
 
   // ── Providers and keys ─────────────────────────────────────────────────────
   // Entering a key in the console rather than a terminal. Two rules hold here:

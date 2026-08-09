@@ -680,6 +680,52 @@ Three things it refuses, each naming what to do instead: a **scanned PDF** (no t
 
 **Coder training** — `training_drill` draws cases weighted toward what the practice actually bills, since that is what makes them relevant, and **names what that weighting misses**: a bank shaped by the practice's history cannot ask about anything the practice has never billed, and a fifth of every draw is spread evenly across topics so the rare ones stay genuinely reachable rather than reachable in arithmetic. Cases carry **defensible alternatives**, because real coding has genuine ambiguity and grading one right answer where two coders would both survive an audit teaches a coder to distrust a correct instinct. Every answer is given with a stated confidence, and `training_progress` reports **calibration beside accuracy** — a Brier score, plus the specific list of answers that were wrong at high confidence. That list is the point: the coder who costs a practice money is not the one who gets things wrong, it is the one who gets things wrong confidently, because nobody double-checks a coder who never flags anything. Topics with few attempts show their Wilson interval instead of a number, since three attempts is not a skill level.
 
+## Talking to it
+
+A coder working a denial has both hands on a chart. The console grew a microphone
+for that, and it is **off until you turn it on** — a package install is not a
+reason to open a microphone on a workstation inside a clinic.
+
+```json5
+speech: { enabled: true, engine: "browser", mode: "push-to-talk" }
+```
+
+Hold the 🎙 button or **Ctrl+Space**, speak, release. **Escape** stops a spoken
+reply mid-sentence, and so does talking over it — a microphone that hears the
+speakers transcribes the assistant's own answer back as the next question, which
+is a loop rather than a conversation. `mode: "always-on"` adds a wake word
+("hey aethera") and is opt-in for the obvious reason.
+
+**Three engines, and the difference between them is where your audio goes.** The
+console says which one is active on the consent dialog, in those words, because a
+prompt that says "voice input may be processed" is not consent to the thing that
+actually happens:
+
+| `engine` | Install | Where audio goes | Use it when |
+|---|---|---|---|
+| `browser` | nothing | **Google** — Chrome's recognizer is a network service | trying it out, synthetic data |
+| `local` | whisper.cpp + Piper | nowhere; it stays on the machine | the only defensible choice near real PHI |
+| `cloud` | an API key | a vendor (OpenAI/Deepgram/ElevenLabs) | best latency and the most natural voice |
+
+Only `local` keeps audio on the machine. The other two are fine for the
+de-identified posture this build already declares and are wrong for anything else.
+
+**Codes are read the way a biller says them.** A text-to-speech engine handed
+`99213` says "ninety-nine thousand two hundred thirteen", which is not a code
+anybody recognises, and a recognizer handed "nine nine two one three" returns
+words. Both directions are normalized in `src/speech/` — digit-wise CPT and
+HCPCS, `E11.65` as "E one one point six five", modifiers, money, dates, and the
+initialisms (NCCI, CARC, 835, wRVU) spelled rather than pronounced. Markdown is
+converted before it is spoken: code fences are dropped, tables become "a table of
+five rows" instead of being read cell by cell, and links keep their text and lose
+the URL. That normalization is server-side **beside its tests** rather than
+reimplemented in the page, which is how the two would drift.
+
+Approval still shows the dialog. Voice adds a second way to answer it — "approve"
+or "deny" — and anything that is not clearly one or the other falls through to the
+composer rather than being guessed, because a misheard "approve" runs a tool
+nobody authorised.
+
 ## Running it
 
 It runs on your own machine — there is no hosted instance. `127.0.0.1:4180` only answers on the box where you started the gateway.

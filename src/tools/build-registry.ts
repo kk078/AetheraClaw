@@ -6,6 +6,7 @@ import { META_TOOLS } from "../tools/meta.js";
 import { createShellTool } from "../tools/shell.js";
 import { listDirTool, readFileTool, writeFileTool } from "../tools/fs.js";
 import { webFetchTool, webSearchFallbackTool } from "../tools/web-fetch.js";
+import { researchTools } from "../research/tools.js";
 import { registerHealthcareTools } from "../tools/healthcare/index.js";
 import {
   emailDraftTool,
@@ -135,6 +136,11 @@ export function buildRegistry(config: Config, store: MemoryStore): ToolRegistry 
   registry.registerAll([readFileTool, writeFileTool, listDirTool, webFetchTool]);
   registry.registerAll(META_TOOLS);
   if (config.provider !== "anthropic") registry.register(webSearchFallbackTool);
+  // Research is registered for EVERY provider, unlike web_search above. It does
+  // its own searching and fetching through the guarded fetcher rather than the
+  // provider's server-side tool, so an Anthropic deployment gets the cited,
+  // tiered answer too instead of falling back to a raw result list.
+  registry.registerAll(researchTools);
   registerHealthcareTools(registry, { config, store });
   registry.registerAll([
     emailPollTool,

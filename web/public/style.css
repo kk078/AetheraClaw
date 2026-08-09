@@ -846,3 +846,27 @@ text.ring-txt { fill: var(--ink); font-size: 15px; font-family: var(--mono); fon
 .provmsg { font: 11px var(--mono); color: #fbbf24; }
 .provcmd { display: block; margin-top: 8px; font: 11.5px var(--mono); color: #22d3ee; word-break: break-all; }
 .banner.warn { border-color: rgb(180 83 9 / .55); background: rgb(69 26 3 / .35); color: #fde68a; }
+
+/* ── Voice ─────────────────────────────────────────────────────────────────
+   The mic sits beside the paperclip because both are "bring something in".
+   The pill is fixed and always visible while the mic is live: an indicator
+   that scrolls away is not an indicator, and a recording state the user
+   cannot see at a glance is the one thing this feature must never have. */
+.attach.mic.on { opacity: 1; color: #f87171; animation: mic-pulse 1.2s ease-in-out infinite; }
+.attach.mic.speaking { opacity: 1; color: var(--accent); }
+@keyframes mic-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.18); } }
+
+.voice-pill {
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px; z-index: 60;
+  padding: 7px 14px; border-radius: 999px;
+  background: rgb(15 23 42 / .92); border: 1px solid rgb(148 163 184 / .28);
+  font: 11.5px var(--mono); color: var(--ink-2); letter-spacing: .04em;
+  box-shadow: 0 6px 22px rgb(0 0 0 / .38);
+}
+.voice-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); }
+.voice-pill[data-phase="listening"] { border-color: rgb(248 113 113 / .5); color: #fca5a5; }
+.voice-pill[data-phase="listening"] .dot { background: #f87171; animation: mic-pulse 1.2s ease-in-out infinite; }
+.voice-pill[data-phase="thinking"] .dot { background: #fbbf24; }
+.voice-pill[data-phase="speaking"] { border-color: rgb(34 211 238 / .45); color: #67e8f9; }
+.voice-pill[data-phase="speaking"] .dot { background: #22d3ee; }

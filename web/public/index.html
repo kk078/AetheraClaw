@@ -238,5 +238,8 @@
 
 <script src="/views.js"></script>
 <script src="/app.js"></script>
+<!-- Loaded last and on purpose: voice.js reads app.js's globals and the
+     `aethera:event` seam. It removes itself quietly when speech is disabled. -->
+<script src="/voice.js"></script>
 </body>
 </html>
