@@ -92,8 +92,18 @@ function readPath(context: Record<string, unknown>, path: string): unknown {
 function coerce(value: unknown, type: AnswerType): string | number | boolean | null {
   if (value === undefined || value === null || value === "") return null;
   switch (type) {
-    case "boolean":
-      return typeof value === "boolean" ? value : String(value).toLowerCase() === "true";
+    case "boolean": {
+      // Recognise the standard string encodings of true/false from EHR and claims
+      // data. `=== "true"` alone turned "yes"/"Y"/"1" into a DEFINITE false — a
+      // prior-auth answer asserting the patient is NOT on anticoagulation when the
+      // record says they are, inverted toward clinical harm. Anything unrecognised
+      // is left UNANSWERED (null) for the clinician, never guessed as false.
+      if (typeof value === "boolean") return value;
+      const s = String(value).trim().toLowerCase();
+      if (["true", "yes", "y", "1", "t"].includes(s)) return true;
+      if (["false", "no", "n", "0", "f"].includes(s)) return false;
+      return null;
+    }
     case "integer":
       return Number.isFinite(Number(value)) ? Math.round(Number(value)) : null;
     case "decimal":

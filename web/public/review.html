@@ -77,22 +77,38 @@ function render() {
     if (item.claimRef || item.claim_ref) bits.push(`claim ${item.claimRef || item.claim_ref}`);
     if (item.payer) bits.push(item.payer);
 
-    card.innerHTML = `
-      <div class="code">${item.kind} · ${item.suggestedCode || item.suggested_code}</div>
-      <div class="meta">${item.suggestedDescription || item.suggested_description || ""}</div>
-      <div class="meta">${bits.join(" · ")}</div>
-      ${item.rationale ? `<div class="meta">Why: ${item.rationale}</div>` : ""}
-      ${item.provenance ? `<div class="quote">${item.provenance}</div>` : '<div class="meta">⚠ No supporting documentation attached.</div>'}
-      <div class="actions">
-        <select name="action">
-          <option value="">— no decision —</option>
-          <option value="accept">accept</option>
-          <option value="edit">edit</option>
-          <option value="reject">reject</option>
-        </select>
-        <input name="final" placeholder="code used" />
-        <input name="reason" placeholder="reason (required to edit or reject)" />
-      </div>`;
+    // Every dynamic value goes through textContent, never innerHTML. `provenance`
+    // is text lifted VERBATIM from an uploaded document (code_suggest quotes the
+    // documentation), so interpolating it into innerHTML was a stored-XSS sink:
+    // a document containing `<img src=x onerror=…>` would execute on the gateway
+    // origin — same origin as provider keys, every session, and stored PHI — the
+    // moment a coder pasted the queue in. The static controls carry no dynamic
+    // data and stay as markup.
+    const meta = (text, cls = "meta") => {
+      const el = document.createElement("div");
+      el.className = cls;
+      el.textContent = text;
+      return el;
+    };
+    card.appendChild(meta(`${item.kind} · ${item.suggestedCode || item.suggested_code}`, "code"));
+    card.appendChild(meta(item.suggestedDescription || item.suggested_description || ""));
+    card.appendChild(meta(bits.join(" · ")));
+    if (item.rationale) card.appendChild(meta(`Why: ${item.rationale}`));
+    card.appendChild(
+      item.provenance ? meta(item.provenance, "quote") : meta("⚠ No supporting documentation attached."),
+    );
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    actions.innerHTML = `
+      <select name="action">
+        <option value="">— no decision —</option>
+        <option value="accept">accept</option>
+        <option value="edit">edit</option>
+        <option value="reject">reject</option>
+      </select>
+      <input name="final" placeholder="code used" />
+      <input name="reason" placeholder="reason (required to edit or reject)" />`;
+    card.appendChild(actions);
     queueEl.appendChild(card);
   }
 }

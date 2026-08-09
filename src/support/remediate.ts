@@ -78,9 +78,14 @@ export function checkStatement(sql: string): StatementCheck {
     if (f.pattern.test(normalized)) return { ok: false, reason: `Refused: ${f.why}.` };
   }
 
-  // Multiple statements: the second one is the one nobody reviewed.
+  // Strings blanked first, THEN comments removed from what remains — so a `--`
+  // or `/* */` that was inside a string literal is not mistaken for a comment,
+  // and a comment cannot smuggle a `where`/`;` past the guards below. Without the
+  // comment strip, `DELETE FROM t /* where */` satisfied the WHERE check and ran
+  // as a full-table delete, defeating the "no unbounded statement" invariant.
   const withoutStrings = normalized.replace(/'(?:[^']|'')*'/g, "''");
-  if (withoutStrings.includes(";")) {
+  const withoutComments = withoutStrings.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--[^\n]*/g, " ");
+  if (withoutComments.includes(";")) {
     return {
       ok: false,
       reason: "Refused: more than one statement. Only the first would be previewed, and the second is the one nobody reviewed. Submit them separately.",
@@ -94,7 +99,7 @@ export function checkStatement(sql: string): StatementCheck {
   if (update || del) {
     const kind: StatementKind = update ? "update" : "delete";
     const table = (update ?? del)![1];
-    if (!/\bwhere\b/i.test(withoutStrings)) {
+    if (!/\bwhere\b/i.test(withoutComments)) {
       return {
         ok: false,
         reason: `Refused: ${kind.toUpperCase()} with no WHERE clause touches every row in ${table}. This is the single most common way production data is destroyed. There is no override — if you genuinely mean every row, write WHERE 1=1 and own it.`,

@@ -767,9 +767,25 @@ function wsSend(payload) {
 
 function connect(sessionId) {
   state.ws?.close();
-  outbox = [];
+  // Only drop queued messages when switching to a DIFFERENT session. Clearing
+  // unconditionally lost a message that was queued while the socket was down and
+  // then reconnected to the same session — the composer had already cleared, so
+  // it read as sent but was silently discarded.
+  if (sessionId !== state.connectedSessionId) outbox = [];
+  state.connectedSessionId = sessionId;
   const ws = new WebSocket(`${location.origin.replace(/^http/, "ws")}/ws?session=${sessionId}`);
   state.ws = ws;
+
+  // A disconnect mid-turn never delivers turn_completed, so Send stayed disabled
+  // forever. Re-enable it (and clear the running flag) so the user is not frozen;
+  // the turn's true outcome is unknown after a drop, and letting them retry beats
+  // a dead UI.
+  const onDrop = () => {
+    if (state.turnRunning) {
+      state.turnRunning = false;
+      $("#send").disabled = false;
+    }
+  };
 
   ws.addEventListener("open", () => {
     setConn("ok", sessionId.slice(0, 16));
@@ -778,8 +794,14 @@ function connect(sessionId) {
     outbox = [];
     for (const p of queued) ws.send(JSON.stringify(p));
   });
-  ws.addEventListener("close", () => setConn("idle", "no session"));
-  ws.addEventListener("error", () => setConn("bad", "stream error"));
+  ws.addEventListener("close", () => {
+    setConn("idle", "no session");
+    onDrop();
+  });
+  ws.addEventListener("error", () => {
+    setConn("bad", "stream error");
+    onDrop();
+  });
 
   ws.addEventListener("message", (ev) => {
     const e = JSON.parse(ev.data);
@@ -805,6 +827,17 @@ function connect(sessionId) {
         break;
       case "approval_request":
         askApproval(e);
+        break;
+      case "approval_resolved":
+        // The server resolved this request — by another client, or by the 120s
+        // auto-deny timer. Without handling it, a stale modal lingered: a click
+        // on it either no-op'd server-side while the UI closed as if approved, or
+        // (once the next request repainted the modal in place) approved a call the
+        // operator never read. Close it only if it is the one on screen.
+        if (state.pendingApproval === e.approvalId) {
+          state.pendingApproval = null;
+          $("#approve-scrim").classList.remove("show");
+        }
         break;
       case "turn_completed":
         endGroup();

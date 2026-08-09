@@ -59,7 +59,9 @@ function storeMessage(
       message.id,
       mailbox,
       message.from,
-      message.subject,
+      // Redact the subject too when quarantining — PHI in the subject is what
+      // triggered it, and storing it raw defeats the quarantine.
+      quarantined ? redact(message.subject) : message.subject,
       quarantined ? "" : message.text,
       c.kind,
       c.confidence,

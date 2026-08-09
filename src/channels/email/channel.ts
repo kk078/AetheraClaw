@@ -3,7 +3,7 @@ import type { MemoryStore } from "../../memory/store.js";
 import type { AgentEvent } from "../../shared/events.js";
 import type { Channel } from "../types.js";
 import { newId } from "../../shared/ids.js";
-import { classify, renderClassification } from "./classify.js";
+import { classify, redact, renderClassification } from "./classify.js";
 import { fetchInbox, imapCredentials } from "./transport.js";
 
 // ── Email channel ────────────────────────────────────────────────────────────
@@ -115,7 +115,9 @@ export class EmailChannel implements Channel {
         message.id,
         mailbox,
         message.from,
-        message.subject,
+        // Redact the subject too when quarantining — detectPhi covers subject+text,
+        // so an identifier in the subject is exactly what triggered quarantine.
+        quarantined ? redact(message.subject) : message.subject,
         quarantined ? "" : message.text,
         c.kind,
         c.confidence,

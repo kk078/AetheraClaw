@@ -341,9 +341,15 @@ export function classify(message: InboundMessage): Classification {
 }
 
 export function renderClassification(message: InboundMessage, c: Classification): string {
+  // Redact the subject when the message carries PHI. detectPhi runs over
+  // subject+text, so a message is quarantined precisely when either may hold an
+  // identifier — yet the subject was rendered (and stored) raw, leaking an
+  // SSN/MBI in a "Records request re SSN 123-45-6789" line straight into the
+  // session transcript this deployment is not approved to hold.
+  const subject = c.phi.length > 0 ? redact(message.subject) : message.subject;
   const lines: string[] = [
     `${c.kind}${c.confidence > 0 ? ` (${(c.confidence * 100).toFixed(0)}% confidence)` : ""} — from ${message.from}`,
-    `Subject: ${message.subject}`,
+    `Subject: ${subject}`,
     "",
     c.why,
   ];
