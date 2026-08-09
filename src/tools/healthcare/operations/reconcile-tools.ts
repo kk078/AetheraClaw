@@ -2,7 +2,7 @@ import { z } from "zod";
 import { defineTool } from "../../registry.js";
 import { loadEras } from "../analytics.js";
 import type { MemoryStore } from "../../../memory/store.js";
-import { parse835 } from "../x12/835.js";
+import { parse835All } from "../x12/835.js";
 import {
   matchRecoupments,
   reconcileEra,
@@ -23,7 +23,21 @@ export const eraReconcileTool = defineTool({
   }),
   execute: async (input, ctx) => {
     if (input.era_text) {
-      return { content: renderReconciliation(reconcileEra(parse835(input.era_text))) };
+      // Reconcile per transaction set: a batched file carries several cheques,
+      // each of which must tie out on its own — aggregating them first would let
+      // one cheque's shortfall hide behind another's surplus.
+      const reports = parse835All(input.era_text).map(reconcileEra);
+      const out = reports.map(renderReconciliation);
+      if (reports.length > 1) {
+        const unbalanced = reports.filter((r) => !r.balanced).length;
+        out.push(
+          "",
+          unbalanced === 0
+            ? `All ${reports.length} remittance(s) in this file balance.`
+            : `${unbalanced} of ${reports.length} remittance(s) in this file DO NOT balance.`,
+        );
+      }
+      return { content: out.join("\n\n") };
     }
     const store = ctx.services.store as MemoryStore | undefined;
     if (!store?.db) return { content: "No 835 supplied and no store available. Pass era_text.", isError: true };

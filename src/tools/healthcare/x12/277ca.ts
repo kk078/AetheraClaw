@@ -158,7 +158,12 @@ function decodeStatus(raw: string | undefined): AckStatus | null {
   return {
     category,
     categoryDesc: cat?.desc ?? `category ${category} — not in bundled dataset; consult the X12 claim status category code list`,
-    accepted: cat?.accepted ?? true,
+    // Unknown category defaults to NOT accepted. Defaulting to accepted banked a
+    // timely-filing proof and skipped the rejection worklist for a claim the
+    // payer never actually acknowledged — a bogus proof that could later anchor a
+    // losing appeal. An unknown code is a claim a person should look at, not one
+    // to quietly mark good.
+    accepted: cat?.accepted ?? false,
     statusCode,
     statusDesc: st?.desc ?? (statusCode ? `status code ${statusCode} — not in bundled dataset; consult the X12 claim status code list` : ""),
     fix: st?.fix ?? (statusCode ? "Look up this status code in the X12 list to determine the correction." : ""),
@@ -372,6 +377,17 @@ export const ackParse277caTool = defineTool({
       if (input.create_worklist_items) {
         for (const c of rejected) {
           const reason = c.statuses[0];
+          // Skip a claim that already has an open rejection item. Reparsing the
+          // same 277CA is routine — a clearinghouse download and an email
+          // attachment are the same file — and without this each reparse opened
+          // a second identical item, double-counting the work queue. The sibling
+          // 835 denial path (ingestDenials) dedupes the same way.
+          const already = store.db
+            .prepare(
+              "SELECT id FROM worklist_items WHERE kind = 'rejection' AND status IN ('open','in_progress') AND json_extract(detail_json, '$.claim_id') = ?",
+            )
+            .get(c.claimId);
+          if (already) continue;
           store.db
             .prepare(
               "INSERT INTO worklist_items (id, kind, title, detail_json, status, priority, due_at, created_at, updated_at) VALUES (?, 'rejection', ?, ?, 'open', ?, ?, ?, ?)",

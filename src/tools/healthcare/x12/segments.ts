@@ -7,14 +7,23 @@ export interface Segment {
 }
 
 export function parseX12(text: string): Segment[] {
-  const clean = text.replace(/\r?\n/g, "").trim();
-  if (!clean.startsWith("ISA")) throw new Error("not an X12 interchange (missing ISA)");
-  // ISA is fixed-length; element separator is char 3, segment terminator char 105.
-  const elemSep = clean[3];
-  const segTerm = clean[105] ?? "~";
-  return clean
+  // Do NOT strip line breaks before reading the terminator. Some clearinghouses
+  // emit interchanges with NO '~', using the newline itself as the segment
+  // terminator — and deleting the newlines first left char 105 pointing at the
+  // first character of GS, so the file split on every 'G' into garbage segment
+  // ids with no error. The ISA is fixed-length, so the real element separator
+  // (char 3) and segment terminator (char 105) are read from the raw text, only
+  // a BOM and leading whitespace removed.
+  const raw = text.replace(/^﻿/, "").replace(/^\s+/, "");
+  if (!raw.startsWith("ISA")) throw new Error("not an X12 interchange (missing ISA)");
+  const elemSep = raw[3];
+  const segTerm = raw[105] ?? "~";
+  return raw
     .split(segTerm)
-    .map((s) => s.trim())
+    // A terminator of '~' is commonly followed by a newline for readability, and
+    // a newline terminator may be part of a CRLF pair — strip any residual line
+    // breaks from each segment either way.
+    .map((s) => s.replace(/[\r\n]+/g, "").trim())
     .filter((s) => s.length > 0)
     .map((s) => {
       const parts = s.split(elemSep);

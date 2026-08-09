@@ -5,7 +5,7 @@ import { npiLuhnValid } from "../npi.js";
 import { MSP_TYPE_CODES } from "../cob.js";
 import { ClaimSchema, type ClaimInput } from "./837.js";
 import { parse835, type EraAdjustment, type EraClaim, type EraServiceLine } from "./835.js";
-import { baseProcedureCode, envelope, seg, serializeX12, type Segment } from "./segments.js";
+import { baseProcedureCode, envelope, procedureModifiers, seg, serializeX12, type Segment } from "./segments.js";
 
 // ── Secondary claims (837 with COB loops) ────────────────────────────────────
 // A secondary claim is the original claim plus proof of what the primary did
@@ -21,14 +21,43 @@ const CENT = 0.005; // tolerance for float comparison of money
  * the single most common reason a secondary claim is rejected up front
  * (277CA status 400), and it is entirely preventable before submission.
  */
+/**
+ * Pair each claim line to the primary's adjudication for THAT line.
+ *
+ * Matching on the base code alone collapsed a claim that bills the same CPT on
+ * two lines (bilateral 20610-RT / 20610-LT, or a split-units resubmission) onto
+ * the FIRST 835 line for both — overstating the primary's payment and dropping
+ * the second line's denial, and invisibly, because each fabricated line still
+ * balanced internally. This matches on code AND modifiers first, then code
+ * alone, and CONSUMES each remittance line so a second same-code claim line
+ * takes the next one rather than re-using the first.
+ */
+function pairPrimaryLines(
+  claimLines: ClaimInput["service_lines"],
+  paidLines: EraServiceLine[],
+): Array<EraServiceLine | undefined> {
+  const pool = paidLines.map((l) => ({ l, used: false }));
+  const norm = (m: string[]): string => [...m].map((x) => x.toUpperCase()).sort().join(",");
+  return claimLines.map((cl) => {
+    const code = baseProcedureCode(cl.cpt_hcpcs);
+    const mods = norm(cl.modifiers ?? []);
+    const hit =
+      pool.find((p) => !p.used && baseProcedureCode(p.l.procedure) === code && norm(procedureModifiers(p.l.procedure)) === mods) ??
+      pool.find((p) => !p.used && baseProcedureCode(p.l.procedure) === code);
+    if (hit) hit.used = true;
+    return hit?.l;
+  });
+}
+
 export function validateCobBalance(claim: ClaimInput, primary: EraClaim): ScrubFinding[] {
   const out: ScrubFinding[] = [];
   const paidLines = primary.lines.filter((l) => l.procedure !== "(claim level)");
+  const matches = pairPrimaryLines(claim.service_lines, paidLines);
 
   for (const [i, line] of claim.service_lines.entries()) {
     const n = i + 1;
     const code = baseProcedureCode(line.cpt_hcpcs);
-    const match = paidLines.find((l) => baseProcedureCode(l.procedure) === code);
+    const match = matches[i];
     if (!match) {
       out.push(
         finding(
@@ -166,8 +195,8 @@ export function buildSecondary837(
   body.push(seg("DTP", "573", "D8", opts.adjudicationDate));
 
   // ── Service lines, each with loop 2430 line adjudication ────────────────
+  const lineMatches = pairPrimaryLines(claim.service_lines, paidLines);
   claim.service_lines.forEach((line, i) => {
-    const code = baseProcedureCode(line.cpt_hcpcs);
     const proc = ["HC", line.cpt_hcpcs, ...(line.modifiers ?? [])].join(":");
     body.push(seg("LX", String(i + 1)));
     body.push(
@@ -175,7 +204,7 @@ export function buildSecondary837(
     );
     body.push(seg("DTP", "472", "D8", line.service_date));
 
-    const match = paidLines.find((l) => baseProcedureCode(l.procedure) === code);
+    const match = lineMatches[i];
     if (match) {
       body.push(seg("SVD", opts.primaryPayerId, match.paid.toFixed(2), proc, "", String(match.units || line.units)));
       body.push(...casSegments(match.adjustments));

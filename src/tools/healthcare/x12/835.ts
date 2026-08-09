@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { defineTool } from "../../registry.js";
 import { explainDenial } from "../denial-codes.js";
-import { parseX12 } from "./segments.js";
+import { parseX12, type Segment } from "./segments.js";
 import { newId } from "../../../shared/ids.js";
 import type { MemoryStore } from "../../../memory/store.js";
 import { denialCandidates, renderIngest, type IngestSummary } from "../prediction/intake.js";
@@ -65,8 +65,8 @@ export interface Era {
   providerAdjustments: EraProviderAdjustment[];
 }
 
-export function parse835(text: string): Era {
-  const segments = parseX12(text);
+/** Parse one transaction set's segments into an Era. */
+function segmentsToEra(segments: Segment[]): Era {
   const era: Era = { payer: "", payee: "", checkOrEftAmount: 0, claims: [], providerAdjustments: [] };
   let claim: EraClaim | null = null;
   let line: EraServiceLine | null = null;
@@ -167,6 +167,49 @@ export function parse835(text: string): Era {
   return era;
 }
 
+/**
+ * Every 835 transaction set in the file, one Era each.
+ *
+ * A payer routinely batches several remittances — each its own BPR/cheque and
+ * its own ST…SE envelope — into a single interchange. Parsing the flat segment
+ * list as ONE Era kept only the last BPR while accumulating every claim, so a
+ * perfectly balanced batched file reported a phantom "-$100.00 DOES NOT BALANCE"
+ * (and two cheques with offsetting errors could conversely net to a false
+ * "balances"). Splitting on ST/SE keeps each cheque with its own claims.
+ */
+export function parse835All(text: string): Era[] {
+  const segments = parseX12(text);
+  const groups: Segment[][] = [];
+  let current: Segment[] | null = null;
+  for (const s of segments) {
+    if (s.id === "ST") {
+      current = [];
+      groups.push(current);
+    }
+    if (current) current.push(s);
+    if (s.id === "SE") current = null;
+  }
+  // No ST envelope at all (a bare 835 body) → the whole thing is one set.
+  return groups.length === 0 ? [segmentsToEra(segments)] : groups.map(segmentsToEra);
+}
+
+export function parse835(text: string): Era {
+  const eras = parse835All(text);
+  if (eras.length <= 1) return eras[0] ?? { payer: "", payee: "", checkOrEftAmount: 0, claims: [], providerAdjustments: [] };
+  // A batched file collapsed to one Era for the single-Era callers: sum the
+  // cheques, concatenate the claims and provider adjustments, keep the distinct
+  // payer/payee names. Per-cheque reconciliation uses parse835All instead, so
+  // this aggregate never has to individually balance.
+  const distinct = (xs: string[]) => [...new Set(xs.filter(Boolean))].join("; ");
+  return {
+    payer: distinct(eras.map((e) => e.payer)),
+    payee: distinct(eras.map((e) => e.payee)),
+    checkOrEftAmount: Math.round(eras.reduce((n, e) => n + e.checkOrEftAmount, 0) * 100) / 100,
+    claims: eras.flatMap((e) => e.claims),
+    providerAdjustments: eras.flatMap((e) => e.providerAdjustments),
+  };
+}
+
 export function summarizeEra(era: Era): string {
   const out: string[] = [
     `Payer: ${era.payer}  Payee: ${era.payee}  Payment: $${era.checkOrEftAmount.toFixed(2)}`,
@@ -179,7 +222,13 @@ export function summarizeEra(era: Era): string {
     for (const l of c.lines) {
       out.push(`  ${l.procedure}: charged $${l.charged.toFixed(2)} paid $${l.paid.toFixed(2)}`);
       for (const a of l.adjustments) {
-        out.push(`    ${a.group}-${a.carc}: -$${a.amount.toFixed(2)}`);
+        // CAS amounts are signed and a POSITIVE amount reduces the payment, so
+        // the effect on the cheque is its negation. A reversal remittance carries
+        // a negative amount that INCREASES payment; the old unconditional "-$"
+        // prefix rendered that as a garbled "-$-34.50" and read it as a
+        // deduction. Show the sign of the effect, once.
+        const effect = -a.amount;
+        out.push(`    ${a.group}-${a.carc}: ${effect < 0 ? "-" : "+"}$${Math.abs(a.amount).toFixed(2)}`);
         out.push(
           explainDenial(a.carc, l.rarcs)
             .split("\n")

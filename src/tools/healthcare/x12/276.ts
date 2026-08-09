@@ -65,7 +65,7 @@ export const STATUS_CATEGORY_276: Record<string, { desc: string; settled: boolea
   P5: { desc: "Pending — payer administrative or system hold", settled: false, action: "Held on the payer's side. Worth a call if it persists beyond their normal turnaround." },
   F0: { desc: "Finalized", settled: true, action: "A decision exists. Expect a remittance; if none arrived, the ERA delivery path is the problem rather than the claim." },
   F1: { desc: "Finalized — payment made as primary", settled: true, action: "Paid as primary. Reconcile against the 835." },
-  F2: { desc: "Finalized — payment made as secondary", settled: true, action: "Paid as secondary. Confirm the primary's adjudication carried over correctly." },
+  F2: { desc: "Finalized/Denial — the claim has been denied", settled: true, action: "Denied. Appeal rights exist and their deadline runs from the determination date, not from today. (X12 category F2 is Denial, not a secondary payment.)" },
   F3: { desc: "Finalized — revised, adjudication changed", settled: true, action: "The decision was revised. There may be a second remittance, or a takeback." },
   F4: { desc: "Finalized — adjudication complete, NO payment", settled: true, action: "Denied. Appeal rights exist and their deadline runs from the determination date, not from today." },
   F5: { desc: "Finalized — no payment, patient responsibility", settled: true, action: "Assigned to the patient. Bill them only after confirming the determination is correct." },
