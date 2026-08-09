@@ -192,20 +192,27 @@ export const a2aVerifyTool = defineTool({
   }),
   execute: async (input, ctx) => {
     let attestation: Attestation;
+    let isLocal = false;
     if (input.attestation_id) {
       const row = store(ctx).db.prepare("SELECT attestation_json FROM a2a_attestations WHERE id = ?").get(input.attestation_id) as
         | { attestation_json: string }
         | undefined;
       if (!row) return { content: `No attestation ${input.attestation_id}.`, isError: true };
       attestation = JSON.parse(row.attestation_json) as Attestation;
+      isLocal = true;
     } else if (Object.keys(input.attestation).length > 0) {
       attestation = input.attestation as unknown as Attestation;
     } else {
       return { content: "Pass an attestation_id or an attestation.", isError: true };
     }
 
+    // Only anchor-check an attestation of OURS against our own chain. A received
+    // counterparty attestation's auditSeq indexes THEIR chain, so comparing it to
+    // our seq-N hash is meaningless — and it reported a valid, correctly-signed
+    // attestation as tampered ("the records disagree"), which could make an
+    // operator reject genuine appeal evidence.
     const entry =
-      attestation.auditSeq > 0
+      isLocal && attestation.auditSeq > 0
         ? (store(ctx).db.prepare("SELECT seq, hash FROM audit_chain WHERE seq = ?").get(attestation.auditSeq) as
             | { seq: number; hash: string }
             | undefined)

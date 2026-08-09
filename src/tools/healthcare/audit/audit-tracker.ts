@@ -221,6 +221,17 @@ export const auditUpdateTool = defineTool({
     const out: string[] = [`Audit ${input.audit_id} → status=${next.status}`];
     const now = Date.now();
     const addWorklist = (title: string, dueYmd: string, priority: number) => {
+      // Skip if an open item with this exact title already exists for the audit.
+      // The appeal/recoupment blocks key off the MERGED row, so once a
+      // determination or demand-letter date is stored, EVERY later audit_update —
+      // even one editing only notes — re-fired these inserts, burying the queue in
+      // duplicate priority-90/100 items.
+      const already = db(ctx)
+        .prepare(
+          "SELECT id FROM worklist_items WHERE kind = 'audit' AND status IN ('open','in_progress') AND title = ? AND json_extract(detail_json, '$.audit_id') = ?",
+        )
+        .get(title, input.audit_id);
+      if (already) return;
       const dueMs = Date.UTC(Number(dueYmd.slice(0, 4)), Number(dueYmd.slice(4, 6)) - 1, Number(dueYmd.slice(6, 8)));
       db(ctx)
         .prepare(

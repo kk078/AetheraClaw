@@ -218,7 +218,24 @@ export const codeUpdateDiffTool = defineTool({
     // against billed procedure codes.
     const relevant = input.code_set === "icd10cm" || input.code_set === "icd10pcs" ? usage.diagnoses : usage.procedures;
 
-    const effective = next.effective || nextRelease(input.code_set);
+    // Do NOT invent nextRelease(today) when the snapshot carries no effective
+    // date — for a release that already took effect (diffing last year's edition
+    // against this year's), that named a future April date six months too late
+    // and told the operator to keep billing deleted codes until then. ICD-10 FY
+    // editions take effect Oct 1 of the prior calendar year, derivable from the
+    // "FYyyyy" label; otherwise fall back to nextRelease but flag it as an
+    // estimate the operator should confirm.
+    let effective = next.effective;
+    let effectiveNote = "";
+    if (!effective) {
+      const fy = /FY\s*(\d{4})/i.exec(next.label ?? "")?.[1];
+      if ((input.code_set === "icd10cm" || input.code_set === "icd10pcs") && fy) {
+        effective = `${Number(fy) - 1}1001`;
+      } else {
+        effective = nextRelease(input.code_set);
+        effectiveNote = `No effective date was supplied for this edition, so ${effective} is the NEXT scheduled release, not necessarily this edition's — confirm the real effective date before relying on the deadlines below.`;
+      }
+    }
     const report = assessCodeImpact(diff, relevant, {
       setLabel: `${spec.label} ${next.label}`,
       effective,
@@ -229,6 +246,7 @@ export const codeUpdateDiffTool = defineTool({
     const truncated = report.impacts.length > input.max_listed;
     const shown = { ...report, impacts: report.impacts.slice(0, input.max_listed) };
     let content = renderImpactReport(shown, diff);
+    if (effectiveNote) content += `\n\n⚠ ${effectiveNote}`;
     if (truncated) {
       content += `\n\nListed the ${input.max_listed} highest-impact of ${report.impacts.length} affected codes — raise max_listed to see the rest.`;
     }

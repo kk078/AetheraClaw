@@ -181,7 +181,11 @@ export async function runTurn(deps: RunnerDeps, sessionId: string, userText: str
           sessionId,
           toolUseId: call.id,
           toolName,
-          summary: result.content.slice(0, 400),
+          // Marked when truncated so the telemetry drawer's "returned to the
+          // model" pane does not silently show a 400-char preview as if it were
+          // the full text (the replay path shows the whole thing). The model
+          // still receives the untruncated content below.
+          summary: result.content.length > 400 ? `${result.content.slice(0, 400)}\n…[truncated preview; reload to see the full result]` : result.content,
           isError: result.isError ?? false,
           // A tool_invoke that named a real tool is NOT plumbing — the inner
           // tool did the work, and hiding it would lose exactly the call the

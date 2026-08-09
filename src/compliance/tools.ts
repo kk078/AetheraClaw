@@ -377,6 +377,14 @@ export const sentinelRunTool = defineTool({
       content: [
         renderReport(report),
         "",
+        // 837P claims carry only the BILLED charge — there is no allowed/paid
+        // amount (that lives in the 835, not joined here). So any exposure figure
+        // above is computed on billed charges, which run well above allowed
+        // amounts; read it as a conservative UPPER bound to decide whether to
+        // investigate, not as a dollar figure that was paid.
+        report.sampleSize >= MIN_SAMPLE_FOR_EXTRAPOLATION
+          ? "Exposure is estimated on BILLED CHARGES (837P carries no payment data), so it overstates the true paid amount — treat it as a conservative upper bound, not a repayment figure."
+          : "",
         `Run ${runId}, seed phrase "${seedText}".`,
         filed > 0 ? `${filed} worklist item(s) opened.` : "",
         report.sampleSize < MIN_SAMPLE_FOR_EXTRAPOLATION

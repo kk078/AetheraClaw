@@ -210,12 +210,26 @@ export function prefill(
 export function applyAnswers(result: PrefillResult, provided: Record<string, string | number | boolean>): PrefillResult {
   const answers = result.answers.map((a) => {
     if (!(a.linkId in provided)) return a;
+    // Coerce the clinician's value to the item's declared type — the same
+    // coercion prefill applies. Assigning it raw let a mistyped answer flow
+    // straight into the QuestionnaireResponse (valueBoolean:"yes", a string in a
+    // boolean slot — schema-invalid FHIR the payer bounces). An unparseable value
+    // is left unanswered rather than emitted wrong.
+    const coerced = coerce(provided[a.linkId], a.type);
+    if (coerced === null) {
+      return {
+        ...a,
+        value: null,
+        origin: "unanswered" as AnswerOrigin,
+        provenance: `The clinician's answer "${String(provided[a.linkId])}" could not be read as a ${a.type} — left unanswered rather than emitted as an invalid ${a.type}.`,
+      };
+    }
     // A distinct origin, not "prefilled". The origin field exists to say who made
     // the assertion, and labelling a clinician's own answer as machine-filled
     // destroys exactly the distinction the module is built around.
     return {
       ...a,
-      value: provided[a.linkId],
+      value: coerced,
       origin: "clinician_answered" as AnswerOrigin,
       provenance: "Answered by the reviewing clinician.",
     };

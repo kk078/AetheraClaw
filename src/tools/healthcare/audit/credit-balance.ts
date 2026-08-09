@@ -264,14 +264,22 @@ export const creditBalanceListTool = defineTool({
     }
 
     const today = todayYmd();
+    const TERMINAL = new Set(["refund_sent", "adjusted_by_payer", "written_off"]);
     const total = filtered.reduce((sum, r) => sum + r.amount_cents, 0);
     let overdueCount = 0;
     const lines = filtered.map((r) => {
       const d = refundDeadline(r.identified_date, today);
-      if (d.overdue) overdueCount++;
-      const flag = d.overdue
-        ? `  ** ${Math.abs(d.daysRemaining)} DAY(S) PAST THE 60-DAY DEADLINE **`
-        : `  (${d.daysRemaining} day(s) to return)`;
+      // A resolved balance has met (or ended) the 60-day obligation, so the
+      // deadline countdown does not apply to it — flagging a balance refunded on
+      // day 19 as "past the 60-day deadline" once 60 days elapse since
+      // identification is a false FCA-exposure alarm on money returned on time.
+      const resolved = TERMINAL.has(r.status);
+      if (!resolved && d.overdue) overdueCount++;
+      const flag = resolved
+        ? `  (resolved${r.resolved_date ? ` ${formatYmd(r.resolved_date)}` : ""})`
+        : d.overdue
+          ? `  ** ${Math.abs(d.daysRemaining)} DAY(S) PAST THE 60-DAY DEADLINE **`
+          : `  (${d.daysRemaining} day(s) to return)`;
       return `${r.id}  ${money(r.amount_cents)}  ${r.payer || "—"}  ${r.reason}  status=${r.status}\n    identified ${formatYmd(r.identified_date)}, due ${formatYmd(d.dueDate)}${flag}${r.claim_id ? `\n    claim ${r.claim_id}` : ""}`;
     });
 

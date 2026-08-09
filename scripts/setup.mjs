@@ -292,13 +292,21 @@ const home = process.env.AETHERACLAW_HOME
   : path.join(os.homedir(), ".aetheraclaw");
 const dataDir = path.join(home, "data");
 const present = fs.existsSync(dataDir) ? fs.readdirSync(dataDir).filter((f) => f.endsWith(".json")) : [];
+// The datasets a complete fetch writes (mpfs-cf.json is conditional on the RVU
+// file carrying a conversion factor, so it is not required). Checking by NAME,
+// not by a count of `.json` files: a `>= 6` count let a run that fetched six but
+// 403'd on the ICD-10 zip look complete, so a re-run never retried the one that
+// mattered — the most-used offline lookup stayed missing on a machine set up twice.
+const REQUIRED_DATASETS = ["ncci-ptp.json", "mue.json", "mpfs.json", "gpci.json", "hcpcs.json", "icd10.json"];
+const missingDatasets = REQUIRED_DATASETS.filter((f) => !present.includes(f));
 
 if (skipData) {
   console.log(`  ${amber("skipped")} (--skip-data)`);
-} else if (present.length >= 6) {
+} else if (missingDatasets.length === 0) {
   console.log(`  ${present.length} dataset file(s) already installed in ${dataDir} — leaving them alone.`);
   console.log("  Re-fetch with: node scripts/fetch-cms-data.mjs");
 } else {
+  if (present.length > 0) console.log(`  ${amber(`missing: ${missingDatasets.join(", ")}`)} — fetching the rest`);
   console.log(`  fetching into ${dataDir} (needs network, ~25s)`);
   // Not fatal. A machine behind a proxy that blocks CMS still has a working
   // install; the affected tools report themselves as unavailable rather than

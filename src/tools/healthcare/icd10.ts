@@ -52,6 +52,23 @@ export const icd10ValidateTool = defineTool({
     const exact = await nlmSearch(code, 30);
     const match = exact.find((r) => r.code.toUpperCase() === code);
     if (!match) {
+      // The NLM table returns only full-specificity leaves, so a real CATEGORY
+      // HEADER (E11) never hits exactly — but the search returns its children
+      // (E11.00, …). If the queried code is a validly-shaped ICD-10 code and the
+      // results extend it, it is a real header (non-billable), not invalid.
+      const wellFormed = /^[A-TV-Z][0-9][0-9A-Z](\.[0-9A-Z]{1,4})?$/.test(code);
+      const headerChildren = exact.filter((r) => {
+        const rc = r.code.toUpperCase();
+        return rc !== code && (rc.startsWith(`${code}.`) || rc.startsWith(code));
+      });
+      if (wellFormed && headerChildren.length > 0) {
+        return {
+          content:
+            `${code} is a valid ICD-10-CM CATEGORY HEADER — a real code, but NOT billable. A claim must use one of the more specific codes:\n` +
+            headerChildren.slice(0, 8).map((c) => `  ${c.code}  ${c.name}`).join("\n") +
+            `\n\n${NLM_NOTE}`,
+        };
+      }
       const near = exact.slice(0, 5).map((r) => `${r.code}  ${r.name}`).join("\n");
       return {
         content: `${code} is NOT a valid ICD-10-CM code.${near ? `\nNearby codes:\n${near}` : ""}\n\n${NLM_NOTE}`,

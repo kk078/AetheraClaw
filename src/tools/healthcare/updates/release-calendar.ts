@@ -161,9 +161,15 @@ export interface UpcomingRelease {
 export function upcomingReleases(asOf: string = todayYmd(), horizonDays = 120): UpcomingRelease[] {
   const limit = addDays(asOf, horizonDays);
   const out: UpcomingRelease[] = [];
+  const startYear = Number(asOf.slice(0, 4));
+  // Enumerate every year the horizon can reach, not just year and year+1: a
+  // 730-day horizon crosses into year+2, and stopping at year+1 silently dropped
+  // releases that fall inside the stated window (the header claims completeness).
+  const endYear = Number(limit.slice(0, 4));
   for (const spec of Object.values(CODE_SETS)) {
-    const year = Number(asOf.slice(0, 4));
-    for (const effective of [...releasesInYear(spec, year), ...releasesInYear(spec, year + 1)]) {
+    const candidates: string[] = [];
+    for (let year = startYear; year <= endYear; year++) candidates.push(...releasesInYear(spec, year));
+    for (const effective of candidates) {
       if (effective <= asOf || effective > limit) continue;
       out.push({
         setId: spec.id,

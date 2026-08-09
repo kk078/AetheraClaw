@@ -69,10 +69,14 @@ function yearOf(serviceDate: string): number {
   return Number(serviceDate.slice(0, 4));
 }
 
-export function daysLeftInYear(asOf: string): number {
-  const year = yearOf(asOf);
-  const end = Date.UTC(year, 11, 31);
-  const now = Date.UTC(year, Number(asOf.slice(4, 6)) - 1, Number(asOf.slice(6, 8)));
+export function daysLeftInYear(asOf: string, targetYear: number = yearOf(asOf)): number {
+  // Days from asOf to the end of the CAPTURE year, which is not necessarily
+  // asOf's year — hcc_recapture takes `year` and `as_of` independently. Using
+  // asOf's year alone reported "144 days left" for a 2025 capture run in Aug
+  // 2026, when that window closed on 2025-12-31 (correctly 0, and the
+  // deadline warning must fire, not stay silent).
+  const end = Date.UTC(targetYear, 11, 31);
+  const now = Date.UTC(yearOf(asOf), Number(asOf.slice(4, 6)) - 1, Number(asOf.slice(6, 8)));
   return Math.max(0, Math.round((end - now) / 86_400_000));
 }
 
@@ -88,7 +92,7 @@ export function findRecaptureGaps(history: CodedDiagnosis[], options: RecaptureO
   const { year, asOf, model } = options;
   const lookback = options.lookbackYears ?? DEFAULT_LOOKBACK_YEARS;
   const warnings: string[] = [];
-  const daysLeft = daysLeftInYear(asOf);
+  const daysLeft = daysLeftInYear(asOf, year);
 
   interface PatientState {
     seenThisYear: boolean;

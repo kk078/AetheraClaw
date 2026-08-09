@@ -123,15 +123,22 @@ export interface Coverage {
  */
 export function rateCoverage(rates: ContractRate[], billed: Array<{ payer: string; code: string; serviceDate: string }>): Coverage {
   const seen = new Set<string>();
-  const uncovered = new Set<string>();
+  // Count uncovered by the SAME payer|code pair key as `seen`; only the display
+  // list is by bare code. Mixing a pair-keyed `seen` with a code-keyed
+  // `uncovered` made codesWithRate overstate coverage whenever one code was
+  // uncovered for two payers (2 pairs, 1 code → reported "1 of 2 covered" when 0
+  // were) — the exact false clean-bill the count exists to prevent.
+  const uncoveredPairs = new Set<string>();
+  const uncoveredCodes = new Set<string>();
   for (const line of billed) {
     const id = `${payerKey(line.payer)}|${line.code.toUpperCase()}`;
     seen.add(id);
     if (!rateFor(rates, { payer: line.payer, code: line.code, serviceDate: line.serviceDate })) {
-      uncovered.add(line.code.toUpperCase());
+      uncoveredPairs.add(id);
+      uncoveredCodes.add(line.code.toUpperCase());
     }
   }
-  return { codesBilled: seen.size, codesWithRate: seen.size - uncovered.size, uncovered: [...uncovered].sort() };
+  return { codesBilled: seen.size, codesWithRate: seen.size - uncoveredPairs.size, uncovered: [...uncoveredCodes].sort() };
 }
 
 export function renderCoverage(coverage: Coverage): string {

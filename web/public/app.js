@@ -600,7 +600,7 @@ const VERDICT_RANK = { clear: 0, preview: 1, review: 2, hold: 3 };
 const VERDICT_LABEL = { clear: "CLEAR", preview: "DRY RUN", review: "REVIEW NEEDED", hold: "HOLD" };
 const REASSURING = new Set(["clear", "preview"]);
 
-function refreshGroupHead(g) {
+function refreshGroupHead(g, done = false) {
   const p = g._parts;
   const verdicts = p.list.map((x) => x.verdict).filter(Boolean);
   let worst = verdicts.length
@@ -620,8 +620,13 @@ function refreshGroupHead(g) {
 
   p.left.replaceChildren();
   if (worst) p.left.append(el("span", `vbadge ${worst}`, VERDICT_LABEL[worst]));
-  else if (p.list.length === 0) p.left.append(el("span", "vbadge running", "RUNNING"));
-  p.left.append(el("h3", null, p.list.length ? `${shown}${more}${subject}` : "Working…"));
+  // RUNNING only while the turn is live. A completed plumbing-only turn (list
+  // empty, catalogue calls collapsed) kept the RUNNING badge and "Working…"
+  // title forever, asserting an in-flight turn that finished; when done, it reads
+  // "Catalogue search" instead.
+  else if (p.list.length === 0 && !done) p.left.append(el("span", "vbadge running", "RUNNING"));
+  const headline = p.list.length ? `${shown}${more}${subject}` : done ? "Catalogue search" : "Working…";
+  p.left.append(el("h3", null, headline));
 
   const bits = [];
   if (p.list.length) bits.push(`${p.list.length} tool${p.list.length === 1 ? "" : "s"}`);
@@ -637,7 +642,7 @@ function endGroup() {
   const p = liveGroup._parts;
   p.live.replaceChildren();
   if (p.list.length === 0 && p.plumbing === 0) liveGroup.remove();
-  else refreshGroupHead(liveGroup);
+  else refreshGroupHead(liveGroup, true);
   liveGroup = null;
 }
 
