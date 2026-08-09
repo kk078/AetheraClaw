@@ -185,8 +185,10 @@ export function routeFor(role: ReferenceRole): RouteSpec | undefined {
 export interface ResolvedRoute {
   spec: RouteSpec;
   table: string;
-  /** Description columns the table actually has, in preference order. */
+  /** Description columns the table actually has, in the TABLE's own casing, in preference order. */
   columns: string[];
+  /** The code column in the TABLE's own casing, for JS row access. */
+  codeColumn: string;
   rowCount: number;
 }
 
@@ -203,11 +205,17 @@ export function resolveRoute(catalogue: ReferenceCatalogue, role: ReferenceRole)
   for (const name of spec.tables) {
     const table = findTable(catalogue, name);
     if (!table || table.access !== "readable") continue;
-    const has = (c: string) => table.columns.some((x) => x.toLowerCase() === c.toLowerCase());
-    if (!has(spec.codeColumn)) continue;
-    const columns = spec.descriptionColumns.filter(has);
+    // Resolve each spec column to the table's ACTUAL casing. Matching
+    // case-insensitively but then returning the spec's casing meant `row[col]`
+    // read undefined against SQLite row keys that carry the table's real casing
+    // (ref_carc(CODE, DESCRIPTION) vs the spec's lowercase) — a confident false
+    // miss. SQL is case-insensitive on identifiers, but JS property access is not.
+    const actual = (c: string): string | undefined => table.columns.find((x) => x.toLowerCase() === c.toLowerCase());
+    const codeColumn = actual(spec.codeColumn);
+    if (!codeColumn) continue;
+    const columns = spec.descriptionColumns.map(actual).filter((x): x is string => Boolean(x));
     if (columns.length === 0) continue;
-    return { spec, table: table.name, columns, rowCount: table.rowCount };
+    return { spec, table: table.name, columns, codeColumn, rowCount: table.rowCount };
   }
   return undefined;
 }
@@ -285,7 +293,7 @@ export function searchRole(
       .all(...resolved.columns.map(() => `%${needle}%`)) as Array<Record<string, unknown>>;
     return rows.flatMap((row) => {
       const description = resolved.columns.map((c) => row[c]).find((v) => typeof v === "string" && v.trim().length > 0);
-      const value = row[resolved.spec.codeColumn];
+      const value = row[resolved.codeColumn];
       if (typeof description !== "string" || value === null || value === undefined) return [];
       return [{ code: String(value), description: description.trim(), role, table: resolved.table, row }];
     });

@@ -107,10 +107,19 @@ export function checkPtpEdits(source: PtpEdit[] | PtpIndex, lines: ScrubLine[]):
   const index = source instanceof Map ? source : indexPtpEdits(source);
   const out: ScrubFinding[] = [];
 
-  // Line order, not file order: two codes on a claim always produce their
+  // DISTINCT codes, in first-appearance order: two codes on a claim produce their
   // findings in the order a reader sees the lines, whatever order CMS published
-  // the pairs in.
-  const present = lines.map((l) => norm(l.cpt_hcpcs));
+  // the pairs in — and de-duplicated, because the SAME code on two lines (a
+  // split-line resubmission) otherwise emitted the identical PTP finding twice.
+  const present: string[] = [];
+  const seenCode = new Set<string>();
+  for (const l of lines) {
+    const code = norm(l.cpt_hcpcs);
+    if (!seenCode.has(code)) {
+      seenCode.add(code);
+      present.push(code);
+    }
+  }
 
   for (const col1 of present) {
     const row = index.get(col1);
@@ -121,8 +130,14 @@ export function checkPtpEdits(source: PtpEdit[] | PtpIndex, lines: ScrubLine[]):
       if (indicator === undefined) continue;
       if (indicator === "9") continue; // deleted edit
 
-      const line2 = lines.find((l) => norm(l.cpt_hcpcs) === col2);
-      const bypassed = hasAny(line2?.modifiers, DISTINCT_SERVICE_MODIFIERS);
+      // Consider EVERY line carrying col2, not just the first — a distinct-service
+      // modifier on a later split line was invisible when only lines.find() was
+      // consulted. And the bypass test uses the full published bypass set, not
+      // only 59/X{EPSU}: a correctly-coded E/M with modifier 25 (or a global-period
+      // 57, or 91 on a repeat lab) against an indicator-1 pair was wrongly reported
+      // as an error recommending a 59 it does not need.
+      const col2Lines = lines.filter((l) => norm(l.cpt_hcpcs) === col2);
+      const bypassed = col2Lines.some((l) => hasAny(l.modifiers, PTP_BYPASS_MODIFIERS));
 
       if (indicator === "0") {
         out.push(
@@ -159,35 +174,67 @@ export function checkPtpEdits(source: PtpEdit[] | PtpIndex, lines: ScrubLine[]):
 
 export function checkMueEdits(table: MueTable, lines: ScrubLine[]): ScrubFinding[] {
   const out: ScrubFinding[] = [];
+
+  // MAI 2 and 3 are DATE-OF-SERVICE edits: the limit is on the total units of the
+  // code across the whole claim date, and the MAI-2 finding itself says it
+  // "cannot be bypassed, split across lines, or won on appeal". Checking each
+  // line on its own let two J1885 lines of 3 units each (6 total) pass a limit of
+  // 4 — the exact split-across-lines evasion the edit exists to stop. So the
+  // date-of-service families are summed per code; MAI 1 is a genuine per-line
+  // edit and stays per line.
+  const totalByCode = new Map<string, { units: number; lines: number }>();
+  for (const line of lines) {
+    const code = line.cpt_hcpcs.trim().toUpperCase();
+    const acc = totalByCode.get(code) ?? { units: 0, lines: 0 };
+    acc.units += line.units;
+    acc.lines += 1;
+    totalByCode.set(code, acc);
+  }
+
+  // Per-line MAI-1 (and untyped) findings, in line order.
   for (const line of lines) {
     const code = line.cpt_hcpcs.trim().toUpperCase();
     const raw = table[code];
     if (raw === undefined) continue;
     const edit = normalizeMue(raw);
+    if (edit.mai === "2" || edit.mai === "3") continue; // summed below
     if (line.units <= edit.units) continue;
+    out.push(
+      finding(
+        "error",
+        edit.mai === "1" ? "mue-line" : "mue",
+        `MUE: ${code} billed with ${line.units} units against a limit of ${edit.units}${edit.mai === "1" ? ". Adjudication indicator 1 — a claim-line edit, so units genuinely furnished across separate sessions may be reported on separate lines with an appropriate modifier" : ""}.`,
+      ),
+    );
+  }
 
+  // Per-code MAI-2/3 findings on the SUMMED units, in first-appearance order.
+  const seen = new Set<string>();
+  for (const line of lines) {
+    const code = line.cpt_hcpcs.trim().toUpperCase();
+    if (seen.has(code)) continue;
+    seen.add(code);
+    const raw = table[code];
+    if (raw === undefined) continue;
+    const edit = normalizeMue(raw);
+    if (edit.mai !== "2" && edit.mai !== "3") continue;
+    const total = totalByCode.get(code)!;
+    if (total.units <= edit.units) continue;
+    const acrossLines = total.lines > 1 ? ` (${total.units} across ${total.lines} lines)` : "";
     if (edit.mai === "2") {
       out.push(
         finding(
           "error",
           "mue-absolute",
-          `MUE: ${code} billed with ${line.units} units against a limit of ${edit.units}. Adjudication indicator 2 — this is an absolute date-of-service limit grounded in policy or anatomy. It cannot be bypassed, split across lines, or won on appeal. Correct the units.`,
-        ),
-      );
-    } else if (edit.mai === "3") {
-      out.push(
-        finding(
-          "error",
-          "mue-clinical",
-          `MUE: ${code} billed with ${line.units} units against a limit of ${edit.units}. Adjudication indicator 3 — a clinical benchmark, so more units can be payable. Expect a denial on submission; it is appealable with records showing the units were furnished and medically necessary.`,
+          `MUE: ${code} billed with ${total.units} units${acrossLines} against a limit of ${edit.units}. Adjudication indicator 2 — this is an absolute date-of-service limit grounded in policy or anatomy. It cannot be bypassed, split across lines, or won on appeal. Correct the units.`,
         ),
       );
     } else {
       out.push(
         finding(
           "error",
-          edit.mai === "1" ? "mue-line" : "mue",
-          `MUE: ${code} billed with ${line.units} units against a limit of ${edit.units}${edit.mai === "1" ? ". Adjudication indicator 1 — a claim-line edit, so units genuinely furnished across separate sessions may be reported on separate lines with an appropriate modifier" : ""}.`,
+          "mue-clinical",
+          `MUE: ${code} billed with ${total.units} units${acrossLines} against a limit of ${edit.units}. Adjudication indicator 3 — a clinical benchmark, so more units can be payable. Expect a denial on submission; it is appealable with records showing the units were furnished and medically necessary.`,
         ),
       );
     }

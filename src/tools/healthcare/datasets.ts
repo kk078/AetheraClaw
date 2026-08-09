@@ -6,7 +6,7 @@ import { defineTool } from "../registry.js";
 import type { ScrubFinding } from "./finding.js";
 import { checkMueEdits, checkPtpEdits, indexPtpEdits, type MueTable, type PtpEdit, type PtpIndex, type PtpTable } from "./intelligence/ncci.js";
 import type { Icd10Table } from "./icd10-local.js";
-import type { ReferenceDbConfig } from "./reference-db.js";
+import { managedReferencePath, type ReferenceDbConfig } from "./reference-db.js";
 import { lookupRole } from "./reference-routes.js";
 
 // Local dataset directory: ~/.aetheraclaw/data — populated by the user or the
@@ -242,13 +242,17 @@ export const dataStatusTool = defineTool({
   execute: async (_input, ctx) => {
     const cfg = ctx.services.config as { healthcare?: { cptDataPath?: string; referenceDbPath?: string } } | undefined;
     const cptPath = cfg?.healthcare?.cptDataPath;
-    const refPath = cfg?.healthcare?.referenceDbPath;
+    // Resolve the reference DB the way the lookup tools do: an explicit
+    // referenceDbPath, else the managed copy `reference install` writes. Reporting
+    // only the explicit path told the operator to attach a database that was
+    // already installed and answering — the tool's whole point is to say what
+    // this installation can actually read.
+    const explicitRef = cfg?.healthcare?.referenceDbPath;
+    const managed = managedReferencePath();
+    const refPath =
+      explicitRef && fs.existsSync(explicitRef) ? explicitRef : fs.existsSync(managed) ? managed : undefined;
     return {
-      content: renderDatasetStatus(
-        datasetStatuses(),
-        Boolean(cptPath && fs.existsSync(cptPath)),
-        refPath && fs.existsSync(refPath) ? refPath : undefined,
-      ),
+      content: renderDatasetStatus(datasetStatuses(), Boolean(cptPath && fs.existsSync(cptPath)), refPath),
     };
   },
 });

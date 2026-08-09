@@ -63,13 +63,47 @@ function order(entries: Array<{ payer: string; rationale: string }>): CobPositio
   return entries.map((e, i) => ({ position: ORDINALS[i] ?? `Payer ${i + 1}`, ...e }));
 }
 
-/** Month/day comparison for the birthday rule — the YEAR is deliberately ignored. */
+/** Month and day parsed from a birthday in any common format, or null if unparseable. */
+export function monthDay(s: string): { month: number; day: number } | null {
+  const parts = s.split(/[^0-9]+/).filter(Boolean);
+  let month: number;
+  let day: number;
+  if (parts.length >= 2) {
+    // Separated: MM/DD, M-D, MM/DD/YYYY — first field month, second day.
+    month = Number(parts[0]);
+    day = Number(parts[1]);
+  } else if (parts.length === 1 && parts[0].length >= 4) {
+    // Contiguous MMDD (optionally trailing year): first two month, next two day.
+    month = Number(parts[0].slice(0, 2));
+    day = Number(parts[0].slice(2, 4));
+  } else if (parts.length === 1 && parts[0].length === 3) {
+    // MDD.
+    month = Number(parts[0].slice(0, 1));
+    day = Number(parts[0].slice(1, 3));
+  } else {
+    return null;
+  }
+  if (!Number.isInteger(month) || !Number.isInteger(day) || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return { month, day };
+}
+
+/**
+ * Month/day comparison for the birthday rule — the YEAR is deliberately ignored.
+ *
+ * Compares numerically. The old version stripped separators and compared the
+ * digit STRINGS, so "7/4" ("74") sorted AFTER "11/22" ("1122") because "7" > "1"
+ * — naming the November parent primary over the July one, the exact COB denial
+ * this exists to prevent. Unparseable input returns "tie" so the caller can warn
+ * rather than silently invert.
+ */
 export function earlierInCalendarYear(a: string, b: string): "a" | "b" | "tie" {
-  const norm = (s: string) => s.replace(/[^0-9]/g, "").slice(0, 4);
-  const na = norm(a);
-  const nb = norm(b);
-  if (na === nb) return "tie";
-  return na < nb ? "a" : "b";
+  const A = monthDay(a);
+  const B = monthDay(b);
+  if (!A || !B) return "tie";
+  const keyA = A.month * 100 + A.day;
+  const keyB = B.month * 100 + B.day;
+  if (keyA === keyB) return "tie";
+  return keyA < keyB ? "a" : "b";
 }
 
 export function determineCobOrder(s: CobSituation): CobDetermination {
@@ -107,6 +141,14 @@ export function determineCobOrder(s: CobSituation): CobDetermination {
       }
       warnings.push("Parents are separated but neither a court decree nor the custodial parent was supplied — ask before billing; guessing produces a COB denial.");
     } else if (s.parentABirthdayMmdd && s.parentBBirthdayMmdd) {
+      // Warn rather than silently pick a primary off a birthday the parser could
+      // not read — naming the wrong plan primary is exactly the COB denial this
+      // determination exists to prevent.
+      if (!monthDay(s.parentABirthdayMmdd) || !monthDay(s.parentBBirthdayMmdd)) {
+        warnings.push(
+          `Could not read one of the parent birthdays ("${s.parentABirthdayMmdd}", "${s.parentBBirthdayMmdd}") as a month/day — give them as MM/DD. The birthday rule was not applied.`,
+        );
+      }
       const which = earlierInCalendarYear(s.parentABirthdayMmdd, s.parentBBirthdayMmdd);
       if (which === "tie") {
         return {
