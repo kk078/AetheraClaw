@@ -430,11 +430,11 @@ export async function buildServer(opts: {
   app.post("/api/speech/worklist/start", async (req) => {
     const q = req.query as { session?: string };
     const key = String(q.session ?? "default");
-    let rows: Array<{ id: string; title: string; due_at: number | null; kind: string }> = [];
+    let rows: Array<{ id: string; title: string; detail_json: string; due_at: number | null; kind: string }> = [];
     try {
       rows = store.db
         .prepare(
-          "SELECT id, title, due_at, kind FROM worklist_items WHERE status = 'open' ORDER BY priority DESC, COALESCE(due_at, 9e15) ASC LIMIT 50",
+          "SELECT id, title, detail_json, due_at, kind FROM worklist_items WHERE status = 'open' ORDER BY priority DESC, COALESCE(due_at, 9e15) ASC LIMIT 50",
         )
         .all() as typeof rows;
     } catch {
@@ -442,15 +442,28 @@ export async function buildServer(opts: {
     }
     const now = Date.now();
     const session = startWorklist(
-      rows.map((r) => ({
-        id: r.id,
-        // The title is what a worklist row carries; the claim id is inside it.
-        // Naming the row itself is better than inventing a claim id that would
-        // then be spoken back as though it were real.
-        claimId: r.id,
-        label: r.title,
-        dueInDays: r.due_at ? Math.round((r.due_at - now) / 86_400_000) : undefined,
-      })),
+      rows.map((r) => {
+        // The claim, the reason and the money live in detail_json; the row id is
+        // internal. Speaking the row id spells out "S Y N dash W L dash S Y N
+        // dash C L M dash one zero five eight" — an announcement nobody can
+        // match against anything on screen, and the claim number is the one
+        // thing a coder needs to hear.
+        let detail: { claimId?: string; carc?: string; reason?: string; amount?: number } = {};
+        try {
+          detail = JSON.parse(r.detail_json || "{}");
+        } catch {
+          /* a row with unreadable detail still belongs on the list */
+        }
+        const reason = detail.carc && detail.reason ? `${detail.carc} ${detail.reason}` : (detail.reason ?? "");
+        return {
+          id: r.id,
+          claimId: detail.claimId || r.id,
+          label: r.title,
+          reason,
+          amount: typeof detail.amount === "number" ? detail.amount : undefined,
+          dueInDays: r.due_at ? Math.round((r.due_at - now) / 86_400_000) : undefined,
+        };
+      }),
     );
     worklists.set(key, session);
     return { say: announceWorklistStart(session), active: session.active, total: session.items.length };
