@@ -47,14 +47,22 @@ export interface CreditCandidate {
  */
 export function detectCreditBalances(eras: Array<{ payer: string; era: Era }>): CreditCandidate[] {
   const out: CreditCandidate[] = [];
-  const seen = new Map<string, Array<{ payer: string; control: string; paid: number }>>();
+  // Keyed by claim AND payer: a different payer paying the same claim is
+  // coordination of benefits (the repo reuses the claim id as the secondary's
+  // patient control number, so both 835s echo it), NOT a duplicate. Reversals
+  // (CLP02=22, negative paid) are KEPT so they can net against the payment they
+  // cancel, and secondary payments (CLP02=2) are excluded from the duplicate test.
+  const seen = new Map<string, Array<{ payer: string; control: string; paid: number; status: string }>>();
+  const KEY = (claimId: string, payer: string) => `${claimId} ${payer}`;
 
   for (const { payer, era } of eras) {
     for (const claim of era.claims) {
-      if (claim.paid > 0) {
-        seen.set(claim.claimId, [
-          ...(seen.get(claim.claimId) ?? []),
-          { payer: payer || era.payer, control: claim.payerControlNumber, paid: claim.paid },
+      const who = payer || era.payer;
+      if (claim.statusCode !== "2") {
+        const key = KEY(claim.claimId, who);
+        seen.set(key, [
+          ...(seen.get(key) ?? []),
+          { payer: who, control: claim.payerControlNumber, paid: claim.paid, status: claim.statusCode },
         ]);
       }
 
@@ -85,35 +93,40 @@ export function detectCreditBalances(eras: Array<{ payer: string; era: Era }>): 
     }
   }
 
-  for (const [claimId, payments] of seen) {
+  for (const [key, payments] of seen) {
     if (payments.length < 2) continue;
+    const claimId = key.slice(0, key.lastIndexOf(" "));
+    const payer = payments[0].payer;
 
-    // Collapse to one entry per distinct payer control number first: repeats of
-    // the SAME control number are one remittance parsed more than once. The two
-    // conditions are independent — a claim can be both genuinely paid twice and
-    // have one of those remittances re-parsed — so report each on its own.
-    const byControl = new Map<string, number>();
-    for (const p of payments) if (!byControl.has(p.control)) byControl.set(p.control, p.paid);
+    // Drop exact-identical payment tuples first — those are one remittance parsed
+    // more than once. Then NET by control number, so a status-22 reversal cancels
+    // the payment it reverses instead of looking like a second payment. A genuine
+    // duplicate is 2+ control numbers each still carrying positive cash after
+    // netting.
+    const unique = new Map<string, { control: string; paid: number }>();
+    for (const p of payments) unique.set(`${p.control} ${p.paid} ${p.status}`, p);
+    const netByControl = new Map<string, number>();
+    for (const p of unique.values()) netByControl.set(p.control, (netByControl.get(p.control) ?? 0) + p.paid);
+    const positive = [...netByControl.entries()].filter(([, amt]) => amt > 0.005);
 
-    if (byControl.size >= 2) {
-      const amounts = [...byControl.values()];
-      const extra = amounts.slice(1).reduce((sum, a) => sum + a, 0);
+    if (positive.length >= 2) {
+      const extra = positive.slice(1).reduce((sum, [, a]) => sum + a, 0);
       out.push({
         kind: "duplicate_payment",
-        payer: payments[0].payer,
+        payer,
         claimId,
         amountCents: toCents(extra),
-        detail: `Paid ${byControl.size}× under distinct payer control numbers (${[...byControl.keys()].join(", ")}) — likely duplicate payment of ${money(toCents(extra))}`,
+        detail: `Paid ${positive.length}× by ${payer} under distinct control numbers (${positive.map(([c]) => c).join(", ")}) — likely duplicate payment of ${money(toCents(extra))}`,
       });
     }
 
-    if (payments.length > byControl.size) {
+    if (payments.length > unique.size) {
       out.push({
         kind: "likely_reparse",
-        payer: payments[0].payer,
+        payer,
         claimId,
         amountCents: 0,
-        detail: `Appears ${payments.length}× across ${byControl.size} distinct payer control number(s) — the repeats are most likely the same 835 parsed more than once, not additional payments.`,
+        detail: `Appears ${payments.length}× but only ${unique.size} are distinct — the repeats are most likely the same 835 parsed more than once, not additional payments.`,
       });
     }
   }

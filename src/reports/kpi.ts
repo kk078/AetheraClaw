@@ -1,5 +1,6 @@
 import { claimCharge, computeArAging, earliestServiceDate, type StoredClaim, type StoredEra } from "./aggregate.js";
 import { reconcileEra } from "./reconcile.js";
+import { isLineDenied } from "../tools/healthcare/intelligence/variance.js";
 
 // ── Executive KPIs ───────────────────────────────────────────────────────────
 // Days in AR, first-pass clean claim rate, net collection rate. Every one of
@@ -156,10 +157,13 @@ export function computeCleanClaimRate(acks: AckRecord[], eras: StoredEra[]): Cle
       const key = claim.claimId.trim().toUpperCase();
       if (firstEra.has(key)) continue;
       if (claim.statusCode === "22") continue; // a reversal is not an adjudication
-      // Denied outright, or paid with any denial adjustment on a line. CO/PR
-      // contractual and patient-responsibility amounts are normal on a clean
-      // claim; what disqualifies it is being denied.
-      const denied = claim.statusCode === "4" || claim.paid <= 0;
+      // Denied outright, OR partially denied — a line paid $0 with a
+      // non-patient-responsibility adjustment needs rework and is not a clean
+      // first pass, even when the claim as a whole was paid something. Checking
+      // only claim-level paid<=0 counted partial denials as clean, inflating the
+      // rate. CO contractual and patient-responsibility amounts on a paid line
+      // are normal and do not disqualify.
+      const denied = claim.statusCode === "4" || claim.paid <= 0 || claim.lines.some(isLineDenied);
       firstEra.set(key, !denied);
     }
   }
@@ -236,29 +240,46 @@ export function computeNetCollectionRate(
   let payments = 0;
   let charges = 0;
   let contractual = 0;
-  let claimsMeasured = 0;
-  const seen = new Set<string>();
 
+  // Accumulate ALL of a settled claim's remittances, not just the first. A claim
+  // denied on its first remittance and paid on appeal 60 days later (the exact
+  // reason the settle window is 120 days) has its appeal cash on the SECOND
+  // remittance; taking only the first counted the $0 denial and dropped the
+  // payment, so a practice that wins appeals reported a falsely low NCR. Each
+  // distinct payer control number is a distinct adjudication; a re-parse of the
+  // same file repeats the control and is de-duplicated.
+  interface Adjudication {
+    paid: number;
+    co: number;
+  }
+  const perClaim = new Map<string, { charged: number; byControl: Map<string, Adjudication> }>();
   for (const { era } of eras) {
     for (const claim of era.claims) {
       const key = claim.claimId.trim().toUpperCase();
-      if (!settledClaimIds.has(key) || seen.has(key)) continue;
-      if (claim.statusCode === "22") continue;
-      seen.add(key);
-      claimsMeasured++;
-      payments += claim.paid;
-      charges += claim.charged;
-      for (const line of claim.lines) {
-        for (const adj of line.adjustments) {
-          // CO is the contractual obligation — the amount the contract says was
-          // never collectable. PR is the patient's balance, which IS collectable
-          // and must stay in the denominator; treating it as a write-off is how
-          // a practice with a large patient-responsibility book reports a
-          // flattering NCR while never chasing a patient balance.
-          if (adj.group === "CO") contractual += adj.amount;
-        }
-      }
+      if (!settledClaimIds.has(key)) continue;
+      if (claim.statusCode === "22") continue; // reversals are handled by the recoupment loop
+      const rec = perClaim.get(key) ?? { charged: 0, byControl: new Map<string, Adjudication>() };
+      rec.charged = Math.max(rec.charged, claim.charged);
+      // CO is the contractual obligation — never collectable. PR is the patient's
+      // balance, which IS collectable and stays in the denominator; treating it
+      // as a write-off is how a large patient-responsibility book reports a
+      // flattering NCR while never chasing a balance.
+      const co = claim.lines.flatMap((l) => l.adjustments).filter((a) => a.group === "CO").reduce((s, a) => s + a.amount, 0);
+      rec.byControl.set(claim.payerControlNumber, { paid: claim.paid, co });
+      perClaim.set(key, rec);
     }
+  }
+
+  const seen = new Set(perClaim.keys());
+  const claimsMeasured = perClaim.size;
+  for (const rec of perClaim.values()) {
+    charges += rec.charged;
+    for (const adj of rec.byControl.values()) payments += adj.paid;
+    // Contractual from the WINNING adjudication (highest paid): a superseded
+    // denial's full CO write-off must not inflate the write-off column once the
+    // claim was later paid on appeal.
+    const winning = [...rec.byControl.values()].sort((a, b) => b.paid - a.paid)[0];
+    if (winning) contractual += winning.co;
   }
 
   // ── Recoupments ────────────────────────────────────────────────────────────
@@ -274,11 +295,18 @@ export function computeNetCollectionRate(
   // and reported, never silently absorbed in either direction.
   let recoupments = 0;
   let unattributed = 0;
+  // De-duplicate identical recoupments: a remittance stored twice (a
+  // clearinghouse download and an email attachment of the same file) would
+  // otherwise have its PLB takeback counted twice, understating collections.
+  const seenRecoupment = new Set<string>();
   for (const { era } of eras) {
     for (const r of reconcileEra(era).adjustments) {
       if (r.reason.kind !== "recoupment") continue;
       const taken = Math.max(0, -r.effect);
       if (taken === 0) continue;
+      const sig = `${r.referenceId.trim().toUpperCase()}|${taken.toFixed(2)}`;
+      if (seenRecoupment.has(sig)) continue;
+      seenRecoupment.add(sig);
       if (seen.has(r.referenceId.trim().toUpperCase())) recoupments += taken;
       else unattributed += taken;
     }

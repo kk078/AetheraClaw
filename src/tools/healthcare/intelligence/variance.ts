@@ -39,6 +39,13 @@ export interface DerivedAllowed {
  * the write-off bucket makes every Medicare line look underpaid by about 1.6%
  * and buries real underpayments in false ones.
  */
+/** A line paid nothing with a non-patient adjustment is a denial, not an underpayment. */
+export function isLineDenied(line: EraServiceLine): boolean {
+  if (line.paid > 0.005) return false;
+  const nonPatient = line.adjustments.filter((a) => !PATIENT_GROUPS.has(a.group)).reduce((s, a) => s + a.amount, 0);
+  return nonPatient > 0.005;
+}
+
 export function deriveAllowed(line: EraServiceLine): DerivedAllowed {
   let patientResponsibility = 0;
   let sequestration = 0;
@@ -92,7 +99,13 @@ export function collectPaidLines(eras: Array<{ era: Era; receivedAt: number }>):
           modifiers: procedureModifiers(line.procedure),
           receivedAt,
           derived: deriveAllowed(line),
-          denied: claim.statusCode === "4",
+          // Denied at the CLAIM level (CLP status 4) OR at the LINE level: a line
+          // paid $0 with a non-patient-responsibility adjustment is a denial, not
+          // an underpayment. Marking only claim-status-4 let a $0 line on an
+          // otherwise-paid claim be reported as underpaid by the full expected
+          // amount, inflating the recovery figure for a line already queued as a
+          // denial. Mirrors risk.ts's collectOutcomes.
+          denied: claim.statusCode === "4" || isLineDenied(line),
         });
       }
     }

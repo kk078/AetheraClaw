@@ -44,6 +44,15 @@ export class ObjectStreamer {
   private started = false;
   /** Inside a record that blew the buffer: still lexing it, no longer keeping it. */
   private skipping = false;
+  /**
+   * The `{`/`[` nesting of the WRAPPER structure, tracked only while NOT inside a
+   * record. A record is an object at ARRAY-element position, so an object only
+   * becomes a record when the innermost open container is `[`. Without this the
+   * outer object of a real TiC file (`{"reporting_entity_name":…,"in_network":[…]}`)
+   * was itself latched as the single record and the whole file emitted as one
+   * blob — zero rates on every spec-conformant payer/hospital file.
+   */
+  private containerStack: string[] = [];
   readonly stats: StreamStats = { consumed: 0, emitted: 0, oversize: 0, peakRecordBytes: 0 };
 
   constructor(private maxRecordBytes: number = DEFAULT_MAX_RECORD_BYTES) {}
@@ -99,7 +108,7 @@ export class ObjectStreamer {
       } else {
         while (j < n) {
           const c = chunk.charCodeAt(j);
-          if (c === 34 || c === 123 || c === 125) break; // " { }
+          if (c === 34 || c === 123 || c === 125 || c === 91 || c === 93) break; // " { } [ ]
           j++;
         }
       }
@@ -138,31 +147,58 @@ export class ObjectStreamer {
         continue;
       }
 
+      if (c === 91) {
+        // Opening bracket: structural only when not inside a record.
+        if (this.started) this.append(chunk, i, i + 1);
+        else this.containerStack.push("[");
+        i++;
+        continue;
+      }
+
+      if (c === 93) {
+        // Closing bracket.
+        if (this.started) this.append(chunk, i, i + 1);
+        else this.containerStack.pop();
+        i++;
+        continue;
+      }
+
       if (c === 123) {
-        if (!this.started) {
+        if (this.started) {
+          this.append(chunk, i, i + 1);
+          this.depth++;
+        } else if (this.containerStack[this.containerStack.length - 1] === "[") {
+          // An object at array-element position — this is where a record begins.
           this.started = true;
           this.skipping = false;
           this.buffer = "{";
+          this.depth = 1;
         } else {
-          this.append(chunk, i, i + 1);
+          // A structural object (the wrapper, or an object-valued field like
+          // reporting_entity) — track its nesting, but it is not a record.
+          this.containerStack.push("{");
         }
-        this.depth++;
         i++;
         continue;
       }
 
       // Closing brace.
-      this.append(chunk, i, i + 1);
-      this.depth--;
-      if (this.depth === 0 && this.started) {
-        if (!this.skipping) {
-          this.stats.peakRecordBytes = Math.max(this.stats.peakRecordBytes, this.buffer.length);
-          out.push(this.buffer);
-          this.stats.emitted++;
+      if (this.started) {
+        this.append(chunk, i, i + 1);
+        this.depth--;
+        if (this.depth === 0) {
+          if (!this.skipping) {
+            this.stats.peakRecordBytes = Math.max(this.stats.peakRecordBytes, this.buffer.length);
+            out.push(this.buffer);
+            this.stats.emitted++;
+          }
+          // Safe to clear the lexer only here: depth is zero and we are provably
+          // outside any string. containerStack is left intact — we are still
+          // inside the enclosing array and its later elements are records too.
+          this.reset();
         }
-        // Safe to clear the lexer only here: depth is zero and we are provably
-        // outside any string.
-        this.reset();
+      } else {
+        this.containerStack.pop();
       }
       i++;
     }
