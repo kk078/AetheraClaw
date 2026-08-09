@@ -33,6 +33,9 @@ export interface SqliteDb {
 
 const require_ = createRequire(import.meta.url);
 
+/** Both drivers wait this long for a lock rather than failing a concurrent writer. */
+const BUSY_TIMEOUT_MS = 5000;
+
 /**
  * Transactions, for a driver that has none.
  *
@@ -51,8 +54,19 @@ function savepointTransaction(exec: (sql: string) => void) {
         exec(`RELEASE ${name}`);
         return result;
       } catch (err) {
-        exec(`ROLLBACK TO ${name}`);
-        exec(`RELEASE ${name}`);
+        // The rollback can itself throw "no such savepoint" when SQLite already
+        // unwound the transaction on its own — an OR ROLLBACK conflict, a full
+        // disk (SQLITE_FULL), some IOERR/NOMEM cases all auto-roll-back. Letting
+        // that throw replaced the ORIGINAL error (the real cause — a UNIQUE
+        // violation, "disk is full") with a confusing "no such savepoint", which
+        // the failure classifiers downstream then could not diagnose. Swallow the
+        // cleanup's own failure and re-throw the real one.
+        try {
+          exec(`ROLLBACK TO ${name}`);
+          exec(`RELEASE ${name}`);
+        } catch {
+          // already unwound by SQLite; nothing to release
+        }
         throw err;
       } finally {
         depth--;
@@ -88,6 +102,14 @@ function openNodeSqlite(file: string, opts: OpenOptions): SqliteDb {
   };
   const db = opts.readonly ? new DatabaseSync(file, { readOnly: true }) : new DatabaseSync(file);
   const exec = (sql: string) => db.exec(sql);
+  // Match better-sqlite3's default 5s busy timeout. Without it node:sqlite runs
+  // with SQLite's default of 0 and a second writer throws "database is locked"
+  // the instant the first holds the lock — where better-sqlite3 waits and
+  // succeeds. That divergence broke the adapter's whole contract ("the rest of
+  // the codebase cannot tell which one it got") on exactly the fallback-only
+  // machines this driver exists for. Read-only handles cannot write, so it is
+  // pointless there but harmless.
+  if (!opts.readonly) exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
   return {
     prepare: (sql) => db.prepare(sql),
     exec,
@@ -113,6 +135,9 @@ function openBetterSqlite(file: string, opts: OpenOptions): SqliteDb | null {
     return null;
   }
   const db = opts.readonly ? new Database(file, { readonly: true }) : new Database(file);
+  // Explicit rather than relying on the driver default (also 5000), so the two
+  // drivers demonstrably match and a future default change cannot desync them.
+  if (!opts.readonly) db.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`);
   return {
     prepare: (sql) => db.prepare(sql),
     exec: (sql) => db.exec(sql),

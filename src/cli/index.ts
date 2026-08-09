@@ -582,7 +582,8 @@ auth
       const outcome = evaluateSet(p, key);
       for (const m of outcome.messages) console.log(`  ${m}`);
       if (!outcome.stored) continue;
-      setCredential(p, key, opts.note);
+      const setResult = setCredential(p, key, opts.note);
+      for (const w of setResult.warnings) console.log(`  ⚠ ${w}`);
       console.log(`  stored ${p} (${maskKey(key)}) in ${credentialsPath()}`);
     }
     console.log("\nNothing above printed your key back. `aetheraclaw auth list` shows the mask.");

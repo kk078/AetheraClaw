@@ -47,7 +47,12 @@ export function saveDocument(store: MemoryStore, sessionId: string, e: Extractio
   const existing = store.db
     .prepare("SELECT id FROM documents WHERE sha256 = ? AND session_id = ?")
     .get(e.sha256, sessionId) as { id: string } | undefined;
-  if (existing) return loadDocument(store, existing.id, { log: false })!;
+  // A dedup hit still returns the full stored text to the caller (and thence to
+  // the model), so it is a READ and is logged as one. The original write was
+  // logged at first upload; treating this later disclosure as "already logged"
+  // left a §164.312(b) gap precisely on the re-access path. loadDocument logs by
+  // default — the point is to NOT pass { log: false } here.
+  if (existing) return loadDocument(store, existing.id)!;
 
   const id = newId("doc");
   store.db

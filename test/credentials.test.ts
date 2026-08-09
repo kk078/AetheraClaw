@@ -81,6 +81,19 @@ describe("storing a key", () => {
     fs.writeFileSync(file, JSON.stringify({ openai: { key: "   ", addedAt: 1 } }));
     expect(loadCredentials(file).credentials.openai).toBeUndefined();
   });
+
+  it("does not silently wipe other keys when the existing file is corrupt", () => {
+    // A trailing-comma slip made the file unparseable but the keys were still
+    // recoverable by hand. setCredential used to overwrite it with just the one
+    // new entry, destroying them. It must preserve the original and warn.
+    fs.writeFileSync(file, '{ "anthropic": { "key": "sk-ant-keep-me-123456" }, }');
+    const result = setCredential("openai", "sk-openai-new-key-abcdef", undefined, file);
+    expect(result.warnings.join(" ")).toMatch(/unreadable|corrupt/i);
+    expect(fs.existsSync(`${file}.corrupt`)).toBe(true);
+    expect(fs.readFileSync(`${file}.corrupt`, "utf8")).toContain("sk-ant-keep-me-123456");
+    // The new key was still stored.
+    expect(loadCredentials(file).credentials.openai?.key).toBe("sk-openai-new-key-abcdef");
+  });
 });
 
 describe("masking", () => {

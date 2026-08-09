@@ -56,9 +56,19 @@ export interface AccessEvent {
  * context intact and pretends the problem is handled.
  */
 const IDENTIFIER_SHAPES: Array<{ label: string; pattern: RegExp }> = [
-  { label: "SSN", pattern: /\b\d{3}-\d{2}-\d{4}\b/ },
-  // MBI: 11 chars, position 1 a digit 1-9, no S/L/O/I/B/Z anywhere.
-  { label: "Medicare MBI", pattern: /\b[1-9][ACDEFGHJKMNPQRTUVWXY][ACDEFGHJKMNPQRTUVWXY0-9]\d[ACDEFGHJKMNPQRTUVWXY][ACDEFGHJKMNPQRTUVWXY0-9]\d[ACDEFGHJKMNPQRTUVWXY]{2}\d{2}\b/i },
+  // Dashed or spaced (123-45-6789, 123 45 6789), plus a whole-ref bare
+  // nine-digit form: a ref that IS a nine-digit SSN was slipping through, and
+  // refusing it is the point. Anchored to the whole ref rather than any
+  // nine-digit run so a structured id like "CLM-123456789" is not falsely
+  // refused — an embedded run is not evidence of an SSN.
+  { label: "SSN", pattern: /\b\d{3}[-\s]\d{2}[-\s]\d{4}\b/ },
+  { label: "SSN", pattern: /^\s*\d{9}\s*$/ },
+  // MBI: 11 chars, position 1 a digit 1-9, no S/L/O/I/B/Z anywhere. Medicare
+  // cards PRINT it grouped 4-3-4 with hyphens (1EG4-TE5-MK72), so a ref copied
+  // straight off a card or a payer letter carries the hyphens; the separators
+  // between groups are optional here so both the printed and contiguous forms
+  // are caught.
+  { label: "Medicare MBI", pattern: /\b[1-9][ACDEFGHJKMNPQRTUVWXY][ACDEFGHJKMNPQRTUVWXY0-9]\d[-\s]?[ACDEFGHJKMNPQRTUVWXY][ACDEFGHJKMNPQRTUVWXY0-9]\d[-\s]?[ACDEFGHJKMNPQRTUVWXY]{2}\d{2}\b/i },
   { label: "legacy HICN", pattern: /\b\d{9}[A-Z]{1,2}\d?\b/ },
   { label: "date of birth", pattern: /\b(?:DOB|D\.O\.B\.|born)\b/i },
   { label: "email address", pattern: /\b[\w.+-]+@[\w-]+\.[a-z]{2,}\b/i },

@@ -89,10 +89,46 @@ function writeCredentials(store: CredentialStore, file = credentialsPath()): voi
   fs.renameSync(tmp, file);
 }
 
-export function setCredential(provider: ProviderName, key: string, note?: string, file = credentialsPath()): void {
+export function setCredential(
+  provider: ProviderName,
+  key: string,
+  note?: string,
+  file = credentialsPath(),
+): { warnings: string[] } {
   const { credentials } = loadCredentials(file);
+  const warnings: string[] = [];
+
+  // loadCredentials returns an EMPTY store on a parse error, so writing now
+  // would overwrite the whole file with this one entry — silently destroying the
+  // other stored keys, which were usually recoverable by hand (a stray trailing
+  // comma). Preserve the unreadable file next to the new one rather than clobber
+  // it, and say so.
+  if (fs.existsSync(file)) {
+    let corrupt = false;
+    try {
+      JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch {
+      corrupt = true;
+    }
+    if (corrupt) {
+      const backup = `${file}.corrupt`;
+      try {
+        fs.renameSync(file, backup);
+        warnings.push(
+          `${path.basename(file)} was unreadable; saved it as ${path.basename(backup)} before writing. Recover any other keys from it by hand, then delete it.`,
+        );
+      } catch {
+        // Could not preserve it — do not proceed to overwrite blind.
+        throw new Error(
+          `${file} is unreadable and could not be backed up. Fix or remove it by hand before storing a key, so existing keys are not lost.`,
+        );
+      }
+    }
+  }
+
   credentials[provider] = { key: key.trim(), addedAt: Date.now(), ...(note ? { note } : {}) };
   writeCredentials(credentials, file);
+  return { warnings };
 }
 
 export function removeCredential(provider: ProviderName, file = credentialsPath()): boolean {
