@@ -1,5 +1,8 @@
 import zlib from "node:zlib";
 
+/** Cap on a single inflated PDF stream — a kilobyte of Flate can claim gigabytes. */
+const MAX_STREAM_BYTES = 200 * 1024 * 1024;
+
 // ── PDF text extraction ──────────────────────────────────────────────────────
 // This is the format that matters most in RCM — EOBs, ADR letters, denial
 // letters and appeal determinations all arrive as PDF — and it is the one where
@@ -114,24 +117,74 @@ function indexObjects(buf: Buffer): Map<number, PdfObject> {
 
 /** Apply the stream filter. Unknown filters yield undefined rather than raw bytes. */
 function decodeStream(head: string, raw: Buffer): Buffer | undefined {
-  const filter = /\/Filter\s*\/(\w+)/.exec(head)?.[1];
+  // A stream with no /Filter at all is genuinely stored uncompressed.
+  if (!/\/Filter\b/.test(head)) return raw;
+
+  // /Filter is either a name (`/FlateDecode`) or an ARRAY (`[/FlateDecode]`,
+  // and for a chain `[/ASCII85Decode /FlateDecode]`). The old regex matched only
+  // the name form, so the spec-legal array form fell through to `return raw` —
+  // handing the COMPRESSED bytes back as if decoded, which parse as scanned
+  // (glyphs 0) and mislabel a text PDF as a scan. Parse both forms and, when a
+  // filter is present but not one we can apply, return undefined rather than raw.
+  const spec = /\/Filter\s*(\/[A-Za-z0-9]+|\[[^\]]*\])/.exec(head)?.[1];
+  if (!spec) return undefined;
+  const names = spec.startsWith("[")
+    ? [...spec.matchAll(/\/([A-Za-z0-9]+)/g)].map((m) => m[1])
+    : [spec.slice(1)];
+
   try {
-    if (!filter) return raw;
-    if (filter === "FlateDecode") {
-      const out = zlib.inflateSync(raw);
-      return applyPredictor(head, out);
+    let out = raw;
+    let flated = false;
+    for (const name of names) {
+      if (name === "FlateDecode") {
+        out = zlib.inflateSync(out, { maxOutputLength: MAX_STREAM_BYTES });
+        flated = true;
+      } else if (name === "ASCIIHexDecode") {
+        out = Buffer.from(out.toString("latin1").replace(/[^0-9A-Fa-f]/g, ""), "hex");
+      } else if (name === "ASCII85Decode") {
+        out = ascii85Decode(out);
+      } else {
+        // DCTDecode is a JPEG, CCITTFaxDecode is a fax image, and anything else
+        // is a filter we do not implement. Returning their bytes as text is how
+        // a "reading" full of mojibake gets produced — refuse instead.
+        return undefined;
+      }
     }
-    if (filter === "ASCIIHexDecode") {
-      const hex = raw.toString("latin1").replace(/[^0-9A-Fa-f]/g, "");
-      return Buffer.from(hex, "hex");
-    }
-    // DCTDecode is a JPEG, CCITTFaxDecode is a fax image. Both are pictures,
-    // not text, and returning their bytes as text is how a "reading" full of
-    // mojibake gets produced.
-    return undefined;
+    // The predictor is a Flate concept; applyPredictor is a no-op without a
+    // /Predictor in the dictionary, so calling it only after Flate is enough.
+    return flated ? applyPredictor(head, out) : out;
   } catch {
     return undefined;
   }
+}
+
+/** ASCII85 (base-85) decode, the second-commonest PDF stream filter after Flate. */
+function ascii85Decode(raw: Buffer): Buffer {
+  const text = raw.toString("latin1").replace(/\s/g, "");
+  const end = text.indexOf("~>");
+  const body = end >= 0 ? text.slice(0, end) : text;
+  const out: number[] = [];
+  let tuple = 0;
+  let count = 0;
+  for (const ch of body) {
+    if (ch === "z" && count === 0) {
+      out.push(0, 0, 0, 0);
+      continue;
+    }
+    const v = ch.charCodeAt(0) - 33;
+    if (v < 0 || v > 84) continue;
+    tuple = tuple * 85 + v;
+    if (++count === 5) {
+      out.push((tuple >>> 24) & 0xff, (tuple >>> 16) & 0xff, (tuple >>> 8) & 0xff, tuple & 0xff);
+      tuple = 0;
+      count = 0;
+    }
+  }
+  if (count > 0) {
+    for (let i = count; i < 5; i++) tuple = tuple * 85 + 84;
+    for (let i = 0; i < count - 1; i++) out.push((tuple >>> (24 - i * 8)) & 0xff);
+  }
+  return Buffer.from(out);
 }
 
 /** PNG predictors, used on xref and object streams. Only Up/Sub/None appear in practice. */
@@ -407,7 +460,7 @@ export function extractContent(content: string, fonts: Map<string, GlyphMap>): {
   };
 
   const TOKEN =
-    /\/([A-Za-z0-9#+._-]+)\s+([\d.]+)\s+Tf|<([0-9A-Fa-f\s]*)>\s*Tj|\(((?:\\.|[^\\()])*)\)\s*Tj|\[((?:\\.|[^\][]|\\.)*)\]\s*TJ|([-\d.]+)\s+([-\d.]+)\s+(?:Td|TD)|([-\d.\s]+?)\s+Tm|T\*|ET/g;
+    /\/([A-Za-z0-9#+._-]+)\s+([\d.]+)\s+Tf|<([0-9A-Fa-f\s]*)>\s*Tj|\(((?:\\.|[^\\()])*)\)\s*Tj|\[((?:\((?:\\.|[^()])*\)|<[0-9A-Fa-f\s]*>|[^\][])*)\]\s*TJ|([-\d.]+)\s+([-\d.]+)\s+(?:Td|TD)|([-\d.\s]+?)\s+Tm|<([0-9A-Fa-f\s]*)>\s*(['"])|\(((?:\\.|[^\\()])*)\)\s*(['"])|T\*|ET/g;
 
   for (const t of content.matchAll(TOKEN)) {
     const whole = t[0];
@@ -450,6 +503,28 @@ export function extractContent(content: string, fonts: Map<string, GlyphMap>): {
           out += s;
           advance(s);
         }
+      }
+      continue;
+    }
+    // The `'` and `"` operators move to the next line and then show a string —
+    // spec-standard, emitted by real producers for line-by-line text. They were
+    // matched by nothing, so their text was neither emitted NOR counted: a whole
+    // document set with `'` came back glyphs 0 and was misreported as scanned,
+    // and one that used it in places dropped those paragraphs at confidence 1,
+    // slipping past the very refusal gate that exists to catch a partial read.
+    if (whole.endsWith("'") || whole.endsWith('"')) {
+      out += "\n";
+      lastY = null;
+      penX = lineX;
+      runWidth = 0;
+      if (t[9] !== undefined) {
+        const s = decodeHex(t[9].replace(/\s+/g, ""));
+        out += s;
+        advance(s);
+      } else if (t[11] !== undefined) {
+        const s = decodeLiteral(t[11]);
+        out += s;
+        advance(s);
       }
       continue;
     }
@@ -500,9 +575,44 @@ export function extractContent(content: string, fonts: Map<string, GlyphMap>): {
   return { text: out, glyphs, unresolved };
 }
 
-/** Page objects in document order, with their dictionaries. */
+/** Page objects in READING order, walked through the page tree. */
 function pages(objects: Map<number, PdfObject>): PdfObject[] {
-  return [...objects.values()].filter((o) => /\/Type\s*\/Page\b/.test(o.head));
+  // The page tree (/Root → /Pages → /Kids) is what defines both the order pages
+  // are read in and which page objects are actually LIVE. Filtering the object
+  // table by /Type /Page instead returned pages in byte-scan order — so an
+  // incrementally-saved insertion came out last and mislabelled every following
+  // page — and resurrected pages that an incremental update had removed from the
+  // tree but left in the file. Walk the tree.
+  let rootRef: number | undefined;
+  for (const obj of objects.values()) {
+    if (/\/Type\s*\/Catalog\b/.test(obj.head)) {
+      rootRef = Number(/\/Pages\s+(\d+)\s+\d+\s+R/.exec(obj.head)?.[1]);
+      break;
+    }
+  }
+
+  const ordered: PdfObject[] = [];
+  const seen = new Set<number>();
+  const visit = (num: number): void => {
+    if (seen.has(num)) return; // guard against a malformed cyclic tree
+    seen.add(num);
+    const obj = objects.get(num);
+    if (!obj) return;
+    // /Page\b does not match /Pages (the following "s" leaves no word boundary),
+    // so a leaf is distinguished from an interior node by type alone.
+    if (/\/Type\s*\/Page\b/.test(obj.head)) {
+      ordered.push(obj);
+      return;
+    }
+    const kids = /\/Kids\s*\[([^\]]*)\]/.exec(obj.head);
+    if (kids) for (const m of kids[1].matchAll(/(\d+)\s+\d+\s+R/g)) visit(Number(m[1]));
+  };
+  if (rootRef !== undefined && Number.isFinite(rootRef)) visit(rootRef);
+
+  // Fall back to byte-scan order only when the tree yielded nothing — a
+  // malformed or unusually-linearized file still reads, just possibly reordered,
+  // rather than returning no pages at all.
+  return ordered.length > 0 ? ordered : [...objects.values()].filter((o) => /\/Type\s*\/Page\b/.test(o.head));
 }
 
 /** Every content stream belonging to one page, concatenated. */

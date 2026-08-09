@@ -227,11 +227,20 @@ export async function buildServer(opts: {
     const sessionId = String(q.session ?? "");
     if (!sessionId || !store.getSession(sessionId)) return reply.code(400).send({ error: "unknown session" });
 
-    // A string can still arrive if some content type resolves to a built-in
-    // parser, and losing an upload to a type-check is a worse failure than
-    // re-encoding one.
+    // A string or a parsed object can still arrive when a built-in parser wins
+    // over the catch-all, and losing an upload to a type-check is a worse failure
+    // than re-encoding one. `application/json` is deliberately left on Fastify's
+    // JSON parser (the session routes need it parsed), so a .json document upload
+    // — a FHIR bundle, an exported record — reaches here as an OBJECT; re-serialize
+    // it rather than reject a valid, non-empty file as "empty body".
     const raw = req.body;
-    const body = Buffer.isBuffer(raw) ? raw : typeof raw === "string" ? Buffer.from(raw, "utf8") : null;
+    const body = Buffer.isBuffer(raw)
+      ? raw
+      : typeof raw === "string"
+        ? Buffer.from(raw, "utf8")
+        : raw && typeof raw === "object"
+          ? Buffer.from(JSON.stringify(raw), "utf8")
+          : null;
     if (!body || body.length === 0) return reply.code(400).send({ error: "empty body" });
 
     // Only the base name is kept, and separators are stripped rather than

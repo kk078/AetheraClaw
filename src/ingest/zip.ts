@@ -20,6 +20,15 @@ const CENTRAL_SIG = 0x02014b50;
 /** The EOCD is followed by a comment of up to 65535 bytes, so the search is bounded. */
 const MAX_COMMENT = 0xffff;
 
+// Caps against a decompression bomb. DEFLATE compresses runs of zeros ~1000:1,
+// so a 32 MB container (the upload limit) can legally inflate to tens of GB and
+// OOM the process — an abort no try/catch can contain. The compressed size is
+// bounded by the upload limit; the DECOMPRESSED size is not, so it is bounded
+// here, both per entry and across the whole archive. A real .docx/.xlsx is
+// comfortably under these.
+const MAX_ENTRY_BYTES = 100 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 300 * 1024 * 1024;
+
 export interface ZipEntry {
   name: string;
   /** Uncompressed bytes. */
@@ -66,22 +75,32 @@ export function readZip(buf: Buffer): Map<string, Buffer> {
 
   const out = new Map<string, Buffer>();
   let p = start;
+  let total = 0;
   for (let n = 0; n < count; n++) {
     if (p + 46 > buf.length || buf.readUInt32LE(p) !== CENTRAL_SIG) {
       throw new ZipError(`Damaged ZIP central directory at entry ${n + 1} of ${count}.`);
     }
     const method = buf.readUInt16LE(p + 10);
     const compSize = buf.readUInt32LE(p + 20);
+    const uncompSize = buf.readUInt32LE(p + 24);
     const nameLen = buf.readUInt16LE(p + 28);
     const extraLen = buf.readUInt16LE(p + 30);
     const commentLen = buf.readUInt16LE(p + 32);
     const localOffset = buf.readUInt32LE(p + 42);
     const name = buf.subarray(p + 46, p + 46 + nameLen).toString("utf8");
 
+    if (total >= MAX_TOTAL_BYTES) {
+      throw new ZipError(`ZIP inflates past the ${Math.round(MAX_TOTAL_BYTES / 1024 / 1024)} MB limit — refusing it as a decompression bomb.`);
+    }
+    // Trust nothing about the declared size: skip early if it alone is over the
+    // cap, and still bound the actual inflate with maxOutputLength so a header
+    // that lies small cannot run away either.
+    const budget = Math.min(MAX_ENTRY_BYTES, MAX_TOTAL_BYTES - total);
+
     // The local header's extra field is frequently a DIFFERENT length from the
     // central one — writers pad it for alignment — so the data offset must be
     // computed from the local header's own fields, never the central copy's.
-    if (localOffset + 30 <= buf.length) {
+    if (uncompSize <= MAX_ENTRY_BYTES && localOffset + 30 <= buf.length) {
       const localNameLen = buf.readUInt16LE(localOffset + 26);
       const localExtraLen = buf.readUInt16LE(localOffset + 28);
       const dataStart = localOffset + 30 + localNameLen + localExtraLen;
@@ -90,10 +109,18 @@ export function readZip(buf: Buffer): Map<string, Buffer> {
         // 0 = stored, 8 = deflate. Anything else (bzip2, LZMA) is legal ZIP and
         // is not produced by Word or Excel; skipping the entry is better than
         // returning bytes that were never decoded.
-        if (method === 0) out.set(name, Buffer.from(raw));
-        else if (method === 8) out.set(name, zlib.inflateRawSync(raw));
+        if (method === 0) {
+          const data = Buffer.from(raw.subarray(0, budget));
+          out.set(name, data);
+          total += data.length;
+        } else if (method === 8) {
+          const data = zlib.inflateRawSync(raw, { maxOutputLength: budget });
+          out.set(name, data);
+          total += data.length;
+        }
       } catch {
-        // One damaged part must not lose the rest of the document.
+        // One damaged part (or one that blew the cap) must not lose the rest of
+        // the document — the entry is skipped, not the whole read.
       }
     }
     p += 46 + nameLen + extraLen + commentLen;

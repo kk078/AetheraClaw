@@ -93,8 +93,20 @@ export function detectKind(filename: string, buf: Buffer): DocumentKind {
     return "unknown";
   }
 
-  const printable = /^[\x09\x0A\x0D\x20-\x7E -￿]*$/.test(head);
-  if (!printable) return "unknown";
+  // Binary vs text is decided on the RAW BYTES, not a latin1 decode. The old
+  // check ran a printable-character regex over the latin1 string, which mapped a
+  // UTF-8 curly quote or en-dash's continuation bytes (0x80-0x9F) to characters
+  // no allowed range covered - so an ordinary .txt or .csv with a smart quote,
+  // pasted from Word or Outlook, was refused as "not a format this reads". The
+  // real binary tell is a NUL byte, or a high proportion of C0 control bytes that
+  // are not tab/newline/CR; high bytes (0x80-0xFF) are ordinary UTF-8/Latin-1.
+  const bytes = buf.subarray(0, 4096);
+  let controls = 0;
+  for (const b of bytes) {
+    if (b === 0x00) return "unknown";
+    if ((b < 0x20 && b !== 0x09 && b !== 0x0a && b !== 0x0d) || b === 0x7f) controls++;
+  }
+  if (bytes.length > 0 && controls / bytes.length > 0.05) return "unknown";
   if (filename.toLowerCase().endsWith(".csv") || /^[^,\n]{1,80}(,[^,\n]{0,80}){2,}/m.test(head)) return "csv";
   return "text";
 }

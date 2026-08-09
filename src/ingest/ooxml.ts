@@ -82,12 +82,22 @@ export interface XlsxWorkbook {
   sheets: XlsxSheet[];
 }
 
+/** Excel's last column is XFD — 16384 columns, so the highest zero-based index. */
+export const MAX_COLUMN_INDEX = 16383;
+
 /** Cell reference "BC12" → zero-based column index, so gaps in a row stay gaps. */
 export function columnIndex(ref: string): number {
   const letters = /^([A-Z]+)/.exec(ref.toUpperCase())?.[1] ?? "";
   let n = 0;
-  for (const ch of letters) n = n * 26 + (ch.charCodeAt(0) - 64);
-  return n - 1;
+  for (const ch of letters) {
+    n = n * 26 + (ch.charCodeAt(0) - 64);
+    // Clamp DURING accumulation, not after: a crafted ref like "ZZZZZZZZ1"
+    // overflows to ~2e11, and the padding loop that follows (`while cells.length
+    // < idx`) then tries hundreds of billions of pushes and OOM-aborts the
+    // process on one upload. No real sheet has a column past XFD.
+    if (n > MAX_COLUMN_INDEX + 1) return MAX_COLUMN_INDEX;
+  }
+  return Math.min(n - 1, MAX_COLUMN_INDEX);
 }
 
 function sharedStrings(parts: Map<string, Buffer>): string[] {
@@ -101,9 +111,45 @@ function sharedStrings(parts: Map<string, Buffer>): string[] {
   );
 }
 
-function sheetNames(parts: Map<string, Buffer>): string[] {
-  const xml = parts.get("xl/workbook.xml")?.toString("utf8") ?? "";
-  return [...xml.matchAll(/<sheet\b[^>]*\bname="([^"]*)"/g)].map((m) => decodeXmlText(m[1]));
+interface SheetRef {
+  name: string;
+  /** The worksheet part this tab points at, e.g. "xl/worksheets/sheet2.xml", or "" if unresolved. */
+  file: string;
+}
+
+/**
+ * Sheets in TAB ORDER, each paired with the worksheet part it actually names.
+ *
+ * The trap: workbook.xml lists tabs in display order, but a tab's worksheet part
+ * is found through its r:id in xl/_rels/workbook.xml.rels — not by matching the
+ * i-th tab to the i-th sheetN.xml file. Reordering tabs rewrites workbook.xml
+ * order but not the part filenames, so pairing by index labels the remittance
+ * rows "Denials" and vice versa. This resolves the relationship instead.
+ */
+function workbookSheets(parts: Map<string, Buffer>): SheetRef[] {
+  const wb = parts.get("xl/workbook.xml")?.toString("utf8") ?? "";
+  const rels = parts.get("xl/_rels/workbook.xml.rels")?.toString("utf8") ?? "";
+
+  const relTarget = new Map<string, string>();
+  for (const m of rels.matchAll(/<Relationship\b([^>]*)\/?>/g)) {
+    const attrs = m[1];
+    const id = /\bId="([^"]+)"/.exec(attrs)?.[1];
+    const target = /\bTarget="([^"]+)"/.exec(attrs)?.[1];
+    if (id && target) relTarget.set(id, target);
+  }
+
+  const out: SheetRef[] = [];
+  for (const m of wb.matchAll(/<sheet\b([^>]*?)\/?>/g)) {
+    const attrs = m[1];
+    const name = decodeXmlText(/\bname="([^"]*)"/.exec(attrs)?.[1] ?? "");
+    const rid = /\br:id="([^"]+)"/.exec(attrs)?.[1] ?? /\bid="([^"]+)"/.exec(attrs)?.[1] ?? "";
+    const rawTarget = rid ? relTarget.get(rid) : undefined;
+    // Target is relative to xl/ ("worksheets/sheet1.xml") or absolute
+    // ("/xl/worksheets/sheet1.xml"); normalise both to the part key.
+    const file = rawTarget ? `xl/${rawTarget.replace(/^\/?xl\//, "").replace(/^\//, "")}` : "";
+    out.push({ name, file });
+  }
+  return out;
 }
 
 /**
@@ -122,15 +168,23 @@ function sheetNames(parts: Map<string, Buffer>): string[] {
 export function extractXlsx(buf: Buffer): XlsxWorkbook {
   const parts = readZip(buf);
   const shared = sharedStrings(parts);
-  const names = sheetNames(parts);
 
-  const sheetFiles = [...parts.keys()]
+  const filesOnDisk = [...parts.keys()]
     .filter((n) => /^xl\/worksheets\/sheet\d+\.xml$/.test(n))
     .sort((a, b) => Number(/(\d+)/.exec(a)![1]) - Number(/(\d+)/.exec(b)![1]));
 
+  // Prefer the relationship-resolved tab order; fall back to filename order only
+  // when the rels are missing or resolve to nothing, so a malformed workbook
+  // still reads (just possibly mislabelled) rather than returning no sheets.
+  const resolved = workbookSheets(parts).filter((s) => s.file && parts.has(s.file));
+  const plan: SheetRef[] =
+    resolved.length > 0
+      ? resolved
+      : filesOnDisk.map((file, i) => ({ name: workbookSheets(parts)[i]?.name ?? `Sheet${i + 1}`, file }));
+
   const sheets: XlsxSheet[] = [];
-  for (const [i, file] of sheetFiles.entries()) {
-    const xml = parts.get(file)!.toString("utf8");
+  for (const [i, ref] of plan.entries()) {
+    const xml = parts.get(ref.file)!.toString("utf8");
     const rows: string[][] = [];
     for (const r of xml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
       const cells: string[] = [];
@@ -159,7 +213,7 @@ export function extractXlsx(buf: Buffer): XlsxWorkbook {
       }
       rows.push(cells);
     }
-    sheets.push({ name: names[i] ?? `Sheet${i + 1}`, rows });
+    sheets.push({ name: ref.name || `Sheet${i + 1}`, rows });
   }
 
   return { sheets };
