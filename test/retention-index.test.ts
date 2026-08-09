@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { checkPtpEdits, indexPtpEdits, type PtpEdit, type PtpTable } from "../src/tools/healthcare/intelligence/ncci.js";
 import { MemoryStore } from "../src/memory/store.js";
 import { VIEW_RETAIN_MAX_ROWS, viewRetentionPlan } from "../src/views/retention.js";
@@ -128,6 +128,24 @@ describe("tool-view retention", () => {
 });
 
 describe("dataset cache invalidation", () => {
+  // This test writes and removes data/ncci-ptp.json, and the dataset layer
+  // live-stats that file on every call. Under the shared globalSetup home that
+  // raced views.test.ts (which reads ncciDataNotice() in a parallel worker):
+  // the file appearing mid-window flipped its expectation. A PRIVATE home for the
+  // duration keeps the writes invisible to every other worker.
+  let priorHome: string | undefined;
+  let privateHome: string;
+  beforeAll(() => {
+    priorHome = process.env.AETHERACLAW_HOME;
+    privateHome = fs.mkdtempSync(path.join(os.tmpdir(), "aclaw-dataset-cache-"));
+    process.env.AETHERACLAW_HOME = privateHome;
+  });
+  afterAll(() => {
+    if (priorHome === undefined) delete process.env.AETHERACLAW_HOME;
+    else process.env.AETHERACLAW_HOME = priorHome;
+    fs.rmSync(privateHome, { recursive: true, force: true });
+  });
+
   it("picks up NCCI data installed AFTER first use, and notices removal", () => {
     // The regression: the scrubber cached "absent" on first use and never
     // re-checked, so it told a reader who had JUST installed the data to go and

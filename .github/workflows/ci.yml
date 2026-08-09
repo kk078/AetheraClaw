@@ -39,6 +39,12 @@ jobs:
 
       - run: npx tsc --noEmit
 
+      # Type-check the tests too. The main config excludes test/ (it must not
+      # reach dist), so a test drifting out of sync with the code it exercises
+      # would otherwise stay green — vitest transpiles per file and never checks
+      # types across the project.
+      - run: npm run typecheck:test
+
       - run: npm test
 
       # The suite runs against better-sqlite3's prebuilt binary. node:sqlite is

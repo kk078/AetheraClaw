@@ -1,0 +1,13 @@
+{
+  // Type-checks the test suite, which the main tsconfig deliberately excludes
+  // (its rootDir is src/, and dist must not carry test files). Without this, a
+  // test could drift out of sync with the code it exercises — a renamed export,
+  // a changed shape — and stay green only because vitest transpiles per-file and
+  // never checks types across the project. noEmit: this run only reports.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

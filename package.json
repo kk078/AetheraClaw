@@ -16,6 +16,7 @@
     "dev": "tsx src/cli/index.ts serve",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json",
     "start": "node dist/cli/index.js serve"
   },
   "dependencies": {
