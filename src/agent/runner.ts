@@ -7,7 +7,7 @@ import type { ToolContext } from "../tools/types.js";
 import { withCard } from "../views/verdict.js";
 import { isPlumbing, previewCard } from "../views/workflow.js";
 import type { AgentEvent } from "../shared/events.js";
-import { knownSecretValues } from "../config/credentials.js";
+import { configuredSecretValues, knownSecretValues } from "../config/credentials.js";
 import { buildSystemPrompt, catalogueBlock } from "./system-prompt.js";
 import { truncateToBudget } from "./context-window.js";
 
@@ -22,11 +22,12 @@ const MAX_TOOL_ROUNDS = 40;
  * sidebar — the machinery, not the question.
  */
 export function sessionTitleFrom(text: string): string {
-  // The block opens with a bracketed line and is closed by a blank line. Matching
-  // its interior line by line was tried and stopped at the first line that was
-  // neither a bullet nor blank — leaving the instruction to the model as the
-  // title. The terminator is the reliable part.
-  const withoutContext = /^\s*\[/.test(text) ? text.replace(/^[\s\S]*?\n\s*\n/, "") : text;
+  // The attachment block the web client prepends opens with this exact line and
+  // is closed by a blank line; strip it so the title is the question, not the
+  // machinery. Matched on the literal opener rather than "any leading bracket",
+  // because users legitimately start messages with brackets ("[URGENT] CLM-1042
+  // …") and the loose test deleted their own first line.
+  const withoutContext = /^\[The user attached /.test(text) ? text.replace(/^[\s\S]*?\n\s*\n/, "") : text;
   return (withoutContext.trim() || text.trim()).slice(0, 60);
 }
 
@@ -53,33 +54,49 @@ export async function runTurn(deps: RunnerDeps, sessionId: string, userText: str
   const { provider, registry, store, config, emit } = deps;
   const system = buildSystemPrompt(config.workspaceRoot);
 
-  store.appendMessage(sessionId, "user", [{ type: "text", text: userText }]);
-  const session = store.getSession(sessionId);
-  if (session && !session.title) store.setSessionTitle(sessionId, sessionTitleFrom(userText));
-
-  emit({ type: "turn_started", sessionId });
-
-  const ctx: ToolContext = {
-    workspaceRoot: config.workspaceRoot,
-    // Resolved once per turn rather than per call: the values do not change
-    // mid-turn, and reading the credentials file on every tool execution would
-    // be a file read per call for a list that is almost always empty.
-    secrets: knownSecretValues().map((value) => ({ value, label: "api-key" })),
-    sessionId,
-    approvalPolicy: config.approvalPolicy,
-    requestApproval: deps.requestApproval,
-    services: deps.services ?? {},
-    // Every tool call the agent makes lands in the log, so support_fmea_diagnose
-    // can read real production failures instead of requiring someone to find and
-    // paste them first.
-    onToolCall: (record) => store.recordToolCall(record),
-  };
-
   try {
+    // Inside the try: the first persist can throw (SQLITE_BUSY from a second
+    // process on the same file, or a full disk), and outside it that rejection
+    // escaped the `void handleUserMessage(...)` at the gateway and — with no
+    // unhandledRejection handler anywhere — took the whole gateway down with it.
+    // In here it becomes the single-turn error event the catch was built for.
+    store.appendMessage(sessionId, "user", [{ type: "text", text: userText }]);
+    const session = store.getSession(sessionId);
+    if (session && !session.title) store.setSessionTitle(sessionId, sessionTitleFrom(userText));
+
+    emit({ type: "turn_started", sessionId });
+
+    const ctx: ToolContext = {
+      workspaceRoot: config.workspaceRoot,
+      // Resolved once per turn rather than per call: the values do not change
+      // mid-turn, and reading the credentials file on every tool execution would
+      // be a file read per call for a list that is almost always empty. Provider
+      // keys AND the non-provider secrets the config routes through the
+      // environment (portal logins, mail passwords, the voice token) — the scrub
+      // is only as complete as this list.
+      secrets: [
+        ...knownSecretValues().map((value) => ({ value, label: "api-key" })),
+        ...configuredSecretValues(config),
+      ],
+      sessionId,
+      approvalPolicy: config.approvalPolicy,
+      requestApproval: deps.requestApproval,
+      services: deps.services ?? {},
+      // Every tool call the agent makes lands in the log, so support_fmea_diagnose
+      // can read real production failures instead of requiring someone to find and
+      // paste them first.
+      onToolCall: (record) => store.recordToolCall(record),
+    };
+
     let rounds = 0;
     for (;;) {
       if (++rounds > MAX_TOOL_ROUNDS) {
         emit({ type: "error", sessionId, message: `stopped after ${MAX_TOOL_ROUNDS} tool rounds` });
+        // turn_completed too: error alone is not the protocol's terminal event
+        // (the catch below emits both), and the CLI client returns its prompt
+        // only on turn_completed — without it the terminal never shows `you>`
+        // again and the turn looks stuck.
+        emit({ type: "turn_completed", sessionId, stopReason: "error" });
         break;
       }
       const messages = truncateToBudget(loadHistory(store, sessionId), config.contextTokenBudget);
@@ -123,8 +140,16 @@ export async function runTurn(deps: RunnerDeps, sessionId: string, userText: str
         return;
       }
 
-      // Checkpoint the assistant message before running tools (crash-safe resume).
-      if (assistant.length > 0) store.appendMessage(sessionId, "assistant", assistant, stopReason);
+      // Checkpoint the assistant message before running tools (crash-safe resume),
+      // but keep a tool_use block only when we are about to execute it and append
+      // its result on this same pass. A turn cut off mid-tool-call — max_tokens
+      // arriving after the model emitted a (partial) tool_use, or any non-tool_use
+      // stop carrying one — would otherwise persist a tool_use with no tool_result
+      // to follow it, a shape the Anthropic and OpenAI APIs both reject with a 400.
+      // That poisons every later turn in the session with no path back. Dropping
+      // the orphan keeps the text and loses only the call that was never run.
+      const toPersist = stopReason === "tool_use" ? assistant : assistant.filter((b) => b.type !== "tool_use");
+      if (toPersist.length > 0) store.appendMessage(sessionId, "assistant", toPersist, stopReason);
 
       if (stopReason === "pause_turn") continue; // server-side tool paused; re-send to resume
 

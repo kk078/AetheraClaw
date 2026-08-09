@@ -193,3 +193,46 @@ export function knownSecretValues(opts: { env?: NodeJS.ProcessEnv; store?: Crede
   }
   return [...out];
 }
+
+/** The shape of config this needs — kept narrow so it does not drag the whole schema in. */
+export interface SecretSourceConfig {
+  browser?: { portals?: Array<{ usernameEnv?: string; passwordEnv?: string }> };
+  voice?: { authTokenEnv?: string };
+}
+
+/**
+ * Secrets this installation holds that are NOT provider API keys.
+ *
+ * The credential store deliberately holds only the four provider keys; the rest
+ * — payer-portal logins, the IMAP/SMTP passwords, the voice auth token — are
+ * routed through environment variables the config names, because a portal
+ * password does not belong in a file people paste into a chat window. But
+ * knownSecretValues() cannot see them, so the single-choke-point scrub in the
+ * tool registry passed them to the model verbatim the moment a command read the
+ * environment (`env`, `printenv`, `grep AETHERACLAW ~/.bashrc`). This closes
+ * that: it reads the values the config points at, so the same value-level
+ * redaction that covers provider keys covers these too.
+ */
+export function configuredSecretValues(
+  config: SecretSourceConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): Array<{ value: string; label: string }> {
+  const out: Array<{ value: string; label: string }> = [];
+  const seen = new Set<string>();
+  const add = (name: string | undefined, label: string) => {
+    if (!name) return;
+    const value = env[name]?.trim();
+    if (!value || seen.has(value)) return;
+    seen.add(value);
+    out.push({ value, label });
+  };
+  for (const portal of config.browser?.portals ?? []) {
+    add(portal.passwordEnv, "portal-credential");
+    add(portal.usernameEnv, "portal-credential");
+  }
+  // Named directly (not via config) because transport.ts reads exactly these.
+  add("AETHERACLAW_IMAP_PASSWORD", "mail-password");
+  add("AETHERACLAW_SMTP_PASSWORD", "mail-password");
+  add(config.voice?.authTokenEnv, "auth-token");
+  return out;
+}

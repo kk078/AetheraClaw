@@ -24,6 +24,21 @@ const SAFE_PREFIXES = [
 
 const DANGEROUS_PATTERNS = [/\bsudo\b/, /\brm\s+-rf\b/, /curl[^|]*\|\s*(ba)?sh/, /\bmkfs\b/, /\bdd\s+if=/];
 
+// Anything that lets a SECOND command run under `bash -lc`: the shell control
+// operators and redirects, plus the newline and carriage return. The line
+// breaks are the ones that were missed — bash treats `\n` as a full command
+// separator identical to `;`, and it sits between the first token and the first
+// space, so a scan that began after the first space (as this once did) stepped
+// straight over it and classified `ls\nrm -rf ~` as a read-only `ls`.
+const COMMAND_SEPARATORS = /[;&|<>`$\n\r]/;
+
+// `find` earns its place on the read-only list for `find . -name …`, but find
+// is a small language of its own: `-delete` removes files and
+// `-exec`/`-execdir`/`-ok`/`-okdir` run an arbitrary program — neither uses a
+// single shell metacharacter, so both slip past COMMAND_SEPARATORS. A find that
+// can act is pulled back out of "safe" and made to ask.
+const FIND_ACTIONS = /(?:^|\s)-(?:delete|exec|execdir|ok|okdir|fprintf?|fls)\b/;
+
 export function assessCommandRisk(command: string): { level: "safe" | "confirm"; reason: string } {
   const trimmed = command.trim();
   for (const pattern of DANGEROUS_PATTERNS) {
@@ -38,11 +53,20 @@ export function assessCommandRisk(command: string): { level: "safe" | "confirm";
   if (mentionsSecretFile(trimmed)) {
     return { level: "confirm", reason: `command names a credentials file: ${trimmed.slice(0, 200)}` };
   }
-  const isSafe = SAFE_PREFIXES.some(
-    (p) => trimmed === p || (trimmed.startsWith(p) && /[\s]/.test(trimmed.charAt(p.length))),
+
+  // A separator anywhere means there is a second command, and its safety is not
+  // decided by the first token — so it always asks. Checked before the prefix
+  // match, over the whole string, because the whole point is that `ls; rm` is
+  // not an `ls`.
+  if (COMMAND_SEPARATORS.test(trimmed)) {
+    return { level: "confirm", reason: `run shell command: ${trimmed.slice(0, 200)}` };
+  }
+
+  const matchedPrefix = SAFE_PREFIXES.find(
+    (p) => trimmed === p || (trimmed.startsWith(p) && /\s/.test(trimmed.charAt(p.length))),
   );
-  // Compound commands (&&, ;, |, redirects) are only safe if every part is safe — keep it simple: confirm.
-  if (isSafe && !/[;&|><`$]/.test(trimmed.slice(trimmed.indexOf(" ") + 1).replace(/\|\|/g, ""))) {
+  const findCanAct = matchedPrefix === "find" && FIND_ACTIONS.test(trimmed);
+  if (matchedPrefix && !findCanAct) {
     return { level: "safe", reason: "read-only command" };
   }
   return { level: "confirm", reason: `run shell command: ${trimmed.slice(0, 200)}` };

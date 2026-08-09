@@ -77,7 +77,14 @@ export class AnthropicProvider implements ModelProvider {
       input_schema: t.inputSchema,
     }));
     // Server-side web search — no external key needed; executed on Anthropic's side.
-    tools.push({ type: "web_search_20260209", name: "web_search" });
+    // Only when the request does not already carry a tool of that name: a gateway
+    // started for another provider registers a local `web_search` fallback, and a
+    // per-session Anthropic override then sends it here — two tools named
+    // "web_search" in one request is a 400 that breaks the session every turn. In
+    // that case keep the local one (it works) rather than duplicate it.
+    if (!tools.some((t) => t.name === "web_search")) {
+      tools.push({ type: "web_search_20260209", name: "web_search" });
+    }
 
     const stream = this.client.messages.stream({
       model: this.model,

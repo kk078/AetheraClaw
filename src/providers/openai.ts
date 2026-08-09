@@ -11,7 +11,7 @@ import type {
 
 type ChatMessage = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 
-function toOpenAIMessages(system: string, messages: NormalizedMessage[]): ChatMessage[] {
+export function toOpenAIMessages(system: string, messages: NormalizedMessage[]): ChatMessage[] {
   const out: ChatMessage[] = [{ role: "system", content: system }];
   for (const m of messages) {
     if (m.role === "user") {
@@ -37,7 +37,17 @@ function toOpenAIMessages(system: string, messages: NormalizedMessage[]): ChatMe
           });
         }
       }
-      const msg: ChatMessage = { role: "assistant", content: texts.join("\n") || null };
+      // An assistant message with neither text nor tool_calls serializes to
+      // {content: null} with no tool_calls, which the API rejects (content is
+      // required unless tool_calls is present). This happens on cross-provider
+      // replay: an Anthropic turn that paused for server-side web search with no
+      // preamble persists an assistant message of only provider_raw blocks, which
+      // are dropped for OpenAI — leaving nothing. The Anthropic and Gemini mappers
+      // both skip empty messages; match them rather than emit a message the API
+      // refuses on every turn.
+      const content = texts.join("\n");
+      if (content.length === 0 && toolCalls.length === 0) continue;
+      const msg: ChatMessage = { role: "assistant", content: content || null };
       if (toolCalls.length > 0) (msg as { tool_calls?: unknown }).tool_calls = toolCalls;
       out.push(msg);
     }
