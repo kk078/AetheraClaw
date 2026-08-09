@@ -39,10 +39,15 @@
     queue: [],
     draining: false,
     spokenChars: 0,
+    // The raw markdown already spoken, so "tell me more" resumes rather than repeats.
+    spokenText: "",
+    brief: false,
+    hasMore: false,
     consented: false,
     wakeActive: false,
     heldKey: false,
     awaitingApproval: null,
+    worklist: false,
   };
 
   const $ = (sel) => document.querySelector(sel);
@@ -255,7 +260,9 @@
         if (r.isFinal) finalText += r[0].transcript;
         else interim += r[0].transcript;
       }
-      preview(finalText + interim);
+      const heard = finalText + interim;
+      preview(heard);
+      if (/\d/.test(heard)) void prefetch(heard);
     });
     rec.addEventListener("error", (ev) => {
       note(ev.error === "not-allowed" ? "Microphone permission was refused." : `Speech error: ${ev.error}`);
@@ -317,6 +324,34 @@
     setPhase("listening", "listening");
   }
 
+  /**
+   * Look up a code from a PARTIAL utterance, while the speaker is still talking.
+   *
+   * Only codes that certainly exist come back — a near miss returns nothing,
+   * because mid-sentence the recognizer is still revising and correcting
+   * someone's half-said code is worse than showing nothing. Results are
+   * discarded silently when the final transcript disagrees.
+   */
+  let prefetchAt = 0;
+  async function prefetch(partial) {
+    if (!V.cfg?.enabled || V.cfg.prefetch === false) return;
+    const now = Date.now();
+    if (now - prefetchAt < 400) return;
+    prefetchAt = now;
+    try {
+      const res = await fetch("/api/speech/prefetch", {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: partial,
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.hint && V.phase === "listening") note(data.hint);
+    } catch {
+      /* speculative by definition — a failure costs nothing */
+    }
+  }
+
   /** Show what was heard in the composer as it is heard, so a misread is visible before it is sent. */
   function preview(text) {
     const input = $("#input");
@@ -334,6 +369,31 @@
    * entirely — the one engine that most needs them, since its audio has
    * already left the machine. One implementation, two entry points.
    */
+  /**
+   * What is on screen right now, as rows the resolver can name.
+   *
+   * Read from the canvas because that is where a worklist or a result table is
+   * actually rendered. Bounded hard: this rides along with every spoken turn,
+   * and pasting a whole table into every request would cost more than the
+   * feature is worth.
+   */
+  function screenContext() {
+    const canvas = $("#canvas");
+    if (!canvas || canvas.hidden) return undefined;
+    const rows = [...canvas.querySelectorAll("tbody tr")].slice(0, 20).map((tr, i) => ({
+      id: tr.dataset.id || tr.querySelector("td")?.textContent?.trim() || String(i + 1),
+      label: [...tr.querySelectorAll("td")].slice(0, 3).map((td) => td.textContent.trim()).filter(Boolean).join(" · "),
+      index: i + 1,
+    })).filter((r) => r.label);
+    if (rows.length === 0) return undefined;
+    const selected = canvas.querySelector("tbody tr.selected");
+    return {
+      title: $("#canvas-title")?.textContent?.trim() || "",
+      rows,
+      selectedId: selected ? (selected.dataset.id || rows[[...canvas.querySelectorAll("tbody tr")].indexOf(selected)]?.id) : undefined,
+    };
+  }
+
   async function refine(text) {
     try {
       // The session id travels with it so the §164.312(b) entry points at a
@@ -343,10 +403,11 @@
       const url = state.sessionId
         ? `/api/speech/refine?session=${encodeURIComponent(state.sessionId)}`
         : "/api/speech/refine";
+      const screen = screenContext();
       const res = await fetch(url, {
         method: "POST",
-        headers: { "content-type": "text/plain" },
-        body: text,
+        headers: { "content-type": screen ? "application/json" : "text/plain" },
+        body: screen ? JSON.stringify({ text, screen }) : text,
       });
       if (!res.ok) return { text };
       return await res.json();
@@ -373,6 +434,23 @@
       return;
     }
     if (refined.why) note(refined.why);
+    // Worklist mode owns the utterance while it is active: in that mode "next"
+    // means the cursor, not a question for the model.
+    if (V.worklist) {
+      void worklistCommand(text);
+      return;
+    }
+    if (/^\s*(start|begin|open|work)( the)? worklist\b/i.test(text) || /^\s*worklist mode\b/i.test(text)) {
+      void worklistStart();
+      return;
+    }
+    // Answered here, not sent. "Tell me more" is about the reply already on
+    // screen; forwarding it would make the model answer the question again
+    // rather than finish reading out the answer it already gave.
+    if (/^\s*(tell me more|go on|continue|read the rest|the rest)\b/i.test(text)) {
+      tellMore();
+      return;
+    }
     // Approval by voice: while a confirmation is on screen, an utterance is an
     // ANSWER to it, not a new request. Anything that is not clearly yes or no
     // falls through to the composer rather than being guessed — a misheard
@@ -390,6 +468,53 @@
     }
     preview(text);
     if (typeof send === "function") send();
+  }
+
+  // ── Worklist mode ──────────────────────────────────────────────────────────
+  // A cursor over the open worklist driven by about six words. The grammar is
+  // CLOSED server-side: an utterance either is one of the known commands or it
+  // is unrecognized and the state does not move. A near-guess here is not a bad
+  // answer, it is an action on somebody else's claim.
+
+  const wlUrl = (path) =>
+    state.sessionId ? `${path}?session=${encodeURIComponent(state.sessionId)}` : path;
+
+  async function worklistStart() {
+    try {
+      const res = await fetch(wlUrl("/api/speech/worklist/start"), { method: "POST" });
+      if (!res.ok) return;
+      const data = await res.json();
+      V.worklist = data.active === true && data.total > 0;
+      enqueueSpeak(data.say, { urgent: true });
+      if (!V.worklist) note("Nothing open on the worklist.");
+    } catch {
+      note("Could not open the worklist.");
+    }
+  }
+
+  async function worklistCommand(text) {
+    try {
+      const res = await fetch(wlUrl("/api/speech/worklist/command"), {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: text,
+      });
+      if (!res.ok) {
+        V.worklist = false;
+        return;
+      }
+      const step = await res.json();
+      if (step.ended) V.worklist = false;
+      if (step.say) enqueueSpeak(step.say, { urgent: true });
+      // An action needs the agent. The instruction names the claim explicitly —
+      // the model is never asked to resolve a pronoun in this mode.
+      if (step.send) {
+        preview(step.send);
+        if (typeof send === "function") send();
+      }
+    } catch {
+      V.worklist = false;
+    }
   }
 
   // ── Speaking ───────────────────────────────────────────────────────────────
@@ -447,12 +572,41 @@
     return { chunk: buffer.slice(0, cut), rest: buffer.slice(cut) };
   }
 
+  /**
+   * Brief mode speaks the FIRST sentence and holds the rest.
+   *
+   * Which is both halves of what is wanted at once: the headline arrives as
+   * fast as streaming can deliver it, and the four paragraphs behind it do not
+   * get read out to a room. The screen still has everything, so nothing is
+   * lost — and "tell me more" is there for the times it matters.
+   */
   function flushSpeech(final) {
     if (!V.cfg?.speakReplies) return;
+    if (V.brief && V.spokenChars > 0) {
+      // Everything past the first sentence is available, just not spoken.
+      if (V.pending.trim()) V.hasMore = true;
+      return;
+    }
     const { chunk, rest } = takeSpeakable(V.pending, final);
     V.pending = rest;
     const text = chunk.trim();
     if (text) enqueueSpeak(text);
+  }
+
+  /** Speak everything that brief mode held back. */
+  function tellMore() {
+    const spokenPrefix = V.spokenText || "";
+    const rest = V.reply.startsWith(spokenPrefix) ? V.reply.slice(spokenPrefix.length) : V.reply;
+    V.hasMore = false;
+    if (!rest.trim()) {
+      note("That was all of it.");
+      return;
+    }
+    // Deliberately bypasses the brief check — this IS the explicit ask for it.
+    const wasBrief = V.brief;
+    V.brief = false;
+    enqueueSpeak(rest.trim());
+    V.brief = wasBrief;
   }
 
   // ── The speech queue ───────────────────────────────────────────────────────
@@ -486,6 +640,7 @@
     const budget = V.cfg?.maxSpokenChars ?? 1200;
     if (V.spokenChars >= budget) return;
     V.spokenChars += text.length;
+    V.spokenText = (V.spokenText || "") + text;
     V.queue.push(text);
     if (!V.draining) void drainQueue();
   }
@@ -519,7 +674,10 @@
     if (!markdown.trim()) return;
     let text = markdown;
     try {
-      const res = await fetch("/api/speech/speakable", {
+      // Brief mode applies to the WHOLE reply, not to each streamed sentence —
+      // summarising every chunk independently would say the same headline four
+      // times. Chunks stream in full; the summary is applied at the end.
+      const res = await fetch("/api/speech/speakable?verbosity=full", {
         method: "POST",
         headers: { "content-type": "text/plain" },
         body: markdown,
@@ -682,6 +840,8 @@
         V.pending = "";
         V.queue.length = 0;
         V.spokenChars = 0;
+        V.spokenText = "";
+        V.hasMore = false;
         setPhase("thinking", "working");
         break;
       case "text_delta":
@@ -710,6 +870,7 @@
         // Everything up to the last complete sentence has already been spoken
         // while it streamed; this says whatever tail was still buffered.
         flushSpeech(true);
+        if (V.brief && V.hasMore) note('Say "tell me more" for the rest.');
         break;
       case "error":
         setPhase("idle");
@@ -727,6 +888,7 @@
       return;
     }
     if (!V.cfg?.enabled) return;
+    V.brief = V.cfg.verbosity === "brief";
     mount();
     await loadHints();
     if (V.cfg.mode === "always-on") startWake();

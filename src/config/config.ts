@@ -199,6 +199,21 @@ export const ConfigSchema = z.object({
       speakReplies: z.boolean().default(true),
       /** Spoken replies are cut at a sentence boundary past this; a five-minute monologue is not an answer. */
       maxSpokenChars: z.number().int().positive().default(1200),
+      // A spoken answer should be the verdict, not the essay. "brief" speaks the
+      // headline and the number and waits to be asked for the rest; the screen
+      // still shows everything either way, so this trades nothing away. It is
+      // the default because a reply that is right and four paragraphs long is,
+      // out loud, a reply nobody listened to the end of.
+      verbosity: z.enum(["brief", "full"]).default("brief"),
+      /**
+       * Look a code up from the interim transcript, while the speaker is still
+       * talking.
+       *
+       * Strictly local reads against the installed tables — never a tool call,
+       * never anything that writes, and discarded when the final transcript
+       * disagrees. It only fills in the composer hint sooner.
+       */
+      prefetch: z.boolean().default(true),
       local: z
         .object({
           whisperBin: z.string().default("whisper-cli"),

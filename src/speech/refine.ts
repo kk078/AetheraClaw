@@ -2,6 +2,7 @@ import { gateTranscript, type GateDecision, type GatePolicy } from "./transcript
 import { normalizeSpokenCodes } from "./spoken-codes.js";
 import { describeSnap, snapCode, type CodeUniverse, type SnapResult } from "./snap.js";
 import type { SpeechEngine } from "./providers/types.js";
+import { resolveDeixis, type ScreenContext } from "./deixis.js";
 
 // ── The one pipeline every transcript goes through ───────────────────────────
 //
@@ -17,7 +18,10 @@ import type { SpeechEngine } from "./providers/types.js";
 //      looking for.
 //   2. Normalise spoken codes, so "ninety nine two thirteen" is a code before
 //      anything tries to validate it as one.
-//   3. Validate against codes that actually exist, and stop rather than guess.
+//   3. Resolve what is on screen — "appeal that one" becomes a named claim, or
+//      becomes a question. This runs BEFORE code validation so the claim id the
+//      screen supplies is validated like any other.
+//   4. Validate against codes that actually exist, and stop rather than guess.
 
 /** A code-shaped token, once normalization has already run. */
 const CODE_TOKEN = /\b(?:\d{5}|[A-Z]\d{4}|[A-Z]\d{2}(?:\.\d{1,4})?)\b/g;
@@ -27,6 +31,8 @@ export interface RefineOptions {
   engine?: SpeechEngine;
   /** Absent means code validation is skipped entirely rather than failing everything. */
   universe?: CodeUniverse;
+  /** What the speaker can see. Absent means "appeal that one" cannot be resolved. */
+  screen?: ScreenContext;
 }
 
 export interface RefineResult {
@@ -55,14 +61,29 @@ export function refineTranscript(raw: string, opts: RefineOptions = {}): RefineR
     return { text: "", blocked: true, why: gate.why, gate, snaps: [] };
   }
 
-  const normalized = normalizeSpokenCodes(gate.text);
+  let normalized = normalizeSpokenCodes(gate.text);
   const snaps: Array<{ from: string; result: SnapResult }> = [];
 
+  // "Appeal that one." Without the screen this is unanswerable, and the wrong
+  // way to answer it is to let a model pick a row. Resolution is deterministic
+  // where the screen determines it and a QUESTION where it does not.
+  let deixisNote: string | undefined;
+  if (opts.screen) {
+    const d = resolveDeixis(normalized, opts.screen);
+    if (d.status === "resolved") {
+      normalized = d.text;
+      deixisNote = `Took "${d.phrase}" to mean ${d.row.label}.`;
+    } else if (d.status === "ambiguous" || d.status === "no-context") {
+      return { text: normalized, ask: d.why, blocked: false, gate, snaps };
+    }
+  }
+
   if (!opts.universe) {
+    const notes = [gate.action === "redact" ? gate.why : "", deixisNote ?? ""].filter(Boolean);
     return {
       text: normalized,
       blocked: false,
-      why: gate.action === "redact" ? gate.why : undefined,
+      why: notes.length > 0 ? notes.join(" ") : undefined,
       gate,
       snaps,
     };
@@ -85,6 +106,7 @@ export function refineTranscript(raw: string, opts: RefineOptions = {}): RefineR
   const corrections = snaps.filter((s) => s.result.status === "snapped");
   const notes: string[] = [];
   if (gate.action === "redact" && gate.why) notes.push(gate.why);
+  if (deixisNote) notes.push(deixisNote);
   for (const c of corrections) notes.push(describeSnap(c.result));
 
   return {

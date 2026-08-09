@@ -271,6 +271,14 @@ export const MODULES: ModuleDef[] = [
     glyph: "🔎",
     match: ["research_"],
   },
+  {
+    key: "briefing",
+    label: "Daily briefing",
+    blurb: "What is about to be lost, what changed, and what needs a person — ordered by urgency.",
+    note: "A figure that cannot be computed is reported as a gap, never spoken as a zero.",
+    glyph: "☀",
+    match: ["briefing_"],
+  },
 ];
 
 const OTHER: ModuleDef = {

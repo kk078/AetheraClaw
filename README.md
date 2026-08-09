@@ -762,6 +762,49 @@ stream rather than after the last token, and a tool call says what it is doing
 ("reading the remittance, eight thirty five") — never its arguments, which can
 carry an identifier and would otherwise be read aloud in a room.
 
+**"Appeal that one" resolves against what is on screen.** The console knows
+which rows are visible and which is selected, so a demonstrative is resolved
+deterministically rather than by a model picking a row:
+
+```
+"appeal that one"  (row selected)     → appeal CLM-2087 BCBS (C2)
+"appeal the second one"               → appeal CLM-2087 BCBS (C2)
+"appeal that one"  (nothing selected) → "that one" could be any of the 2 rows on
+                                         screen and none of them is selected…
+"what is it"                          → left alone; not a row reference
+```
+
+The ambiguous case is a question, never a default to the first row. `"it"` is a
+closed whitelist — an action verb before it, or a passive with a known participle
+— because a false positive rewrites an utterance that was already fine and the
+speaker never sees the substitution.
+
+**Worklist mode.** Say "start worklist" and the whole interaction is five words:
+`next`, `why`, `appeal it`, `skip`, `stop`. The grammar is **closed** — an
+utterance either is one of the commands or the state does not move at all. A
+near-guess here is not a bad answer, it is an action on somebody else's claim.
+Actions name the claim explicitly when they reach the agent, so nothing has to
+resolve a pronoun, and an action does not advance the cursor: an item moved past
+is an item nobody looks at again.
+
+**Brief by default, out loud.** `speech.verbosity` ships as `"brief"`: the first
+sentence is spoken as it streams and the rest waits for "tell me more". The
+screen still shows everything, so this trades nothing away — a reply that is
+right and four paragraphs long is, spoken, a reply nobody heard the end of.
+
+**It looks a code up while you are still saying it.** An interim transcript that
+already contains a code that certainly exists gets a description in the composer
+hint before the sentence is finished. Only exact matches — a near miss returns
+nothing, because correcting a half-said code is worse than showing nothing, and
+corrections belong to the final transcript where a person is there to answer.
+
+**`briefing_daily`** composes the start-of-day answer: what is about to be lost,
+what changed, what needs a person — ordered by what is lost if it is ignored, so
+a filing window closing in three days outranks a KPI that moved a point. A figure
+that cannot be computed is reported as a **gap, not a zero**; telling someone at
+8am that their net collection rate is zero because no remittances are loaded is
+the failure that rule exists for.
+
 ## Running it
 
 It runs on your own machine — there is no hosted instance. `127.0.0.1:4180` only answers on the box where you started the gateway.

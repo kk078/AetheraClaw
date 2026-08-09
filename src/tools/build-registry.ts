@@ -7,6 +7,7 @@ import { createShellTool } from "../tools/shell.js";
 import { listDirTool, readFileTool, writeFileTool } from "../tools/fs.js";
 import { webFetchTool, webSearchFallbackTool } from "../tools/web-fetch.js";
 import { researchTools } from "../research/tools.js";
+import { briefingTools } from "../reports/briefing-tools.js";
 import { registerHealthcareTools } from "../tools/healthcare/index.js";
 import {
   emailDraftTool,
@@ -141,6 +142,7 @@ export function buildRegistry(config: Config, store: MemoryStore): ToolRegistry 
   // provider's server-side tool, so an Anthropic deployment gets the cited,
   // tiered answer too instead of falling back to a raw result list.
   registry.registerAll(researchTools);
+  registry.registerAll(briefingTools);
   registerHealthcareTools(registry, { config, store });
   registry.registerAll([
     emailPollTool,

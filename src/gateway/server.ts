@@ -21,13 +21,23 @@ import { credentialsPath, loadCredentials, maskKey, removeCredential, resolveKey
 import { discoverLocal } from "../providers/discover.js";
 import type { ProviderName } from "../config/config.js";
 import { createSpeechProvider, speechStatus } from "../speech/providers/index.js";
-import { toSpeakable } from "../speech/speakable.js";
+import { speakableSummary, toSpeakable } from "../speech/speakable.js";
 import { accessEventForTranscript } from "../speech/transcript-gate.js";
 import { recordAccess } from "../tenancy/store.js";
 import { loadInstalledUniverse } from "../speech/snap.js";
 import { refineTranscript } from "../speech/refine.js";
 import { buildHintVocabulary, renderVocabularyPrompt } from "../speech/vocabulary.js";
 import { narrateTool, shouldNarrate } from "../speech/narrate.js";
+import { describePrefetch, prefetchCodes } from "../speech/prefetch.js";
+import type { ScreenContext } from "../speech/deixis.js";
+import {
+  announceWorklistStart,
+  applyCommand,
+  parseWorklistCommand,
+  startWorklist,
+  type WorklistSession,
+} from "../speech/worklist-mode.js";
+import { icd10Table, loadDataJson } from "../tools/healthcare/datasets.js";
 
 /**
  * Above this many rows, the overview does not compute KPIs.
@@ -353,10 +363,11 @@ export async function buildServer(opts: {
   };
 
   /** Gate, normalize and validate — then log the access if an identifier was spoken. */
-  const refined = (text: string, sessionId: string) => {
+  const refined = (text: string, sessionId: string, screen?: ScreenContext) => {
     const result = refineTranscript(text, {
       engine: config.speech.engine,
       universe: loadInstalledUniverse(),
+      screen,
     });
     const event = accessEventForTranscript(result.gate, {
       sessionId: sessionId || "unknown",
@@ -381,10 +392,93 @@ export async function buildServer(opts: {
    */
   app.post("/api/speech/refine", async (req, reply) => {
     const raw = req.body;
-    const text = Buffer.isBuffer(raw) ? raw.toString("utf8") : typeof raw === "string" ? raw : "";
+    // A JSON body carries the screen with the utterance; a plain string is just
+    // the utterance. Both are accepted so the simple case stays simple.
+    let text = "";
+    let screen: ScreenContext | undefined;
+    if (Buffer.isBuffer(raw)) text = raw.toString("utf8");
+    else if (typeof raw === "string") text = raw;
+    else if (raw && typeof raw === "object") {
+      const body = raw as { text?: string; screen?: ScreenContext };
+      text = String(body.text ?? "");
+      screen = body.screen;
+    }
     if (!text.trim()) return reply.code(400).send({ error: "empty body" });
     const q = req.query as { session?: string };
-    return refined(text, String(q.session ?? ""));
+    return refined(text, String(q.session ?? ""), screen);
+  });
+
+  // ── Worklist mode ──────────────────────────────────────────────────────────
+  // A cursor over the open worklist, driven by about six words. The state
+  // machine is pure and tested; this holds one session per conversation and
+  // does the I/O. Sessions live in memory on purpose — a half-finished pass
+  // through a worklist is not something to resume days later from a database,
+  // because the worklist itself will have moved underneath it.
+
+  const worklists = new Map<string, WorklistSession>();
+
+  app.post("/api/speech/worklist/start", async (req) => {
+    const q = req.query as { session?: string };
+    const key = String(q.session ?? "default");
+    let rows: Array<{ id: string; title: string; due_at: number | null; kind: string }> = [];
+    try {
+      rows = store.db
+        .prepare(
+          "SELECT id, title, due_at, kind FROM worklist_items WHERE status = 'open' ORDER BY priority DESC, COALESCE(due_at, 9e15) ASC LIMIT 50",
+        )
+        .all() as typeof rows;
+    } catch {
+      rows = [];
+    }
+    const now = Date.now();
+    const session = startWorklist(
+      rows.map((r) => ({
+        id: r.id,
+        // The title is what a worklist row carries; the claim id is inside it.
+        // Naming the row itself is better than inventing a claim id that would
+        // then be spoken back as though it were real.
+        claimId: r.id,
+        label: r.title,
+        dueInDays: r.due_at ? Math.round((r.due_at - now) / 86_400_000) : undefined,
+      })),
+    );
+    worklists.set(key, session);
+    return { say: announceWorklistStart(session), active: session.active, total: session.items.length };
+  });
+
+  app.post("/api/speech/worklist/command", async (req, reply) => {
+    const q = req.query as { session?: string };
+    const key = String(q.session ?? "default");
+    const session = worklists.get(key);
+    if (!session) return reply.code(409).send({ error: "no worklist session — start one first" });
+    const raw = req.body;
+    const text = Buffer.isBuffer(raw) ? raw.toString("utf8") : typeof raw === "string" ? raw : "";
+    const step = applyCommand(session, parseWorklistCommand(text));
+    if (step.ended) worklists.delete(key);
+    else worklists.set(key, step.session);
+    return { say: step.say, send: step.send, ended: step.ended ?? false, prompt: step.prompt };
+  });
+
+  /**
+   * A code lookup from a PARTIAL utterance, while the speaker is still talking.
+   *
+   * Strictly local reads: a membership test against tables already in memory
+   * plus a description from the same public CMS files the console already
+   * serves. No tool runs, nothing is written, and a result about a code the
+   * speaker turns out not to have said is simply discarded.
+   */
+  app.post("/api/speech/prefetch", async (req, reply) => {
+    if (!config.speech.enabled || !config.speech.prefetch) return { hits: [], hint: "" };
+    const raw = req.body;
+    const text = Buffer.isBuffer(raw) ? raw.toString("utf8") : typeof raw === "string" ? raw : "";
+    if (!text.trim()) return reply.code(400).send({ error: "empty body" });
+    const icd10 = icd10Table();
+    const hcpcs = loadDataJson<Record<string, string>>("hcpcs.json");
+    const hits = prefetchCodes(text, loadInstalledUniverse(), {
+      describe: (code, kind) =>
+        kind === "icd10" ? (icd10?.billable?.[code] ?? icd10?.headers?.[code]) : (hcpcs?.[code] ?? undefined),
+    });
+    return { hits, hint: describePrefetch(hits) };
   });
 
   /** The recognizer hint list, in the shape the browser's SpeechGrammarList takes. */
@@ -464,7 +558,21 @@ export async function buildServer(opts: {
     const raw = req.body;
     const text = Buffer.isBuffer(raw) ? raw.toString("utf8") : typeof raw === "string" ? raw : "";
     if (!text.trim()) return reply.code(400).send({ error: "empty body" });
-    return toSpeakable(text, { maxChars: config.speech.maxSpokenChars });
+    const q = req.query as { verbosity?: string };
+    // Brief is the default for SPEECH only — the screen still shows everything,
+    // so this trades nothing away. A reply that is right and four paragraphs
+    // long is, out loud, a reply nobody listened to the end of.
+    const brief = (q.verbosity ?? config.speech.verbosity) === "brief";
+    const full = toSpeakable(text, { maxChars: config.speech.maxSpokenChars });
+    if (!brief) return full;
+    const lead = speakableSummary(full.text);
+    return {
+      text: lead,
+      truncated: lead.length < full.text.length,
+      omitted: full.omitted,
+      /** The console offers "tell me more"; there is no point offering it when there is no more. */
+      hasMore: lead.length < full.text.length,
+    };
   });
 
   // ── Providers and keys ─────────────────────────────────────────────────────
