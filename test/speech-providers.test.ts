@@ -28,6 +28,7 @@ import {
   resolveBinary,
 } from "../src/speech/providers/local.js";
 import type { SpeechConfig, SpeechEnv } from "../src/speech/providers/types.js";
+import { PROMPT_TOKEN_BUDGET, estimateTokens } from "../src/speech/vocabulary.js";
 
 // A fake key that is easy to grep for. Every "no secret leaks" assertion below
 // looks for exactly this string.
@@ -622,5 +623,285 @@ describe("no key ever appears in describable output", () => {
     expect(redacted).toContain("Authorization: [not shown]");
     expect(redacted).toContain("xi-api-key: [not shown]");
     expect(redacted).toContain("Content-Type: application/json");
+  });
+});
+
+// ── Vocabulary hints reaching the vendors ────────────────────────────────────
+// The hint list is the difference between "Availity" and "availability". Each
+// engine takes it in its own shape, and each shape has one way to get it wrong.
+
+/** A realistic practice vocabulary: codes, payers, a portal, a provider. */
+const HINTS = ["J1885", "99213", "Availity", "Aetna", "uhcprovider", "Okonkwo"];
+
+describe("buildWhisperArgs with hints", () => {
+  const cfg = config().local;
+
+  it("adds --prompt with the joined vocabulary", () => {
+    const args = buildWhisperArgs(cfg, "/tmp/x/input.wav", HINTS);
+    const at = args.indexOf("--prompt");
+    expect(at).toBeGreaterThan(-1);
+    expect(args[at + 1]).toBe("J1885, 99213, Availity, Aetna, uhcprovider, Okonkwo");
+  });
+
+  it("produces the identical argv when no hints are supplied", () => {
+    // Turning a vocabulary on must be the only thing turning it on changes.
+    const baseline = buildWhisperArgs(cfg, "/tmp/x/input.wav");
+    expect(buildWhisperArgs(cfg, "/tmp/x/input.wav", undefined)).toEqual(baseline);
+    expect(buildWhisperArgs(cfg, "/tmp/x/input.wav", [])).toEqual(baseline);
+    // An all-unusable list renders to nothing, so it must not add a bare flag —
+    // `--prompt` with no value would swallow the next argument.
+    expect(buildWhisperArgs(cfg, "/tmp/x/input.wav", ["", " ", "-"])).toEqual(baseline);
+    expect(baseline).not.toContain("--prompt");
+  });
+
+  it("keeps identifier-shaped hints off argv, which every process can read via ps", () => {
+    const args = buildWhisperArgs(cfg, "/tmp/x/input.wav", ["Aetna", "123-45-6789", "1EG4-TE5-MK73"]);
+    const argv = args.join(" ");
+    expect(argv).not.toContain("123-45-6789");
+    expect(argv).not.toContain("1EG4-TE5-MK73");
+    expect(argv).toContain("Aetna");
+  });
+
+  it("caps the prompt at whisper's initial-prompt budget instead of letting it truncate", () => {
+    const many = Array.from({ length: 400 }, (_, i) => `PayerName${String(i).padStart(3, "0")}`);
+    const args = buildWhisperArgs(cfg, "/tmp/x/input.wav", many);
+    expect(estimateTokens(args[args.indexOf("--prompt") + 1]!)).toBeLessThanOrEqual(PROMPT_TOKEN_BUDGET);
+  });
+});
+
+describe("buildOpenAiTranscribeRequest with hints", () => {
+  const audio = Buffer.from("RIFFfake-wav-bytes");
+
+  it("adds a prompt multipart field carrying the vocabulary", () => {
+    const req = mustBuild(
+      buildOpenAiTranscribeRequest(config().cloud, withKeys, audio, "audio/wav", {
+        boundary: "BOUND",
+        hints: HINTS,
+      }),
+    );
+    const body = (req.body as Buffer).toString("utf8");
+    expect(body).toContain('Content-Disposition: form-data; name="prompt"');
+    expect(body).toContain("J1885, 99213, Availity, Aetna, uhcprovider, Okonkwo");
+    // The other parts and the terminator are untouched by the insertion.
+    expect(body).toContain('name="file"; filename="audio.wav"');
+    expect(body).toContain("whisper-1");
+    expect(body.endsWith("--BOUND--\r\n")).toBe(true);
+  });
+
+  it("produces a byte-identical body when no hints are supplied", () => {
+    const baseline = mustBuild(
+      buildOpenAiTranscribeRequest(config().cloud, withKeys, audio, "audio/wav", { boundary: "BOUND" }),
+    ).body as Buffer;
+
+    for (const hints of [undefined, [], ["", " ", "!"]]) {
+      const built = mustBuild(
+        buildOpenAiTranscribeRequest(config().cloud, withKeys, audio, "audio/wav", { boundary: "BOUND", hints }),
+      );
+      expect((built.body as Buffer).equals(baseline)).toBe(true);
+    }
+    expect(baseline.toString("utf8")).not.toContain('name="prompt"');
+  });
+
+  it("respects OpenAI's 224-token prompt cap rather than letting the vendor cut it", () => {
+    const many = Array.from({ length: 400 }, (_, i) => `PayerName${String(i).padStart(3, "0")}`);
+    const req = mustBuild(
+      buildOpenAiTranscribeRequest(config().cloud, withKeys, audio, "audio/wav", { boundary: "B", hints: many }),
+    );
+    const body = (req.body as Buffer).toString("utf8");
+    const prompt = body.split('name="prompt"\r\n\r\n')[1]!.split("\r\n")[0]!;
+    expect(estimateTokens(prompt)).toBeLessThanOrEqual(PROMPT_TOKEN_BUDGET);
+    // Truncated between entries, so nothing arrives as half a payer name.
+    for (const term of prompt.split(", ")) expect(many).toContain(term);
+  });
+
+  it("cannot be used to forge a multipart header out of a payer name", () => {
+    // A CR/LF surviving into a hint would close the prompt part and open one of
+    // the caller's choosing. Hints are whitespace-collapsed before they get here.
+    const req = mustBuild(
+      buildOpenAiTranscribeRequest(config().cloud, withKeys, audio, "audio/wav", {
+        boundary: "BOUND",
+        hints: ['Aetna\r\n--BOUND\r\nContent-Disposition: form-data; name="model"\r\n\r\nevil'],
+      }),
+    );
+    const body = (req.body as Buffer).toString("utf8");
+    // The hint's text may survive as text — harmlessly, since it is a value,
+    // and counting literal substrings just finds the echo. What must not
+    // survive is its STRUCTURE: only "--BOUND\r\n" opens a part, and the
+    // injected "--BOUND" is now followed by a space rather than a CRLF, so the
+    // body still holds exactly the four real parts (model, response_format,
+    // prompt, file) plus one terminator.
+    expect(body.split("--BOUND\r\n").length - 1).toBe(4);
+    expect(body.split("--BOUND--\r\n").length - 1).toBe(1);
+    // The prompt value is one line: the CRLFs were collapsed before it got here.
+    const prompt = body.split('name="prompt"\r\n\r\n')[1]!.split("\r\n")[0]!;
+    expect(prompt).toContain("Aetna");
+    expect(prompt).not.toMatch(/[\r\n]/);
+  });
+});
+
+describe("buildDeepgramTranscribeRequest with hints", () => {
+  const cfg = config({ cloud: { ...config().cloud, sttVendor: "deepgram", sttModel: "nova-2-medical" } }).cloud;
+  const audio = Buffer.from("opus-bytes");
+
+  it("adds one keyterm query parameter per term", () => {
+    const req = mustBuild(buildDeepgramTranscribeRequest(cfg, withKeys, audio, "audio/webm", { hints: HINTS }));
+    const params = new URL(req.url).searchParams;
+    expect(params.getAll("keyterm")).toEqual(HINTS);
+    // The parameters that were already there are still there and still right.
+    expect(params.get("model")).toBe("nova-2-medical");
+    expect(params.get("smart_format")).toBe("true");
+    expect(params.get("punctuate")).toBe("true");
+  });
+
+  it("URL-encodes a payer name so an ampersand or a space cannot corrupt the query", () => {
+    // Hand-joined, "Blue Cross & Blue Shield" ends the parameter at the
+    // ampersand and leaves a bogus "Blue Shield" parameter behind it.
+    const messy = ["Blue Cross & Blue Shield", "Aetna Better Health", "UHC=West", "50% Coinsurance", "A#1 Medical"];
+    const req = mustBuild(buildDeepgramTranscribeRequest(cfg, withKeys, audio, "audio/webm", { hints: messy }));
+
+    expect(req.url).toContain("keyterm=Blue+Cross+%26+Blue+Shield");
+    expect(req.url).toContain("keyterm=Aetna+Better+Health");
+    expect(req.url).toContain("keyterm=UHC%3DWest");
+    expect(req.url).toContain("keyterm=50%25+Coinsurance");
+    // A '#' unencoded would truncate the whole URL into a fragment.
+    expect(req.url).toContain("keyterm=A%231+Medical");
+
+    // And it survives a round trip: no term lost, no term split, nothing extra.
+    const params = new URL(req.url).searchParams;
+    expect(params.getAll("keyterm")).toEqual(messy);
+    expect([...params.keys()].filter((k) => k !== "keyterm")).toEqual(["model", "smart_format", "punctuate"]);
+  });
+
+  it("produces the identical URL when no hints are supplied", () => {
+    const baseline = "https://api.deepgram.com/v1/listen?model=nova-2-medical&smart_format=true&punctuate=true";
+    for (const opts of [undefined, {}, { hints: [] }, { hints: ["", " ", "-"] }]) {
+      expect(mustBuild(buildDeepgramTranscribeRequest(cfg, withKeys, audio, "audio/webm", opts)).url).toBe(baseline);
+    }
+  });
+
+  it("does not cap the keyterm list — there is no prompt to overflow", () => {
+    const many = Array.from({ length: 300 }, (_, i) => `Term${String(i).padStart(3, "0")}`);
+    const req = mustBuild(buildDeepgramTranscribeRequest(cfg, withKeys, audio, "audio/webm", { hints: many }));
+    expect(new URL(req.url).searchParams.getAll("keyterm")).toHaveLength(300);
+  });
+});
+
+describe("a patient identifier never reaches a built request", () => {
+  // The scenario this exists for: a "payers" or "notes" column with a member ID
+  // typed into it, swept up by the vocabulary query, and shipped to a vendor as
+  // a recognition hint. That is a reportable disclosure caused by a feature
+  // whose whole purpose is to spell "Availity" correctly.
+  const IDENTIFIERS = ["123-45-6789", "1EG4-TE5-MK73", "1EG4TE5MK73", "123456789A", "DOB: 04/11/1957"];
+  const dirty = ["Aetna", ...IDENTIFIERS, "J1885"];
+
+  it("is stripped from the OpenAI multipart prompt", () => {
+    const req = mustBuild(
+      buildOpenAiTranscribeRequest(config().cloud, withKeys, Buffer.from("x"), "audio/wav", {
+        boundary: "BOUND",
+        hints: dirty,
+      }),
+    );
+    const body = (req.body as Buffer).toString("utf8");
+    for (const identifier of IDENTIFIERS) expect(body).not.toContain(identifier);
+    // The legitimate vocabulary still made it — this is a filter, not a kill switch.
+    expect(body).toContain("Aetna, J1885");
+  });
+
+  it("is stripped from the Deepgram keyterm parameters, encoded or not", () => {
+    const cfg = config({ cloud: { ...config().cloud, sttVendor: "deepgram" } }).cloud;
+    const req = mustBuild(
+      buildDeepgramTranscribeRequest(cfg, withKeys, Buffer.from("x"), "audio/webm", { hints: dirty }),
+    );
+    const keyterms = new URL(req.url).searchParams.getAll("keyterm");
+    expect(keyterms).toEqual(["Aetna", "J1885"]);
+    // Also absent from the raw URL, where encoding could have hidden it from
+    // the assertion above.
+    for (const identifier of IDENTIFIERS) {
+      expect(req.url).not.toContain(identifier);
+      expect(decodeURIComponent(req.url.replace(/\+/g, " "))).not.toContain(identifier);
+    }
+  });
+
+  it("is stripped from the whisper argv", () => {
+    const argv = buildWhisperArgs(config().local, "/tmp/x/input.wav", dirty).join(" ");
+    for (const identifier of IDENTIFIERS) expect(argv).not.toContain(identifier);
+    expect(argv).toContain("Aetna, J1885");
+  });
+
+  it("is stripped from the browser grammar", () => {
+    const provider = new BrowserSpeechProvider(config({ engine: "browser" }), dirty);
+    const grammar = provider.grammar();
+    for (const identifier of IDENTIFIERS) expect(grammar).not.toContain(identifier);
+    expect(provider.vocabulary()).toEqual(["Aetna", "J1885"]);
+  });
+});
+
+// ── The browser's grammar ────────────────────────────────────────────────────
+
+describe("BrowserSpeechProvider vocabulary", () => {
+  it("publishes a JSGF grammar for the page to install", () => {
+    const provider = new BrowserSpeechProvider(config({ engine: "browser" }), ["Availity", "Blue Cross & Blue Shield"]);
+    const grammar = provider.grammar();
+    expect(grammar.startsWith("#JSGF V1.0;")).toBe(true);
+    expect(grammar).toContain("Availity");
+    // Quoted, because an unquoted space or '&' is a parse error and
+    // SpeechGrammarList.addFromString throws on the whole grammar.
+    expect(grammar).toContain('"Blue Cross & Blue Shield"');
+  });
+
+  it("returns an empty grammar rather than a malformed empty rule", () => {
+    expect(new BrowserSpeechProvider(config({ engine: "browser" })).grammar()).toBe("");
+    expect(new BrowserSpeechProvider(config({ engine: "browser" }), []).grammar()).toBe("");
+  });
+
+  it("does not claim to apply hints server-side, because it transcribes nothing", () => {
+    const provider = new BrowserSpeechProvider(config({ engine: "browser" }), HINTS);
+    expect(provider.capabilities().acceptsHints).toBe(false);
+    expect(provider.capabilities().note).toContain("grammar()");
+    // transcribe still refuses, hints or no hints — the vocabulary does not turn
+    // a descriptor into an implementation.
+    return provider.transcribe(Buffer.from("x"), "audio/webm", HINTS).then((heard) => {
+      expect(heard.text).toBe("");
+      expect(heard.error).toMatch(/Web Speech API/);
+    });
+  });
+
+  it("says in describe() whether a vocabulary was handed over at all", () => {
+    expect(new BrowserSpeechProvider(config({ engine: "browser" }), HINTS).describe()).toContain("6 hints");
+    expect(new BrowserSpeechProvider(config({ engine: "browser" })).describe()).toContain("vocabulary: none");
+  });
+
+  it("takes hints through the factory", () => {
+    const provider = createSpeechProvider(config({ engine: "browser" }), withoutKeys, HINTS);
+    expect(provider).toBeInstanceOf(BrowserSpeechProvider);
+    expect((provider as BrowserSpeechProvider).vocabulary()).toEqual(HINTS);
+    // Still optional — every existing two-argument call site keeps working.
+    expect((createSpeechProvider(config({ engine: "browser" }), withoutKeys) as BrowserSpeechProvider).grammar()).toBe(
+      "",
+    );
+  });
+});
+
+describe("capabilities report where hints actually apply", () => {
+  it("marks the server-side engines as accepting them and the browser as not", () => {
+    expect(new LocalSpeechProvider(config(), withoutKeys).capabilities().acceptsHints).toBe(true);
+    expect(new CloudSpeechProvider(config(), withKeys).capabilities().acceptsHints).toBe(true);
+    expect(new BrowserSpeechProvider(config()).capabilities().acceptsHints).toBe(false);
+  });
+
+  it("accepts the optional hints argument on every provider's transcribe", async () => {
+    // Nothing is installed and no vendor is reachable here; the point is that
+    // the third argument is accepted rather than what comes back.
+    const audio = Buffer.from("x");
+    for (const provider of [
+      new LocalSpeechProvider(config(), withoutKeys),
+      new BrowserSpeechProvider(config()),
+    ]) {
+      const result = await provider.transcribe(audio, "audio/wav", HINTS);
+      expect(result.text).toBe("");
+      expect(result.error).toBeDefined();
+      // And the hints never surface in the failure text, which gets logged.
+      expect(result.error).not.toContain("J1885");
+    }
   });
 });

@@ -9,6 +9,7 @@ import type {
   TranscriptResult,
   TtsVendor,
 } from "./types.js";
+import { renderVocabularyPrompt } from "../vocabulary.js";
 
 // ── Requests as data ─────────────────────────────────────────────────────────
 // Every vendor call is built as a value first and sent second. That split is
@@ -77,8 +78,19 @@ export interface BuildOptions {
    * Multipart boundary. Defaulted but overridable so a test can assert the body
    * byte-for-byte; a random boundary would make the request unassertable and
    * the assertion is the point of building it separately.
+   *
+   * Multipart only — Deepgram posts raw audio and ignores this.
    */
   boundary?: string;
+  /**
+   * Ranked recognition vocabulary — see src/speech/vocabulary.ts.
+   *
+   * Absent or empty MUST produce the request this builder produced before hints
+   * existed, byte for byte. Anything else would mean turning a vocabulary on
+   * silently changed an unrelated request, and the existing assertions on these
+   * bodies are what proves it did not.
+   */
+  hints?: string[];
 }
 
 const DEFAULT_BOUNDARY = "----aetheraclaw-speech-boundary";
@@ -96,11 +108,22 @@ export function buildOpenAiTranscribeRequest(
 
   const boundary = opts.boundary ?? DEFAULT_BOUNDARY;
   const filename = `audio.${extensionForMime(mimeType)}`;
+
+  // OpenAI calls this field `prompt`: text the decoder is biased toward, capped
+  // at 224 tokens. renderVocabularyPrompt does the truncating and the identifier
+  // gate; it also collapses whitespace, which is what keeps a hint from opening
+  // a CRLF and forging a multipart header out of the middle of a payer name.
+  const prompt = opts.hints?.length ? renderVocabularyPrompt(opts.hints, "prompt") : "";
+  const promptPart = prompt
+    ? `--${boundary}\r\nContent-Disposition: form-data; name="prompt"\r\n\r\n${prompt}\r\n`
+    : "";
+
   const head = Buffer.from(
     `--${boundary}\r\n` +
       `Content-Disposition: form-data; name="model"\r\n\r\n${cfg.sttModel}\r\n` +
       `--${boundary}\r\n` +
       `Content-Disposition: form-data; name="response_format"\r\n\r\njson\r\n` +
+      promptPart +
       `--${boundary}\r\n` +
       `Content-Disposition: form-data; name="file"; filename="${filename}"\r\n` +
       `Content-Type: ${mimeType}\r\n\r\n`,
@@ -125,6 +148,7 @@ export function buildDeepgramTranscribeRequest(
   env: SpeechEnv,
   audio: Buffer,
   mimeType: string,
+  opts: BuildOptions = {},
 ): BuiltRequest {
   const key = env[cfg.sttKeyEnv];
   if (!key) return missingKeyMessage(cfg.sttKeyEnv, "sttKeyEnv", "Deepgram");
@@ -132,6 +156,16 @@ export function buildDeepgramTranscribeRequest(
   // smart_format gives punctuation and casing; without it the transcript
   // arrives as one lowercase run, which reads badly and parses worse.
   const query = new URLSearchParams({ model: cfg.sttModel, smart_format: "true", punctuate: "true" });
+
+  // Deepgram takes one `keyterm=` per term, repeated. Appending through
+  // URLSearchParams rather than string concatenation is the whole point: a payer
+  // called "Blue Cross & Blue Shield" hand-joined into the query string ends the
+  // parameter at the ampersand, and the request then carries a bogus
+  // "Blue Shield" parameter Deepgram rejects — or worse, quietly ignores.
+  for (const term of renderVocabularyPrompt(opts.hints ?? [], "keyterm")) {
+    query.append("keyterm", term);
+  }
+
   return {
     url: `https://api.deepgram.com/v1/listen?${query.toString()}`,
     method: "POST",
@@ -244,12 +278,12 @@ export class CloudSpeechProvider implements SpeechProvider {
     private env: SpeechEnv = process.env,
   ) {}
 
-  async transcribe(audio: Buffer, mimeType: string): Promise<TranscriptResult> {
+  async transcribe(audio: Buffer, mimeType: string, hints?: string[]): Promise<TranscriptResult> {
     const cloud = this.cfg.cloud;
     const built =
       cloud.sttVendor === "deepgram"
-        ? buildDeepgramTranscribeRequest(cloud, this.env, audio, mimeType)
-        : buildOpenAiTranscribeRequest(cloud, this.env, audio, mimeType);
+        ? buildDeepgramTranscribeRequest(cloud, this.env, audio, mimeType, { hints })
+        : buildOpenAiTranscribeRequest(cloud, this.env, audio, mimeType, { hints });
     if (isRequestError(built)) return { text: "", error: built };
 
     try {
@@ -294,6 +328,8 @@ export class CloudSpeechProvider implements SpeechProvider {
       // Both vendors offer websocket streaming; this adapter posts whole
       // utterances, which is what the push-to-talk flow needs.
       streaming: false,
+      // OpenAI as a `prompt` field, Deepgram as repeated `keyterm` params.
+      acceptsHints: true,
       note: `Whole-utterance HTTP calls to ${this.cfg.cloud.sttVendor} (STT) and ${this.cfg.cloud.ttsVendor} (TTS).`,
     };
   }

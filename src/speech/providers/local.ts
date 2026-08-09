@@ -12,6 +12,7 @@ import type {
   SynthesisResult,
   TranscriptResult,
 } from "./types.js";
+import { renderVocabularyPrompt } from "../vocabulary.js";
 
 // ── Pure builders ────────────────────────────────────────────────────────────
 // The argv is the interesting part and the part that breaks: a flag renamed
@@ -32,9 +33,18 @@ export function outputPrefix(audioPath: string): string {
  * payer call is PHI. `-of` is passed explicitly so the sidecar `.txt` lands at a
  * path we chose — whisper's default derives it from the input and the cleanup
  * in the `finally` has to be able to name it.
+ *
+ * `hints`, when supplied, becomes whisper's `--prompt` — an initial prompt the
+ * decoder is conditioned on. Note where that lands: on ARGV, which every process
+ * on the host can read via `ps`. That is the same leak the rest of this builder
+ * exists to avoid, and it is why the prompt is rendered through
+ * renderVocabularyPrompt rather than joined here — that function drops
+ * identifier-shaped entries, so a member ID that wandered into a payer table
+ * cannot end up in the process table. Absent or empty hints must produce the
+ * argv this builder produced before hints existed, unchanged.
  */
-export function buildWhisperArgs(cfg: SpeechLocalConfig, audioPath: string): string[] {
-  return [
+export function buildWhisperArgs(cfg: SpeechLocalConfig, audioPath: string, hints?: string[]): string[] {
+  const args = [
     "-m",
     cfg.whisperModel,
     "-f",
@@ -48,6 +58,14 @@ export function buildWhisperArgs(cfg: SpeechLocalConfig, audioPath: string): str
     "--print-progress",
     "false",
   ];
+
+  // whisper.cpp truncates its initial prompt at n_text_ctx/2 — the same 224
+  // tokens OpenAI caps at — so the render is capped here rather than the binary
+  // silently dropping whichever half it liked less.
+  const prompt = hints?.length ? renderVocabularyPrompt(hints, "prompt") : "";
+  if (prompt) args.push("--prompt", prompt);
+
+  return args;
 }
 
 /**
@@ -193,7 +211,7 @@ export class LocalSpeechProvider implements SpeechProvider {
     private env: SpeechEnv = process.env,
   ) {}
 
-  async transcribe(audio: Buffer, mimeType: string): Promise<TranscriptResult> {
+  async transcribe(audio: Buffer, mimeType: string, hints?: string[]): Promise<TranscriptResult> {
     const local = this.cfg.local;
     const problem = checkWhisperPrereqs(local, this.env);
     if (problem) return { text: "", error: problem };
@@ -208,7 +226,7 @@ export class LocalSpeechProvider implements SpeechProvider {
       await writeFile(audioPath, audio);
 
       const bin = resolveBinary(local.whisperBin, this.env) ?? local.whisperBin;
-      const result = await run(bin, buildWhisperArgs(local, audioPath));
+      const result = await run(bin, buildWhisperArgs(local, audioPath, hints));
       if (result.error) {
         return {
           text: "",
@@ -271,6 +289,8 @@ export class LocalSpeechProvider implements SpeechProvider {
       // whisper.cpp here is invoked per utterance on a finished file; partial
       // results would need its streaming mode and a long-lived process.
       streaming: false,
+      // As whisper's `--prompt` initial-prompt conditioning.
+      acceptsHints: true,
       note: "Whole-utterance only: audio is written to a temp file, transcribed, and the file is deleted.",
     };
   }

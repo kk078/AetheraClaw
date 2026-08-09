@@ -68,6 +68,15 @@ export interface SpeechCapabilities {
   tts: boolean;
   /** Whether partial transcripts arrive while the speaker is still talking. */
   streaming: boolean;
+  /**
+   * Whether a vocabulary hint list reaches the recognizer from THIS process.
+   *
+   * Optional so an adapter written before hints existed still satisfies the
+   * interface. False is not the same as "hints do not help here": the browser
+   * engine takes a grammar, it just takes it in the page — which is why it also
+   * publishes `grammar()` rather than pretending this flag covers it.
+   */
+  acceptsHints?: boolean;
   /** One line of nuance the three booleans cannot carry. */
   note: string;
 }
@@ -88,7 +97,15 @@ export interface SpeechProvider {
    * the server at all — not to decide whether the feature exists.
    */
   readonly runsInBrowser: boolean;
-  transcribe(audio: Buffer, mimeType: string): Promise<TranscriptResult>;
+  /**
+   * `hints` is a ranked vocabulary list — see src/speech/vocabulary.ts.
+   *
+   * Optional, and optional on purpose: every existing caller passes two
+   * arguments, and a required third would have turned a recognition improvement
+   * into a breaking change across the gateway, the CLI and the tests. An adapter
+   * that cannot use hints ignores the argument rather than failing on it.
+   */
+  transcribe(audio: Buffer, mimeType: string, hints?: string[]): Promise<TranscriptResult>;
   synthesize(text: string): Promise<SynthesisResult>;
   capabilities(): SpeechCapabilities;
   /**

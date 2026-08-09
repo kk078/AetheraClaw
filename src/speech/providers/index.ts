@@ -5,11 +5,22 @@ import type { SpeechConfig, SpeechEnv, SpeechEngine, SpeechProvider } from "./ty
 
 export const KNOWN_SPEECH_ENGINES = ["browser", "local", "cloud"] as const;
 
-export function createSpeechProvider(cfg: SpeechConfig, env: SpeechEnv = process.env): SpeechProvider {
+/**
+ * @param hints Ranked recognition vocabulary — see src/speech/vocabulary.ts.
+ *   Only the browser adapter needs it at construction time (it publishes a JSGF
+ *   grammar for the page); the server-side adapters take hints per call, so a
+ *   caller with a vocabulary that changes between utterances passes it to
+ *   `transcribe` instead. Optional so no existing caller breaks.
+ */
+export function createSpeechProvider(
+  cfg: SpeechConfig,
+  env: SpeechEnv = process.env,
+  hints: string[] = [],
+): SpeechProvider {
   const engine: SpeechEngine = cfg.engine;
   switch (engine) {
     case "browser":
-      return new BrowserSpeechProvider(cfg);
+      return new BrowserSpeechProvider(cfg, hints);
     case "local":
       return new LocalSpeechProvider(cfg, env);
     case "cloud":
@@ -96,6 +107,17 @@ export function speechStatus(cfg: SpeechConfig, env: SpeechEnv = process.env): s
 export { BrowserSpeechProvider } from "./browser.js";
 export { CloudSpeechProvider } from "./cloud.js";
 export { LocalSpeechProvider } from "./local.js";
+// Re-exported here so a caller wiring speech up has one import to reach for
+// rather than having to know the vocabulary lives a directory above.
+export {
+  buildHintVocabulary,
+  describeVocabulary,
+  renderVocabularyPrompt,
+  sanitizeHints,
+  DEFAULT_HINT_LIMIT,
+  PROMPT_TOKEN_BUDGET,
+} from "../vocabulary.js";
+export type { VocabularySource, VocabularyOptions, VocabularyStyle } from "../vocabulary.js";
 export type {
   SpeechCapabilities,
   SpeechConfig,

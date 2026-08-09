@@ -726,6 +726,42 @@ or "deny" — and anything that is not clearly one or the other falls through to
 composer rather than being guessed, because a misheard "approve" runs a tool
 nobody authorised.
 
+**A heard code is checked against codes that exist.** Every transcript runs one
+pipeline, whichever engine produced it: the identifier gate, then spoken-code
+normalization, then validation against the installed tables — 9,803 CPT, 6,091
+HCPCS and 98,166 ICD-10 codes on a full install. A code one character from
+exactly one real code is corrected and the correction is stated. A code one
+character from *several* is a **question, not a guess**:
+
+```
+"look up J1985"
+  → 6 HCPCS or ICD-10 codes are 1 character from what I heard —
+    did you mean J1885, J1955, J1980, J9185, J98.5, or S19.85?
+```
+
+Nothing is sent until that is resolved. Silently turning 99213 into 99214 is
+wrong in a way no reviewer downstream can see, which is the entire reason this
+step exists.
+
+**A spoken identifier is redacted before it becomes a turn, and logged.** The
+same `detectPhi`/`redact` the email channel uses, at one choke point, with an
+entry in `phi_access_log` chained like every other access. The wording is honest
+about what redaction can and cannot do — under the browser and cloud engines the
+audio reached a vendor before any of this ran, so the entry is an **export**, not
+a read, and the console says the identifier has already been disclosed rather
+than implying it was protected.
+
+**Recognition is biased toward this practice's vocabulary.** The hint list is
+derived from the codes actually billed, the payers actually worked and the
+billing provider names — never patient name, subscriber id or date of birth,
+which sit on the same record and are excluded at the source rather than filtered
+later. Generic recognition has never heard of "Availity" or "J1885".
+
+**It speaks as it thinks.** Replies are spoken sentence by sentence as they
+stream rather than after the last token, and a tool call says what it is doing
+("reading the remittance, eight thirty five") — never its arguments, which can
+carry an identifier and would otherwise be read aloud in a room.
+
 ## Running it
 
 It runs on your own machine — there is no hosted instance. `127.0.0.1:4180` only answers on the box where you started the gateway.

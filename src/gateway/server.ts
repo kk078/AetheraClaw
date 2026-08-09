@@ -22,6 +22,12 @@ import { discoverLocal } from "../providers/discover.js";
 import type { ProviderName } from "../config/config.js";
 import { createSpeechProvider, speechStatus } from "../speech/providers/index.js";
 import { toSpeakable } from "../speech/speakable.js";
+import { accessEventForTranscript } from "../speech/transcript-gate.js";
+import { recordAccess } from "../tenancy/store.js";
+import { loadInstalledUniverse } from "../speech/snap.js";
+import { refineTranscript } from "../speech/refine.js";
+import { buildHintVocabulary, renderVocabularyPrompt } from "../speech/vocabulary.js";
+import { narrateTool, shouldNarrate } from "../speech/narrate.js";
 
 /**
  * Above this many rows, the overview does not compute KPIs.
@@ -298,6 +304,111 @@ export async function buildServer(opts: {
     };
   });
 
+  /**
+   * The hint vocabulary, built once and reused.
+   *
+   * Generic speech recognition has never heard of "Availity" or "J1885". The
+   * practice's own billed codes and payers are the vocabulary that matters, and
+   * they are already in the database — so the hint list is derived rather than
+   * configured, and cannot drift from what the practice actually does.
+   */
+  let hintCache: { at: number; hints: string[] } | null = null;
+  const HINT_TTL_MS = 5 * 60_000;
+  const speechHints = (): string[] => {
+    if (hintCache && Date.now() - hintCache.at < HINT_TTL_MS) return hintCache.hints;
+
+    const codes: string[] = [];
+    const payers: string[] = [];
+    const providers: string[] = [];
+    try {
+      // loadClaims rather than a second hand-written query. Two loaders reading
+      // the claim JSON differently is how the dashboard and a tool end up
+      // disagreeing about what was billed, and the first version of this did
+      // exactly that — it selected a `data` column that does not exist, and the
+      // catch turned a schema mistake into a silently empty hint list.
+      for (const row of loadClaims({ services: { store } })) {
+        if (row.payer) payers.push(row.payer);
+        if (row.claim.payer_name) payers.push(row.claim.payer_name);
+        if (row.claim.billing_provider_name) providers.push(row.claim.billing_provider_name);
+        for (const line of row.claim.service_lines ?? []) if (line.cpt_hcpcs) codes.push(line.cpt_hcpcs);
+        for (const dx of row.claim.diagnoses ?? []) if (dx) codes.push(dx);
+      }
+    } catch {
+      // An install with no claims yet is the common case, not an error. The
+      // hint list is an optimisation and must never be able to break
+      // transcription by being unavailable.
+    }
+
+    // Codes, payers and the BILLING provider only. Patient name, subscriber id
+    // and date of birth are on the same claim record and are deliberately not
+    // read: a hint list is sent to whichever engine is configured, and under
+    // the browser and cloud engines that means handing a patient's surname to
+    // a third party to improve its transcription. The identifier scan inside
+    // buildHintVocabulary catches SSN and MBI shapes, but a surname has no
+    // shape to catch — so it is excluded here, at the source, rather than
+    // relied on to be filtered later.
+    const hints = buildHintVocabulary({ codes, payers, providers });
+    hintCache = { at: Date.now(), hints };
+    return hints;
+  };
+
+  /** Gate, normalize and validate — then log the access if an identifier was spoken. */
+  const refined = (text: string, sessionId: string) => {
+    const result = refineTranscript(text, {
+      engine: config.speech.engine,
+      universe: loadInstalledUniverse(),
+    });
+    const event = accessEventForTranscript(result.gate, {
+      sessionId: sessionId || "unknown",
+      actor: "voice",
+      engine: config.speech.engine,
+    });
+    if (event) {
+      try {
+        recordAccess(store, event);
+      } catch {
+        // Never fail the utterance because the log write failed; the console
+        // surfaces chain gaps separately and losing the turn helps nobody.
+      }
+    }
+    return { text: result.text, ask: result.ask, blocked: result.blocked, why: result.why };
+  };
+
+  /**
+   * The browser engine recognises in the page, so its transcript would
+   * otherwise skip the identifier gate and the code validation entirely — the
+   * one engine that most needs both, since its audio has already left.
+   */
+  app.post("/api/speech/refine", async (req, reply) => {
+    const raw = req.body;
+    const text = Buffer.isBuffer(raw) ? raw.toString("utf8") : typeof raw === "string" ? raw : "";
+    if (!text.trim()) return reply.code(400).send({ error: "empty body" });
+    const q = req.query as { session?: string };
+    return refined(text, String(q.session ?? ""));
+  });
+
+  /** The recognizer hint list, in the shape the browser's SpeechGrammarList takes. */
+  app.get("/api/speech/vocabulary", async () => {
+    const hints = speechHints();
+    return { count: hints.length, grammar: renderVocabularyPrompt(hints, "grammar") };
+  });
+
+  /**
+   * One spoken clause for a tool call.
+   *
+   * Server-side because the verb map lives beside its tests, and because the
+   * rule that tool ARGUMENTS are never spoken has to be enforced somewhere a
+   * test can see it — an argument can carry an identifier and this ends up
+   * coming out of a speaker in a room with other people in it.
+   */
+  app.get("/api/speech/narrate", async (req, reply) => {
+    const q = req.query as { tool?: string };
+    const tool = String(q.tool ?? "");
+    if (!tool) return reply.code(400).send({ error: "no tool named" });
+    if (!shouldNarrate(tool)) return { narrate: false, text: "" };
+    return { narrate: true, text: narrateTool(tool) };
+  });
+
   app.post("/api/speech/transcribe", async (req, reply) => {
     if (!config.speech.enabled) return reply.code(400).send({ error: "speech is disabled — set speech.enabled in config.json5" });
     const raw = req.body;
@@ -309,9 +420,11 @@ export async function buildServer(opts: {
       if (provider.runsInBrowser) {
         return reply.code(400).send({ error: "engine is 'browser' — recognition happens in the page and must not be posted here" });
       }
-      const result = await provider.transcribe(audio, String(q.mime ?? "audio/webm"));
+      const result = await provider.transcribe(audio, String(q.mime ?? "audio/webm"), speechHints());
       if (result.error) return reply.code(502).send({ error: result.error });
-      return { text: result.text };
+      // Same pipeline the browser engine gets through /api/speech/refine. One
+      // implementation, so a rule cannot hold on one path and not the other.
+      return refined(result.text, String((req.query as { session?: string }).session ?? ""));
     } catch (err) {
       return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
     }
