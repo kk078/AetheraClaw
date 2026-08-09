@@ -222,8 +222,35 @@ program
       handleUserMessage: (sessionId, text) => sessions.handleUserMessage(sessionId, text),
     });
     await email.start();
+    // ── Ctrl-C has to actually stop it ──────────────────────────────────────
+    // Registering ANY listener for SIGINT replaces Node's default behaviour,
+    // which is to terminate. So a handler that only stopped the mail channel
+    // left the HTTP server listening and the event loop alive: Ctrl-C printed
+    // nothing, the gateway kept serving, and the next `serve` died on
+    // EADDRINUSE — which reads as "the port is stuck" rather than "the last
+    // one never exited".
+    //
+    // `once` is load-bearing: after it fires the listener is gone, so a second
+    // Ctrl-C gets Node's default terminate and is always an escape hatch.
     for (const signal of ["SIGINT", "SIGTERM"] as const) {
-      process.once(signal, () => void email.stop());
+      process.once(signal, () => {
+        console.log(`\nStopping the gateway (${signal})… press Ctrl-C again to force.`);
+        // Bounded: a close that hangs must not turn Ctrl-C back into a no-op.
+        const forced = setTimeout(() => process.exit(0), 5_000);
+        forced.unref();
+        void (async () => {
+          // Each step is independent — a mail channel that fails to stop must
+          // not prevent the port being released.
+          await email.stop().catch(() => {});
+          await app.close().catch(() => {});
+          try {
+            store.close();
+          } catch {
+            /* already closed */
+          }
+          process.exit(0);
+        })();
+      });
     }
 
     await app.listen({ host: config.gateway.host, port: config.gateway.port });
