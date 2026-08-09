@@ -45,9 +45,14 @@
     hasMore: false,
     consented: false,
     wakeActive: false,
+    vad: null,
+    wake: null,
     heldKey: false,
     awaitingApproval: null,
     worklist: false,
+    awaitingChallenge: false,
+    pendingRisk: "",
+    pendingTool: "",
   };
 
   const $ = (sel) => document.querySelector(sel);
@@ -455,12 +460,21 @@
     // ANSWER to it, not a new request. Anything that is not clearly yes or no
     // falls through to the composer rather than being guessed — a misheard
     // "approve" would run a tool nobody authorised.
+    if (V.awaitingChallenge) {
+      void answerChallenge(text);
+      return;
+    }
     if (V.awaitingApproval) {
       const yes = /\b(approve|approved|yes|yeah|confirm|go ahead|do it)\b/i.test(text);
       const no = /\b(deny|denied|no|nope|cancel|stop|reject)\b/i.test(text);
       if (yes !== no) {
-        V.awaitingApproval = null;
-        if (typeof respondApproval === "function") respondApproval(yes);
+        // Denial never needs a challenge — stopping something is always allowed.
+        if (!yes) {
+          V.awaitingApproval = null;
+          if (typeof respondApproval === "function") respondApproval(false);
+          return;
+        }
+        void approveWithAuthorization();
         return;
       }
       note(`Heard "${text}" — say approve or deny.`);
@@ -468,6 +482,71 @@
     }
     preview(text);
     if (typeof send === "function") send();
+  }
+
+  // ── Spoken authorization ───────────────────────────────────────────────────
+  // Saying "approve" out loud is one word, and anyone in the room can say it.
+  // Risky actions ask for a phrase first.
+  //
+  // What this is: a knowledge factor. It checks that whoever spoke knows the
+  // authorization phrase — NOT who they are. There is no voiceprint here and
+  // the console does not pretend otherwise; anyone who has overheard the
+  // phrase can repeat it. The approval dialog on screen remains the authority.
+
+  async function approveWithAuthorization() {
+    const q = state.sessionId ? `?session=${encodeURIComponent(state.sessionId)}` : "";
+    try {
+      const res = await fetch(
+        `/api/speech/authorization${q}${q ? "&" : "?"}tool=${encodeURIComponent(V.pendingTool)}&risk=${encodeURIComponent(V.pendingRisk)}`,
+      );
+      const info = res.ok ? await res.json() : { required: false };
+      // Not required, already inside the window, or no phrase configured on
+      // this install: behave exactly as before rather than blocking somebody
+      // out of their own approval.
+      if (!info.required || info.authorized || !info.configured) {
+        V.awaitingApproval = null;
+        if (typeof respondApproval === "function") respondApproval(true);
+        return;
+      }
+      const ch = await fetch(`/api/speech/authorization/challenge${q}`, { method: "POST" });
+      if (!ch.ok) {
+        V.awaitingApproval = null;
+        if (typeof respondApproval === "function") respondApproval(true);
+        return;
+      }
+      const challenge = await ch.json();
+      V.awaitingChallenge = true;
+      enqueueSpeak(challenge.prompt, { urgent: true });
+      note(challenge.prompt);
+    } catch {
+      // A failure here must not strand the approval; the screen still works.
+      note("Could not start the authorization challenge — use the buttons.");
+    }
+  }
+
+  async function answerChallenge(spoken) {
+    const q = state.sessionId ? `?session=${encodeURIComponent(state.sessionId)}` : "";
+    try {
+      const res = await fetch(`/api/speech/authorization/verify${q}`, {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: spoken,
+      });
+      const out = await res.json();
+      if (out.ok) {
+        V.awaitingChallenge = false;
+        V.awaitingApproval = null;
+        if (typeof respondApproval === "function") respondApproval(true);
+        return;
+      }
+      // The challenge stays open on a wrong answer; the server counts attempts
+      // and locks out, so retrying here cannot become unlimited guessing.
+      note(out.why || "That was not the authorization phrase.");
+      enqueueSpeak(out.why || "That was not right.", { urgent: true });
+    } catch {
+      V.awaitingChallenge = false;
+      note("Authorization could not be checked — use the buttons.");
+    }
   }
 
   // ── Worklist mode ──────────────────────────────────────────────────────────
@@ -762,60 +841,167 @@
   // would mean streaming continuous audio off the machine to detect one phrase,
   // which is a far larger exposure than the feature is worth.
 
-  function startWake() {
-    if (V.cfg.mode !== "always-on" || !V.cfg.runsInBrowser || !SR) return;
-    if (V.wakeActive) return;
-    const rec = new SR();
-    rec.lang = "en-US";
-    rec.continuous = true;
-    rec.interimResults = true;
-    V.wake = rec;
-    V.wakeActive = true;
-    const wake = (V.cfg.wakeWord || "hey aethera").toLowerCase();
-    rec.addEventListener("result", (ev) => {
-      for (let i = ev.resultIndex; i < ev.results.length; i++) {
-        const said = ev.results[i][0].transcript.toLowerCase();
-        if (said.includes(wake)) {
-          const after = said.split(wake).pop().trim();
-          stopWake();
-          if (after) submitTranscript(after);
-          else startListening();
-          return;
-        }
-      }
-    });
-    // A continuous recogniser stops itself on silence; restart unless something
-    // deliberately turned it off, or always-on lasts about a minute.
-    rec.addEventListener("end", () => {
-      if (V.wakeActive) {
-        try {
-          rec.start();
-        } catch {
-          V.wakeActive = false;
-        }
-      }
-    });
-    rec.addEventListener("error", () => {
-      V.wakeActive = false;
-    });
+  /**
+   * A local energy gate in front of the recognizer.
+   *
+   * This is the whole point of the item. Always-on used to mean a continuous
+   * SpeechRecognition session, and under the browser engine that streams the
+   * room to Google for as long as the tab is open — including the silence, and
+   * including every conversation that is not addressed to the computer.
+   *
+   * The gate runs entirely in the page over the Web Audio API: it measures
+   * loudness and nothing else, never buffers audio, and never sends anything.
+   * The recognizer is only started once somebody is actually speaking, and is
+   * stopped again when they stop. Silence costs nothing and leaves nowhere.
+   *
+   * It is a loudness gate, not speech detection — it cannot tell talking from a
+   * door closing. That is the honest limit, and it is the right trade: the
+   * expensive failure was streaming continuously, and a gate that occasionally
+   * opens on a noise still closes again a second later.
+   */
+  const VAD_RMS_THRESHOLD = 0.018;
+  const VAD_SILENCE_MS = 1200;
+
+  async function startVad(onSpeech, onSilence) {
     try {
-      rec.start();
+      V.stream = V.stream || (await navigator.mediaDevices.getUserMedia({ audio: true }));
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const source = ctx.createMediaStreamSource(V.stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+      const buf = new Float32Array(analyser.fftSize);
+      V.vad = { ctx, analyser, speaking: false, quietSince: 0, stop: false };
+
+      const tick = () => {
+        if (V.vad?.stop) return;
+        analyser.getFloatTimeDomainData(buf);
+        let sum = 0;
+        for (const v of buf) sum += v * v;
+        const rms = Math.sqrt(sum / buf.length);
+        const now = Date.now();
+        if (rms > VAD_RMS_THRESHOLD) {
+          V.vad.quietSince = 0;
+          if (!V.vad.speaking) {
+            V.vad.speaking = true;
+            onSpeech();
+          }
+        } else if (V.vad.speaking) {
+          if (!V.vad.quietSince) V.vad.quietSince = now;
+          else if (now - V.vad.quietSince > VAD_SILENCE_MS) {
+            V.vad.speaking = false;
+            V.vad.quietSince = 0;
+            onSilence();
+          }
+        }
+        requestAnimationFrame(tick);
+      };
+      tick();
+      return true;
     } catch {
-      V.wakeActive = false;
+      return false;
     }
   }
 
-  function stopWake() {
-    V.wakeActive = false;
+  function stopVad() {
+    if (!V.vad) return;
+    V.vad.stop = true;
+    try {
+      V.vad.ctx.close();
+    } catch {
+      /* already closed */
+    }
+    V.vad = null;
+  }
+
+  async function startWake() {
+    if (V.cfg.mode !== "always-on" || !V.cfg.runsInBrowser || !SR) return;
+    if (V.wakeActive) return;
+    V.wakeActive = true;
+
+    // The recognizer is created on demand, only while somebody is speaking.
+    const gated = await startVad(
+      () => openWakeRecognizer(),
+      () => closeWakeRecognizer(),
+    );
+    // No microphone or no Web Audio: fall back to the old continuous listener
+    // rather than silently doing nothing, and say so, because the privacy
+    // posture is different and the operator should know which one they have.
+    if (!gated) {
+      note("Always-on is running without the local gate — recognition stays open continuously.");
+      openWakeRecognizer();
+    }
+  }
+
+  function closeWakeRecognizer() {
     try {
       V.wake?.stop();
     } catch {
       /* already stopped */
     }
+    V.wake = null;
+  }
+
+  function openWakeRecognizer() {
+    if (!V.wakeActive || V.wake) return;
+    const rec = new SR();
+    rec.lang = "en-US";
+    rec.continuous = true;
+    rec.interimResults = false;
+    applyHints(rec);
+    V.wake = rec;
+    rec.addEventListener("result", (ev) => {
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        // FINAL results only: the wake check is a server round trip, and the
+        // tolerance rules that decide whether a microphone opens in a room
+        // with a patient in it belong beside their tests, not reimplemented
+        // here.
+        if (!ev.results[i].isFinal) continue;
+        void checkWake(ev.results[i][0].transcript);
+      }
+    });
+    // A continuous recogniser stops itself on silence. Under the gate that is
+    // expected and correct — it is reopened the next time somebody speaks —
+    // so it is NOT restarted here.
+    rec.addEventListener("end", () => {
+      if (V.wake === rec) V.wake = null;
+    });
+    rec.addEventListener("error", () => {
+      if (V.wake === rec) V.wake = null;
+    });
+    try {
+      rec.start();
+    } catch {
+      V.wake = null;
+    }
+  }
+
+  async function checkWake(heard) {
+    try {
+      const res = await fetch("/api/speech/wake", {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: heard,
+      });
+      if (!res.ok) return;
+      const m = await res.json();
+      if (!m.matched) return;
+      stopWake();
+      if (m.remainder) submitTranscript(m.remainder);
+      else startListening();
+    } catch {
+      /* a failed check just means the wake word did not fire */
+    }
+  }
+
+  function stopWake() {
+    V.wakeActive = false;
+    stopVad();
+    closeWakeRecognizer();
   }
 
   function resumeWake() {
-    if (V.cfg?.mode === "always-on") startWake();
+    if (V.cfg?.mode === "always-on") void startWake();
   }
 
   function note(message) {
@@ -859,6 +1045,8 @@
         // authority. Voice is a second way to answer it, never a replacement
         // for seeing what is about to run.
         V.awaitingApproval = e.approvalId;
+        V.pendingTool = e.toolName || "";
+        V.pendingRisk = e.risk || "confirm";
         // The tool NAME and its stated reason, never `e.input` — an argument
         // can carry an identifier and this comes out of a speaker.
         enqueueSpeak(`Approval needed. ${e.toolName}. ${e.description || ""} Say approve or deny.`, { urgent: true });
@@ -891,7 +1079,7 @@
     V.brief = V.cfg.verbosity === "brief";
     mount();
     await loadHints();
-    if (V.cfg.mode === "always-on") startWake();
+    if (V.cfg.mode === "always-on") void startWake();
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);

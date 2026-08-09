@@ -581,3 +581,42 @@ describe("speakableSummary", () => {
     expect(speakableSummary("All clean.")).toBe("All clean.");
   });
 });
+
+describe("normalizeSpokenCodes refuses to manufacture an identifier", () => {
+  // Found by the voice eval harness, and it is a PHI leak rather than a
+  // cosmetic bug. A spoken MRN reaches the transcript as WORDS, so the
+  // identifier gate — which matches digit patterns — sees nothing to redact
+  // and passes it. Normalization then turned those words into "00918": a
+  // patient identifier, past the gate, shaped exactly like a CPT code and
+  // indistinguishable from one downstream.
+  it("leaves a spoken medical record number as words", () => {
+    expect(normalizeSpokenCodes("the medical record number is zero zero nine one eight")).toBe(
+      "the medical record number is zero zero nine one eight",
+    );
+  });
+
+  it("leaves a spoken member id, social and account number alone", () => {
+    for (const said of [
+      "member id nine nine two one three",
+      "the social is one two three four five",
+      "account number four four one seven",
+    ]) {
+      expect(normalizeSpokenCodes(said), said).toBe(said);
+    }
+  });
+
+  it("does not weld a claim prefix onto dictated digits", () => {
+    // "claim C L M four four one seven" produced "claim C L M4417" — neither
+    // the claim number nor a real code, just a HCPCS-shaped string.
+    expect(normalizeSpokenCodes("claim C L M four four one seven")).toBe("claim C L M four four one seven");
+  });
+
+  it("still normalizes a genuinely dictated code", () => {
+    // The guard must not cost the feature it protects.
+    expect(normalizeSpokenCodes("scrub CPT nine nine two one three")).toBe("scrub CPT 99213");
+    expect(normalizeSpokenCodes("check E eleven point six five and modifier twenty five")).toBe(
+      "check E11.65 and modifier 25",
+    );
+    expect(normalizeSpokenCodes("code ninety nine two thirteen please")).toBe("code 99213 please");
+  });
+});

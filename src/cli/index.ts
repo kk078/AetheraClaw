@@ -9,6 +9,7 @@ import { resolveOllamaTarget } from "../providers/openai.js";
 import { createProvider } from "../providers/index.js";
 import { CASES } from "../eval/cases.js";
 import { renderReport, runEval } from "../eval/run.js";
+import { renderVoiceReport, runVoiceEval } from "../eval/voice-run.js";
 import { describeManifest, installReference, managedDbPath, readManifest, verifyInstalled, writeManifest } from "../tools/healthcare/reference-store.js";
 import { MemoryStore } from "../memory/store.js";
 import { ToolRegistry } from "../tools/registry.js";
@@ -423,7 +424,8 @@ program
   .option("--provider <name>", "anthropic | openai | gemini | ollama")
   .option("--profile <name>", "tool profile")
   .option("--case <id>", "run one case by id")
-  .action(async (opts: { provider?: string; profile?: string; case?: string }) => {
+  .option("--voice", "add the voice families: spoken code recognition, spoken phrasing, and pronunciation")
+  .action(async (opts: { provider?: string; profile?: string; case?: string; voice?: boolean }) => {
     const config = loadConfig();
     if (opts.profile) config.toolProfile = opts.profile;
     const choice = resolveProvider(config, { explicit: opts.provider });
@@ -452,8 +454,20 @@ program
       (r) => console.log(`${r.passed ? "pass" : "FAIL"}  ${r.case.id.padEnd(24)} ${String(r.ms).padStart(6)}ms  ${r.reached.join(" → ") || "(no tool)"}`),
     );
     console.log(renderReport(report));
+
+    // The voice families measure what the typed harness structurally cannot
+    // see: a code heard wrongly, a spoken phrasing that selects a different
+    // tool than the typed one, and a reply that is right on screen and wrong
+    // out loud. Two of the three need no model at all, so they run offline.
+    let voiceOk = true;
+    if (opts.voice) {
+      const voice = await runVoiceEval({ provider, registry, config, services: { store, config, registry } });
+      console.log(renderVoiceReport(voice));
+      voiceOk = voice.codes.falsePositives === 0 && voice.pronunciation.passed === voice.pronunciation.results.length;
+    }
+
     store.close();
-    process.exit(report.passed === report.total ? 0 : 1);
+    process.exit(report.passed === report.total && voiceOk ? 0 : 1);
   });
 
 

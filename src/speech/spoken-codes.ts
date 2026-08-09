@@ -316,6 +316,59 @@ const TENS_WORDS: Record<string, number> = {
 const POINT_WORDS = new Set(["point", "dot", "decimal"]);
 
 /** Words a speaker puts in front of a code. They carry no digits of their own. */
+/**
+ * Words that mean "the digits after this are an IDENTIFIER, not a code".
+ *
+ * This exists because of a real leak the voice eval harness found. A spoken
+ * medical record number reaches the transcript as WORDS — "medical record
+ * number zero zero nine one eight" — so the identifier gate, which matches
+ * digit patterns, sees nothing to redact and passes it. Normalization then
+ * helpfully turned those words into "00918": a patient identifier, past the
+ * gate, now shaped exactly like a CPT code and indistinguishable from one
+ * downstream.
+ *
+ * The gate cannot be moved after normalization, because normalization is what
+ * makes a dictated CPT code recognisable in the first place. So the fix belongs
+ * here: a digit run introduced by one of these labels is left as the words the
+ * speaker said. Prose is harmless; a manufactured identifier is not.
+ */
+const IDENTIFIER_LABELS = new Set([
+  "mrn",
+  "ssn",
+  "social",
+  "dob",
+  "birthdate",
+]);
+
+/**
+ * Words that mean an identifier only when a qualifier follows them.
+ *
+ * "Record number 00918" is an identifier; "prior auth for 27447" is a CPT code
+ * with the word "auth" nearby. Treating these as identifiers unconditionally
+ * broke exactly that case, so the qualifier is required.
+ */
+const QUALIFIED_IDENTIFIER_LABELS = new Set([
+  "record",
+  "chart",
+  "account",
+  "policy",
+  "group",
+  "control",
+  "reference",
+  "authorization",
+  "auth",
+  "claim",
+  "member",
+  "subscriber",
+  "patient",
+]);
+
+/** What turns one of the above into an identifier label. */
+const IDENTIFIER_QUALIFIERS = new Set(["number", "num", "no", "id", "identifier"]);
+
+/** How many tokens after a label the guard still applies. */
+const IDENTIFIER_LABEL_REACH = 4;
+
 const LABEL_WORDS = new Set([
   "cpt",
   "hcpcs",
@@ -495,6 +548,39 @@ export function normalizeSpokenCodes(text: string): string {
     NUMBER_TOKENS.has(t.text.toLowerCase()) || /^\d+$/.test(t.text) || /^[A-Z]$/.test(t.text);
   const inRun = (t: Token) => isLabel(t) || isCodeWord(t);
 
+  /**
+   * True when this run is introduced by an identifier label.
+   *
+   * Looks back a few tokens rather than only at the immediately preceding one,
+   * because people say "the medical record number is …" and "member ID for the
+   * patient is …" — the label and the digits are rarely adjacent.
+   */
+  const introducedByIdentifier = (runStart: number): boolean => {
+    for (let back = runStart - 1; back >= 0 && back >= runStart - IDENTIFIER_LABEL_REACH; back--) {
+      const word = tokens[back].text.toLowerCase();
+      if (IDENTIFIER_LABELS.has(word)) return true;
+      if (!QUALIFIED_IDENTIFIER_LABELS.has(word)) continue;
+      // "record"/"claim"/"auth" only count with a qualifier after them, so
+      // "prior auth for 27447" stays a procedure code.
+      for (let fwd = back + 1; fwd < tokens.length && fwd <= back + 2; fwd++) {
+        if (IDENTIFIER_QUALIFIERS.has(tokens[fwd].text.toLowerCase())) return true;
+      }
+    }
+    return false;
+  };
+
+  /**
+   * A single capital letter preceded by another is a SPELLED PREFIX, not a code.
+   *
+   * "claim C L M four four one seven" matched from the M and produced M4417 — a
+   * perfectly valid-looking HCPCS code assembled out of the tail of a spelled
+   * claim prefix and the digits after it. No real code carries three leading
+   * letters, so a code-letter with a code-letter in front of it is not the
+   * start of one.
+   */
+  const isSpelledPrefixTail = (at: number): boolean =>
+    at > 0 && /^[A-Z]$/.test(tokens[at].text) && /^[A-Z]$/.test(tokens[at - 1].text);
+
   const out: string[] = [];
   let cursor = 0;
   let i = 0;
@@ -506,6 +592,14 @@ export function normalizeSpokenCodes(text: string): string {
     }
     let runEnd = i;
     while (runEnd < tokens.length && inRun(tokens[runEnd])) runEnd += 1;
+
+    // A run introduced by an identifier label is left exactly as spoken. See
+    // IDENTIFIER_LABELS: turning those words into digits manufactures a
+    // code-shaped patient identifier that the gate has already waved through.
+    if (introducedByIdentifier(i)) {
+      i = runEnd;
+      continue;
+    }
 
     let k = i;
     while (k < runEnd) {
@@ -520,7 +614,7 @@ export function normalizeSpokenCodes(text: string): string {
           break;
         }
       }
-      if (code === null) {
+      if (code === null || isSpelledPrefixTail(k)) {
         k += 1;
         continue;
       }

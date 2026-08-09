@@ -30,6 +30,16 @@ import { buildHintVocabulary, renderVocabularyPrompt } from "../speech/vocabular
 import { narrateTool, shouldNarrate } from "../speech/narrate.js";
 import { describePrefetch, prefetchCodes } from "../speech/prefetch.js";
 import type { ScreenContext } from "../speech/deixis.js";
+import { matchWake } from "../speech/wake.js";
+import {
+  describeAuthState,
+  initialAuthState,
+  isAuthorized,
+  issueChallenge,
+  requiresAuthorization,
+  verifyResponse,
+  type AuthState,
+} from "../speech/authorization.js";
 import {
   announceWorklistStart,
   applyCommand,
@@ -479,6 +489,75 @@ export async function buildServer(opts: {
         kind === "icd10" ? (icd10?.billable?.[code] ?? icd10?.headers?.[code]) : (hcpcs?.[code] ?? undefined),
     });
     return { hits, hint: describePrefetch(hits) };
+  });
+
+  // ── Spoken authorization ───────────────────────────────────────────────────
+  // A voice interface removes the keyboard as an implicit factor: anyone in the
+  // room can speak, and "approve" is one word. This gates the risky ones behind
+  // a challenge.
+  //
+  // It authenticates KNOWLEDGE OF A PHRASE, not a voice. There is no acoustic
+  // model here and nothing in this codebase claims one — anyone who overhears
+  // the phrase can repeat it. It is a real factor against the person who
+  // wandered past an unattended desk, and no defence at all against someone who
+  // was in the room. The screen remains the authority either way.
+
+  const authStates = new Map<string, AuthState>();
+  const authFor = (key: string): AuthState => authStates.get(key) ?? initialAuthState();
+
+  app.get("/api/speech/authorization", async (req) => {
+    const q = req.query as { session?: string; tool?: string; risk?: string };
+    const key = String(q.session ?? "default");
+    const state = authFor(key);
+    const needed = q.tool ? requiresAuthorization(String(q.risk ?? ""), String(q.tool)) : false;
+    return {
+      required: needed,
+      authorized: isAuthorized(state, Date.now()),
+      status: describeAuthState(state, Date.now()),
+      // The secret lives where every other secret in this project lives: an env
+      // var named in config, never in the database and never returned here.
+      configured: Boolean(process.env.AETHERACLAW_VOICE_AUTH_PHRASE),
+    };
+  });
+
+  app.post("/api/speech/authorization/challenge", async (req) => {
+    const q = req.query as { session?: string; kind?: string };
+    const key = String(q.session ?? "default");
+    const kind = q.kind === "digits" ? "digits" : "passphrase";
+    const challenge = issueChallenge(kind, Date.now());
+    authStates.set(key, { ...authFor(key), challenge });
+    return { prompt: challenge.prompt, expiresAt: challenge.expiresAt };
+  });
+
+  app.post("/api/speech/authorization/verify", async (req, reply) => {
+    const q = req.query as { session?: string };
+    const key = String(q.session ?? "default");
+    const raw = req.body;
+    const spoken = Buffer.isBuffer(raw) ? raw.toString("utf8") : typeof raw === "string" ? raw : "";
+    const secret = process.env.AETHERACLAW_VOICE_AUTH_PHRASE ?? "";
+    if (!secret) {
+      return reply
+        .code(503)
+        .send({ ok: false, why: "No authorization phrase is configured. Set AETHERACLAW_VOICE_AUTH_PHRASE to use spoken authorization." });
+    }
+    const result = verifyResponse(authFor(key), spoken, secret, Date.now());
+    authStates.set(key, result.state);
+    return { ok: result.ok, why: result.why };
+  });
+
+  /**
+   * Does this utterance start with the wake word?
+   *
+   * Server-side so the tolerance rules — which decide whether a microphone
+   * opens itself in a room with a patient in it — live beside their tests
+   * rather than being reimplemented in the page. Called on FINAL recognition
+   * results only, not on every interim revision.
+   */
+  app.post("/api/speech/wake", async (req, reply) => {
+    const raw = req.body;
+    const heard = Buffer.isBuffer(raw) ? raw.toString("utf8") : typeof raw === "string" ? raw : "";
+    if (!heard.trim()) return reply.code(400).send({ error: "empty body" });
+    return matchWake(heard, config.speech.wakeWord);
   });
 
   /** The recognizer hint list, in the shape the browser's SpeechGrammarList takes. */

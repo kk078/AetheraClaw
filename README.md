@@ -798,6 +798,46 @@ hint before the sentence is finished. Only exact matches — a near miss returns
 nothing, because correcting a half-said code is worse than showing nothing, and
 corrections belong to the final transcript where a person is there to answer.
 
+**Always-on has a local gate.** It used to mean a continuously open recognizer,
+which under the browser engine streams the room to Google for as long as the tab
+is open — including the silence, and including every conversation not addressed
+to the computer. A Web Audio loudness gate now runs in the page, measuring
+nothing but volume and sending nothing, and the recognizer is only opened once
+somebody is actually speaking. It is a loudness gate, not speech detection: it
+cannot tell talking from a door closing, and that is the honest limit.
+
+The wake word is matched with tolerance proportional to word length, because a
+recognizer mangles a wake phrase far more than ordinary speech — and **anchored
+to the start**, so "I asked Aethera about that yesterday" does not open a
+microphone mid-consultation.
+
+**Spoken authorization.** "Approve" is one word and anyone in the room can say
+it, so risky actions ask for a phrase first (`AETHERACLAW_VOICE_AUTH_PHRASE`,
+with attempt limits and a lockout). Stated plainly, because the distinction
+matters: this checks **knowledge of a phrase, not who is speaking**. There is no
+voiceprint here and nothing claims one — anyone who has overheard the phrase can
+repeat it. It is a real factor against someone wandering past an unattended desk
+and no defence against someone who was in the room. Real speaker verification
+needs an enrolled biometric model, which would itself be PHI.
+
+**Ambient encounter capture** (`src/speech/ambient.ts`) is the decision layer
+only: it decides whether capture is permitted, segments a transcript that already
+exists, and produces a coding **draft** where every suggestion carries the
+sentence that supports it. It performs no capture and there is no path through it
+that produces a submittable claim. Consent **fails closed** — an unknown
+jurisdiction refuses rather than inheriting the one-party default, retention is a
+separate decision from listening, and uncertain diagnoses go to `notCoded`
+because the ICD-10-CM guidelines forbid coding them in the outpatient setting.
+
+**`aetheraclaw eval --voice`** measures what the typed harness structurally
+cannot see: a code heard wrongly, a spoken phrasing that reaches a different tool
+than the typed one, and a reply that is right on screen and wrong out loud. Two
+of the three families need no model and run offline. A low score is the finding,
+not a reason to tune the cases — and this harness has already earned that: it
+found a **PHI leak** (a dictated MRN normalized into a CPT-shaped `00918`, past
+an identifier gate that only matches digit patterns) and a claim-prefix weld,
+both now fixed and guarded by the cases that found them.
+
 **`briefing_daily`** composes the start-of-day answer: what is about to be lost,
 what changed, what needs a person — ordered by what is lost if it is ignored, so
 a filing window closing in three days outranks a KPI that moved a point. A figure
