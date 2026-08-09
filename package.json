@@ -11,6 +11,7 @@
     "node": ">=22.5"
   },
   "scripts": {
+    "setup": "node scripts/setup.mjs",
     "build": "tsc -p tsconfig.json && node scripts/copy-schema.mjs",
     "dev": "tsx src/cli/index.ts serve",
     "test": "vitest run",
