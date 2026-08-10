@@ -92,6 +92,18 @@ export const ConfigSchema = z.object({
       // payers. There is no test network for the 837 path, so the mock
       // connector is the only rehearsal that exists for it.
       clearinghouseEnv: z.enum(["sandbox", "production"]).default("sandbox"),
+      // ── The supervised window ──────────────────────────────────────────────
+      // How many claims may be sent to a REAL payer before somebody raises this
+      // deliberately. One, because a first live submission is a test of the
+      // pipe and the second claim teaches nothing the first did not — while
+      // doubling what is at stake if the pipe is wrong.
+      //
+      // A NUMBER RATHER THAN A CHECKLIST ITEM. A document saying "only submit
+      // one to start" is a document somebody deviates from at 4pm when the
+      // first one worked and the queue is long. A counter the submit path
+      // consults is not. Raise it only after the earlier claims have been
+      // ACKNOWLEDGED and ADJUDICATED — accepted is not paid.
+      liveSubmissionCap: z.number().int().min(0).default(1),
       // ── How this deployment behaves around patient data ────────────────────
       // Distinct from ORION_PHI / src/config/posture.ts, and the distinction is
       // load-bearing. The posture answers a LEGAL question — may this

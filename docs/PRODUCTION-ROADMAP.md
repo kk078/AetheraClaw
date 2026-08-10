@@ -252,6 +252,13 @@ does not mean "mostly done".
         confirmed must appear on the wire, and the charge submitted must equal
         the charge adjudicated — when it does not, the claim in the system was
         not the claim on the wire and every KPI after it is fiction
+  - [x] The supervised-first-submission machinery, so the decision is ready to
+        make rather than improvised on the day — `docs/FIRST-LIVE-SUBMISSION.md`,
+        a gate that blocks, a dry run that reads values back OUT of the wire,
+        and a ledger written BEFORE the send. The cap is a number the submit
+        path consults, not a line in a document: a document saying "only submit
+        one to start" is one somebody deviates from at 4pm when the first
+        worked and the queue is long
   - [ ] **Submit / status / ERA against a real network — NOT POSSIBLE.**
         Stedi's sandbox plan covers eligibility ONLY. Those three unlock on the
         production plan, which by Stedi's own wording means sending real claims
