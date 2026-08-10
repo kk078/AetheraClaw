@@ -1,6 +1,6 @@
 {
   "name": "orion",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "ORION (Operational Reasoning & Intelligence Orchestration Network) by Aethera Healthcare Solutions — self-hosted AI for US healthcare Revenue Cycle Management and medical billing & coding",
   "license": "MIT",
   "type": "module",
