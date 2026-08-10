@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.5 — 2026-08-10
+
+- fix: live provider in the header, plus Phase 0 production roadmap (#14)
+
+
 ## v0.2.4 — 2026-08-10
 
 - fix: one id selector kept the console on top of every other screen (#12)
