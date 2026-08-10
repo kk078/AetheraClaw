@@ -1026,10 +1026,52 @@ export async function buildServer(opts: {
 
   app.get("/api/providers/local", async () => ({ servers: await discoverLocal() }));
 
+  // ── The upgrade, and the 500 it used to be able to produce ────────────────
+  //
+  // OBSERVED ON THE LIVE DEPLOYMENT, recorded before it was forgotten: WebSocket
+  // connections opened in quick succession while an agent turn is in flight
+  // intermittently failed the UPGRADE with HTTP 500. Spaced-out connections
+  // succeeded every time and plain HTTP stayed 200 throughout, so it is
+  // saturation of the single container rather than a broken route.
+  //
+  // WHAT THIS CHANGE IS AND IS NOT. It does not claim to have found that root
+  // cause — reproducing it needs the load the container was under. What it does
+  // is remove this handler as a possible source and make the failure legible if
+  // it is elsewhere: anything thrown while setting up a connection now closes
+  // the socket with a stated reason instead of escalating into a 500 on the
+  // upgrade, which is the least debuggable outcome available. A client that is
+  // told "server busy" reconnects sensibly; a client that gets a 500 on an
+  // upgrade retries in a loop.
+  const MAX_SOCKETS = 200;
+  let openSockets = 0;
+
   app.get("/ws", { websocket: true }, (socket, req) => {
-    const url = new URL(req.url ?? "/ws", "http://localhost");
-    const initialSession = url.searchParams.get("session");
-    if (initialSession) sessions.subscribe(initialSession, socket);
+    openSockets++;
+    socket.on("close", () => {
+      openSockets--;
+    });
+    if (openSockets > MAX_SOCKETS) {
+      // 1013 is "try again later" — the code a browser's WebSocket client is
+      // meant to back off on. A cap that is stated is a limit; a cap that
+      // manifests as a 500 is a bug report.
+      socket.close(1013, `too many open connections (${MAX_SOCKETS})`);
+      return;
+    }
+
+    let initialSession: string | null = null;
+    try {
+      initialSession = new URL(req.url ?? "/ws", "http://localhost").searchParams.get("session");
+    } catch {
+      // A malformed query string is not a reason to fail the connection. The
+      // client can still subscribe by message.
+      initialSession = null;
+    }
+    try {
+      if (initialSession) sessions.subscribe(initialSession, socket);
+    } catch (err) {
+      socket.close(1011, err instanceof Error ? err.message.slice(0, 120) : "subscribe failed");
+      return;
+    }
 
     socket.on("message", (raw: Buffer) => {
       let parsed;

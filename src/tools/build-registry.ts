@@ -130,6 +130,7 @@ import { MAIL_OPS_TOOLS } from "../channels/email/ops-tools.js";
 import { documentExtractTool, documentListTool } from "../ingest/tools.js";
 import { kpiDashboardTool, wrvuReportTool } from "../reports/kpi-tools.js";
 import { contractRateListTool, contractRateSetTool } from "../tools/healthcare/intelligence/contract-tools.js";
+import { jobKindsTool, jobListTool } from "../jobs/tools.js";
 
 export function buildRegistry(config: Config, store: MemoryStore): ToolRegistry {
   const registry = new ToolRegistry();
@@ -145,6 +146,10 @@ export function buildRegistry(config: Config, store: MemoryStore): ToolRegistry 
   registry.registerAll(briefingTools);
   registerHealthcareTools(registry, { config, store });
   registry.registerAll([
+    // Reading the queue is always available; job_enqueue is registered by the
+    // gateway, which is the only place a worker exists to enqueue into.
+    jobListTool,
+    jobKindsTool,
     emailPollTool,
     emailListTool,
     emailRouteTool,

@@ -17,6 +17,10 @@ import { fileURLToPath } from "node:url";
 import { datasetProbes } from "../tools/healthcare/datasets.js";
 import { assessDataset, assessReadiness, renderReadiness, renderStartupWarning } from "../tools/healthcare/data-lifecycle.js";
 import { todayYmd } from "../tools/healthcare/audit/deadlines.js";
+import { JobWorker, describeKinds } from "../jobs/worker.js";
+import { jobEnqueueTool } from "../jobs/tools.js";
+import { listJobs, pruneJobs } from "../jobs/store.js";
+import { renderQueue } from "../jobs/queue.js";
 import { describeManifest, installReference, managedDbPath, readManifest, verifyInstalled, writeManifest } from "../tools/healthcare/reference-store.js";
 import { MemoryStore } from "../memory/store.js";
 import { ToolRegistry } from "../tools/registry.js";
@@ -276,6 +280,29 @@ program
     // `tenant` is passed as a service, not as tool input — nothing the model
     // emits can reach it, which is the whole point of the binding.
     const sessions = new SessionManager(store, registry, config, { store, config, registry, tenant });
+
+    // ── Deferred work ───────────────────────────────────────────────────────
+    // One worker, in this process. `start()` reclaims anything a dead process
+    // left behind BEFORE it begins ticking — a lease expires because the
+    // process holding it stopped, and boot is the only moment a new process
+    // exists to notice that.
+    //
+    // Handlers are registered per kind. A kind with no handler dead-letters
+    // rather than spinning, so a half-deployed build says so instead of
+    // burning attempts quietly.
+    const worker = new JobWorker({
+      store,
+      handlers: {},
+      // Job events ride the session channel the browser already listens on, so
+      // background progress reaches the UI with no second transport.
+      emit: (event) => {
+        const sessionId = typeof event.sessionId === "string" ? event.sessionId : "";
+        if (sessionId) sessions.broadcast(sessionId, event);
+      },
+    });
+    registry.register(jobEnqueueTool(worker));
+    worker.start();
+
     const app = await buildServer({ config, store, sessions, registry });
 
     const email = new EmailChannel({
@@ -854,6 +881,46 @@ auth
         console.log(`  ${p.padEnd(10)} FAIL  ${Date.now() - started}ms  ${msg.slice(0, 160)}`);
       }
     }
+  });
+
+const jobs = program.command("jobs").description("Deferred background work: what ran, what is waiting, and what needs a decision");
+
+jobs
+  .command("list")
+  .description("Show the queue, with dead-lettered work listed individually")
+  .option("--limit <n>", "how many rows", "50")
+  .action((opts: { limit?: string }) => {
+    const store = new MemoryStore(resolveDbFile(configDir()));
+    const rows = listJobs(store, { limit: Number(opts.limit ?? 50) });
+    if (rows.length === 0) {
+      console.log("No jobs recorded.");
+      return;
+    }
+    console.log(renderQueue(rows, Date.now()));
+    console.log("");
+    for (const j of rows) {
+      console.log(
+        `  ${j.status.padEnd(8)} ${j.kind.padEnd(18)} ${j.id}` +
+          (j.attempts > 1 ? `  attempt ${j.attempts}/${j.maxAttempts}` : "") +
+          (j.lastError ? `  — ${j.lastError}` : ""),
+      );
+    }
+  });
+
+jobs
+  .command("kinds")
+  .description("Which kinds of work exist, and whether a failure of each is retried automatically")
+  .action(() => console.log(describeKinds()));
+
+jobs
+  .command("prune")
+  .description("Delete FINISHED jobs older than a cutoff. Dead-lettered rows are never removed — they still need a decision")
+  .option("--days <n>", "keep this many days of completed jobs", "30")
+  .action((opts: { days?: string }) => {
+    const store = new MemoryStore(resolveDbFile(configDir()));
+    const days = Number(opts.days ?? 30);
+    const removed = pruneJobs(store, Date.now() - days * 86_400_000);
+    console.log(`Removed ${removed} completed job(s) older than ${days} days. Dead-lettered rows were kept.`);
   });
 
 // ── orion data ───────────────────────────────────────────────────────────────

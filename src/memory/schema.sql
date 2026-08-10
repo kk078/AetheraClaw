@@ -1029,3 +1029,31 @@ CREATE TABLE IF NOT EXISTS session_summaries (
   UNIQUE (session_id, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_session_summaries ON session_summaries(session_id, seq);
+
+-- ── Job queue ───────────────────────────────────────────────────────────────
+-- One row per unit of deferred work. SQLite rather than Redis, and one consumer
+-- rather than many — see src/jobs/queue.ts for the tradeoff and the limit that
+-- buys.
+--
+-- dedupe_key is UNIQUE, and that constraint is the whole idempotency story: a
+-- second enqueue of the same work collides at the database instead of relying on
+-- the caller to check first, which is a check that races.
+CREATE TABLE IF NOT EXISTS jobs (
+  id          TEXT PRIMARY KEY,
+  kind        TEXT NOT NULL,
+  payload     TEXT NOT NULL DEFAULT '{}',
+  status      TEXT NOT NULL DEFAULT 'queued',  -- queued | running | done | failed | dead
+  attempts    INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 1,
+  run_after   INTEGER NOT NULL DEFAULT 0,
+  -- Set while a worker holds the job. An expired lease means the worker died,
+  -- which is not the same fact as the work having failed.
+  lease_until INTEGER NOT NULL DEFAULT 0,
+  dedupe_key  TEXT NOT NULL UNIQUE,
+  last_error  TEXT NOT NULL DEFAULT '',
+  session_id  TEXT NOT NULL DEFAULT '',
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_runnable ON jobs(status, run_after);
+CREATE INDEX IF NOT EXISTS idx_jobs_session ON jobs(session_id, created_at DESC);
