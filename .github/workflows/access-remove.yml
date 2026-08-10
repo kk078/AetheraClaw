@@ -1,0 +1,47 @@
+name: Access removal
+
+# ── Take the door off ────────────────────────────────────────────────────────
+# The counterpart to access-setup.yml. Deletes the Cloudflare Access application
+# in front of a hostname, which is the only way the sign-in page goes away:
+# Access runs ahead of the Worker, so no change to worker/index.ts can stop it
+# redirecting an anonymous visitor to a login screen.
+#
+# Manual dispatch only, and it asks the operator to type the hostname AND to
+# confirm — removing authentication from a hostname is not something that should
+# ever happen as a side effect of a push. The confirmation is a literal "yes"
+# rather than a checkbox so that it appears in the run's inputs and the record
+# says a person meant it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      hostname:
+        description: "Hostname to un-protect"
+        required: true
+        default: "orion.aetheraonline.com"
+        type: string
+      confirm:
+        description: 'Type "yes" to actually delete. Anything else lists what WOULD go.'
+        required: true
+        default: "no"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  remove:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCESS_HOSTNAME: ${{ inputs.hostname }}
+          ACCESS_CONFIRM_REMOVE: ${{ inputs.confirm }}
+        run: node scripts/access-remove.mjs

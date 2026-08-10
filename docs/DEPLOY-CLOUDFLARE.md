@@ -8,9 +8,9 @@ and the two workflows — and, just as importantly, what it does **not** do yet.
 ```
 browser ──► Cloudflare Access ──► Worker ──► Container ──► SQLite on /data
                 (SSO, MFA)      (verifies    (the Node        │
-                                 the JWT,     gateway)        ▼
-                                 pins the                  R2 snapshot
-                                 tenant)
+                 ⚠ CURRENTLY     the JWT,     gateway)        ▼
+                   REMOVED —     pins the                  R2 snapshot
+                   see below)    tenant)
 ```
 
 Each hop exists for a reason that is not decoration:
@@ -20,6 +20,44 @@ Each hop exists for a reason that is not decoration:
 codebase — no hook, no middleware — and the entire security model was
 `gateway: { host: "127.0.0.1" }`. Access is what replaces "only this machine can
 reach it" when the thing is on the public internet.
+
+> ## ⚠ This deployment currently has NO sign-in
+>
+> `PUBLIC_ACCESS: "1"` in `wrangler.jsonc` and no Access application in front of
+> `orion.aetheraonline.com`. **Anyone who learns the hostname gets the console,
+> the claims database, the shell tool, the filesystem tool and the payer-portal
+> browser.** This was asked for explicitly, for a trial and a presentation, over
+> a stated objection — it is recorded here rather than left for someone to
+> discover.
+>
+> Two things make it survivable, and only these two:
+>
+> - the seeded data is **synthetic** (`ORION_SEED_DEMO`), and
+> - the PHI posture is **`blocked`** (`ORION_PHI` in the `Dockerfile`), so a
+>   document carrying an identifier is refused with 422 before it is stored.
+>
+> **If either changes, this must change on the same day.** In particular, the
+> day the BAA is signed and `ORION_PHI` becomes `permitted`, an unauthenticated
+> console becomes an unauthenticated console over real charts.
+>
+> **To close it:** set `PUBLIC_ACCESS` to `"0"` in `wrangler.jsonc`, deploy, and
+> run the **Access setup** workflow to re-create the application. Both halves —
+> Access runs ahead of the Worker, so the code flag alone changes nothing a
+> visitor sees, and deleting the application alone leaves the origin demanding an
+> identity the edge no longer sends (every page 403).
+>
+> What public mode does **not** relax, deliberately:
+>
+> - the shared `GATEWAY_TOKEN` is still required, so the container is
+>   addressable only by our own Worker (a browser never sends it, so this costs
+>   a visitor nothing);
+> - a JWT that *is* presented is still verified — an unverifiable one is refused,
+>   not downgraded to anonymous;
+> - the Worker deletes any client-supplied `Cf-Access-Authenticated-User-Email`
+>   before forwarding, so nobody can name themselves in the audit log;
+> - PHI access rows record the actor as **`anonymous`**, not as the agent —
+>   "the software read this chart" is the one answer that would be actively
+>   false.
 
 **The Worker** verifies the Access JWT's signature, audience and expiry before
 anything else runs, then presents a shared secret to the container. The order is
@@ -70,10 +108,14 @@ None of this is done by the pipeline, because none of it should be automatic.
 1. **DNS** — `aetheraonline.com` on Cloudflare, and `orion.aetheraonline.com`
    as the custom domain in `wrangler.jsonc`.
 2. **R2 bucket** — `npx wrangler r2 bucket create orion-snapshots`.
-3. **Access application** over `orion.aetheraonline.com` in Zero Trust. Take the
-   **AUD tag** and put it in `wrangler.jsonc` under `vars.ACCESS_AUD`, and set
-   `ACCESS_TEAM_DOMAIN` to your team domain. The AUD check is what stops a valid
-   token for a *different* Access application in the same account working here.
+3. **Access application** over `orion.aetheraonline.com` in Zero Trust — run the
+   **Access setup** workflow, which creates it and commits the **AUD tag** into
+   `wrangler.jsonc` under `vars.ACCESS_AUD` along with `ACCESS_TEAM_DOMAIN`. The
+   AUD check is what stops a valid token for a *different* Access application in
+   the same account working here.
+   *Skipped in the current public deployment* — the **Access removal** workflow
+   (`scripts/access-remove.mjs`) deletes it, and it is the only thing that makes
+   the sign-in page go away, because Access runs ahead of the Worker.
 4. **Repository secrets** in GitHub: `CLOUDFLARE_API_TOKEN`,
    `CLOUDFLARE_ACCOUNT_ID`, and `GATEWAY_TOKEN` (generate with
    `openssl rand -hex 32`). The deploy fails fast if any is missing rather than
@@ -155,9 +197,13 @@ items below become live obligations rather than deferred ones.
 - Keep Zaraz and Web Analytics off this hostname — URLs carry claim and
   document ids.
 - **AI Gateway logging** stores prompts, and the prompts would then contain PHI.
-- **`req.identity` is populated by the auth hook but not yet written to
-  `phi_access_log`** — those rows still record what they did before. This is the
-  one item that should not wait for the BAA.
+- **`req.identity` reaches `phi_access_log` on the ingress paths only.** An
+  upload records the person (or `anonymous`); a *read* performed by a tool
+  during an agent turn still records `agent`, because a tool call is not an HTTP
+  request and carries no identity today. This is the one item that should not
+  wait for the BAA.
+- **The console has no sign-in at all right now** (see the box at the top).
+  Under a BAA that is not a gap, it is a breach.
 
 ### Still true regardless
 

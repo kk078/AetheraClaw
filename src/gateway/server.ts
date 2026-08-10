@@ -44,8 +44,10 @@ import {
   type AuthState,
 } from "../speech/authorization.js";
 import {
+  actorFor,
   authorizeRequest,
   classifyBind,
+  isPublicAccess,
   isUnauthenticatedPath,
   type Identity,
 } from "./auth.js";
@@ -153,9 +155,13 @@ export async function buildServer(opts: {
   // long-running process change what it accepts halfway through a session with
   // nothing recording that it had.
   const posture = resolvePosture({ exposure });
+  // Serve anyone who reaches the edge. Read once, reported once, and OFF
+  // unless the deployment explicitly asked — see src/gateway/auth.ts for what
+  // it gives away.
+  const publicAccess = isPublicAccess(readEnv("PUBLIC"));
   app.addHook("onRequest", async (req, reply) => {
     if (isUnauthenticatedPath(req.url)) return;
-    const decision = authorizeRequest({ exposure, headers: req.headers, expectedToken: gatewayToken });
+    const decision = authorizeRequest({ exposure, headers: req.headers, expectedToken: gatewayToken, publicAccess });
     if (decision.ok) {
       // Carried on the request so PHI rows can name a person rather than a
       // socket. Anything that logs an access reads this instead of guessing.
@@ -392,6 +398,10 @@ export async function buildServer(opts: {
     posture: posture.posture,
     source: posture.source,
     why: posture.why,
+    // Reported, not hidden. A console served to anyone should say so on its own
+    // face — the alternative is a visitor assuming they are inside something
+    // private because it looks like an internal tool.
+    publicAccess,
   }));
 
   app.post("/api/upload", async (req, reply) => {
@@ -435,7 +445,7 @@ export async function buildServer(opts: {
       }
       // Captured from the REQUEST, before the background work starts. Reading
       // it later would be reading a request that has already been answered.
-      const archiveActor = (req as { identity?: Identity }).identity?.email || "";
+      const archiveActor = actorFor((req as { identity?: Identity }).identity);
       const archive = createArchive(
         store,
         sessionId,
@@ -483,8 +493,10 @@ export async function buildServer(opts: {
     // The person, not the software. `identity` was put on the request by the
     // auth hook after Cloudflare Access verified the session; on loopback it is
     // absent and the store falls back to the agent, which is what a
-    // single-operator laptop actually means.
-    const actor = (req as { identity?: Identity }).identity?.email || "";
+    // single-operator laptop actually means. In public mode there is no person
+    // to name, and `actorFor` writes "anonymous" rather than letting the row
+    // read as though the agent did it.
+    const actor = actorFor((req as { identity?: Identity }).identity);
     const doc = saveDocument(store, sessionId, extraction, Date.now(), "", actor);
     return {
       id: doc.id,
