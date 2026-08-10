@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.4 — 2026-08-10
+
+- fix: one id selector kept the console on top of every other screen (#12)
+
+
 ## v0.2.3 — 2026-08-10
 
 - fix: make the provider-key screen reachable, usable and persistent (#11)
