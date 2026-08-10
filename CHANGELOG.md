@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.2 — 2026-08-10
+
+- Phases 3–10: agent reliability, data lifecycle, jobs, UI, swarm SLA, channels, EHR seam, hardening (#17)
+
+
 ## v0.3.1 — 2026-08-10
 
 - Phases 1–3: encryption at rest, the clearinghouse seam, and tool routing (#16)
