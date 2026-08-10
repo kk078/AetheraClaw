@@ -1,0 +1,11 @@
+{
+  "name": "ORION",
+  "install": "node scripts/setup.mjs --skip-tests",
+  "terminals": [
+    {
+      "name": "gateway",
+      "command": "npm start"
+    }
+  ],
+  "ports": [4180]
+}
