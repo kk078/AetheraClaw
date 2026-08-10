@@ -12,6 +12,11 @@ import { CASES } from "../eval/cases.js";
 import { renderReport, runEval } from "../eval/run.js";
 import { renderVoiceReport, runVoiceEval } from "../eval/voice-run.js";
 import { renderCorrectness, runCorrectness } from "../eval/correctness.js";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { datasetProbes } from "../tools/healthcare/datasets.js";
+import { assessDataset, assessReadiness, renderReadiness, renderStartupWarning } from "../tools/healthcare/data-lifecycle.js";
+import { todayYmd } from "../tools/healthcare/audit/deadlines.js";
 import { describeManifest, installReference, managedDbPath, readManifest, verifyInstalled, writeManifest } from "../tools/healthcare/reference-store.js";
 import { MemoryStore } from "../memory/store.js";
 import { ToolRegistry } from "../tools/registry.js";
@@ -219,6 +224,28 @@ program
     if (report.fatal) {
       console.error(renderProductionReport(report));
       process.exit(1);
+    }
+
+    // ── Reference data, said at boot ────────────────────────────────────────
+    // A WARNING, never fatal. Missing NCCI edits are a degraded install, not an
+    // unsafe one — the tools already refuse rather than guess. But an operator
+    // who never hears about it runs the claims profile for a quarter believing
+    // bundling is being checked, because "no edit found" reads identically
+    // whether the table was consulted or absent.
+    //
+    // Silent when there is nothing to say. A banner that prints every boot is
+    // one people learn to scroll past, which costs the warnings that matter.
+    try {
+      const asOf = todayYmd();
+      const readiness = assessReadiness(
+        datasetProbes().map((p) => assessDataset(p, asOf)),
+        config.toolProfile,
+      );
+      const warning = renderStartupWarning(readiness);
+      if (warning) console.error(warning);
+    } catch {
+      // A broken data directory must not stop the gateway starting. The tools
+      // that need those files report their own absence at the point of use.
     }
 
     const choice = resolveProvider(config, { explicit: opts.provider });
@@ -827,6 +854,59 @@ auth
         console.log(`  ${p.padEnd(10)} FAIL  ${Date.now() - started}ms  ${msg.slice(0, 160)}`);
       }
     }
+  });
+
+// ── orion data ───────────────────────────────────────────────────────────────
+// `data_status` (the tool) says whether a file is there. This says whether it is
+// still the RIGHT file — which is the question a practice billing last quarter's
+// NCCI edits needs answered, and the one they otherwise get answered by denials.
+const data = program.command("data").description("Local CMS reference datasets: what is installed, how old, and how to refresh");
+
+data
+  .command("status")
+  .description("Which datasets are installed, which have fallen behind a published release, and which this profile needs")
+  .option("--profile <name>", "score against a specific tool profile instead of the configured one")
+  .action((opts: { profile?: string }) => {
+    const config = loadConfig();
+    const profile = opts.profile ?? config.toolProfile;
+    // todayYmd() is called HERE and passed down. Nothing inside the lifecycle
+    // module reads a clock, which is what lets a test put the machine in any
+    // quarter without touching the system time.
+    const asOf = todayYmd();
+    const lifecycles = datasetProbes().map((p) => assessDataset(p, asOf));
+    const report = assessReadiness(lifecycles, profile);
+    console.log(renderReadiness(report, lifecycles));
+    // Exit 1 on a real problem so this can gate a deployment script. "Undated"
+    // is not a real problem — it is the normal state of a correct install.
+    process.exit(report.warn ? 1 : 0);
+  });
+
+data
+  .command("refresh")
+  .description("Fetch the current public CMS files (NCCI, MUE, MPFS, GPCI, HCPCS) into the local data directory")
+  .action(() => {
+    // Delegates to the existing fetcher rather than reimplementing it. That
+    // script carries the licence reasoning about AMA-copyrighted CPT content in
+    // the NCCI and MPFS files, and having two copies of that reasoning is how
+    // one of them ends up wrong.
+    // Resolved relative to this file, then up out of dist/ or src/ — the same
+    // shape store.ts uses to find schema.sql, so a built install and a source
+    // checkout both land on the script.
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const candidates = [
+      path.resolve(here, "..", "..", "scripts", "fetch-cms-data.mjs"),
+      path.resolve(here, "..", "..", "..", "scripts", "fetch-cms-data.mjs"),
+    ];
+    const script = candidates.find((p) => fs.existsSync(p));
+    if (!script) {
+      console.error(
+        `Cannot find scripts/fetch-cms-data.mjs (looked in ${candidates.join(" and ")}). ` +
+          "Run it directly from a source checkout: node scripts/fetch-cms-data.mjs",
+      );
+      process.exit(2);
+    }
+    const res = spawnSync(process.execPath, [script], { stdio: "inherit" });
+    process.exit(res.status ?? 1);
   });
 
 const reference = program.command("reference").description("Manage the attached reference code database");
