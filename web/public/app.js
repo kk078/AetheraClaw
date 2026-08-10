@@ -172,9 +172,26 @@ async function loadOverview() {
   // It answered, so the gateway is up whatever the socket is doing.
   if (!state.ws || state.ws.readyState !== WebSocket.OPEN) setConn("idle", "no session");
 
-  $("#pill-provider").innerHTML =
-    `<span class="dot on"></span><b>${ov.model}</b>` + (ov.endpoint ? ` · ${ov.endpoint}` : "");
-  $("#pill-driver").textContent = ov.driver;
+  // Provider AND model, because the model alone does not say who is answering:
+  // "gemini-2.5-pro" and "qwen3" are both just names until you know which
+  // service they belong to, and the one thing this pill exists to answer is
+  // "what will my next question actually be sent to".
+  //
+  // Built with textContent rather than innerHTML — these strings come from
+  // config a user typed into the providers screen, and a model name is not a
+  // place to accept markup.
+  const provPill = $("#pill-provider");
+  provPill.replaceChildren();
+  provPill.append(el("span", "dot on"));
+  provPill.append(el("b", null, ov.model));
+  const where = ov.endpoint ? ` · ${ov.provider} · ${ov.endpoint}` : ` · ${ov.provider}`;
+  provPill.append(el("span", null, where));
+  provPill.title = `Provider: ${ov.provider}\nModel: ${ov.model}\nStorage: ${ov.driver}\nTool profile: ${ov.profile}`;
+  // The SQLite driver used to have a pill of its own. It is an implementation
+  // detail with no action attached to it — nobody working a denial does
+  // anything differently because the storage engine is better-sqlite3 — so it
+  // moved into the tooltip above, where it is still there for a support call
+  // and not competing for header space with the things people read.
   // The workspace is the one path everything the agent writes lands under, so
   // the footer says where it is AND how to move it. Not editable from here on
   // purpose: a browser control that rewrites the confinement root is one
@@ -1214,7 +1231,10 @@ async function loadProviders() {
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ provider: p.name }),
           });
-          if (sw.ok) msg.textContent += ` — and made ${p.name} the active provider`;
+          if (sw.ok) {
+            msg.textContent += ` — and made ${p.name} the active provider`;
+            loadOverview();
+          }
         }
       } catch (err) {
         // Without this the throw escapes, `save.disabled` is never cleared and
@@ -1287,7 +1307,16 @@ async function loadProviders() {
         });
         const out = await res.json();
         cmsg.textContent = res.ok ? out.applied || "saved" : `failed: ${out.error}`;
-        if (res.ok) setTimeout(loadProviders, 700);
+        if (res.ok) {
+          // The header names the provider and model a new session will use. It
+          // was painted once at page load and never again, so changing the
+          // active provider here left the pill naming the OLD one — the console
+          // said "qwen3 · local" while this screen said gemini was active.
+          // Two views of the same fact disagreeing is worse than either being
+          // stale on its own, because one of them is now a lie.
+          loadOverview();
+          setTimeout(loadProviders, 700);
+        }
       } catch (err) {
         cmsg.textContent = `failed: ${err.message}`;
       } finally {
