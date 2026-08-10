@@ -153,6 +153,7 @@ import { resolveStore, tenancyRoot } from "../tenancy/resolve.js";
 import { TenantRegistry } from "../tenancy/registry.js";
 import { checkSlug, tenantDbPath } from "../tenancy/tenant.js";
 import { retentionPlan } from "../support/tool-log.js";
+import { retentionDecision, retentionReport } from "../compliance/retention.js";
 import { VIEW_RETAIN_DAYS, viewRetentionPlan } from "../views/retention.js";
 
 const program = new Command();
@@ -311,6 +312,19 @@ program
     if (notice !== "") console.log(notice);
     // Amortized retention: once at startup rather than on every tool call, so
     // the log's cost does not scale with the log's size.
+    // Document retention, enforced rather than documented. Before the other
+    // prunes because this is the one that removes CONTENT — the tool log and
+    // the view cache hold references, this holds a chart.
+    const retention = retentionDecision(
+      { documentDays: config.healthcare.documentRetentionDays },
+      Date.now(),
+    );
+    if (retention.enforce) {
+      console.log(retention.note);
+      const purged = purgeDocuments(store, { olderThanMs: retention.cutoff, actor: "retention" });
+      const line = retentionReport(purged.deleted, purged.charactersRemoved, config.healthcare.documentRetentionDays);
+      if (line !== "") console.log(line);
+    }
     const pruned = store.pruneToolCalls(retentionPlan(Date.now()));
     if (pruned > 0) console.log(`Tool log: pruned ${pruned} row(s) past retention`);
     const views = store.pruneToolViews(viewRetentionPlan(Date.now()));

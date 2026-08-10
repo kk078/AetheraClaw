@@ -39,7 +39,38 @@ const COMMAND_SEPARATORS = /[;&|<>`$\n\r]/;
 // can act is pulled back out of "safe" and made to ask.
 const FIND_ACTIONS = /(?:^|\s)-(?:delete|exec|execdir|ok|okdir|fprintf?|fls)\b/;
 
-export function assessCommandRisk(command: string): { level: "safe" | "confirm"; reason: string } {
+/**
+ * Paths that hold patient data on disk.
+ *
+ * `cat` and `grep` are on the auto-approved list, which is right for a
+ * workspace full of generated appeals and wrong the moment the same command is
+ * pointed at the database. `grep -r 1EG4 /data` is a read-only command by every
+ * test this file applies, and it is also a search of every stored document with
+ * no prompt and no PHI access row — the read trail §164.312(b) exists for,
+ * routed around by a tool that was never asked to think about it.
+ *
+ * Only consulted in production PHI mode. On a laptop full of synthetic claims,
+ * making every `ls ~/.orion` ask is the kind of friction that gets a control
+ * switched off.
+ */
+const PHI_STORE_PATTERNS = [
+  /\borion\.db\b/i,
+  /\baetheraclaw\.db\b/i,
+  /\.orion(?:\/|\b)/i,
+  /\.aetheraclaw(?:\/|\b)/i,
+  // The container's data volume, which is where /data/orion.db and
+  // /data/credentials.json live.
+  /(?:^|\s)\/data(?:\/|\s|$)/,
+];
+
+export function mentionsPhiStore(command: string): boolean {
+  return PHI_STORE_PATTERNS.some((p) => p.test(command));
+}
+
+export function assessCommandRisk(
+  command: string,
+  opts: { phiMode?: "education" | "production" } = {},
+): { level: "safe" | "confirm"; reason: string } {
   const trimmed = command.trim();
   for (const pattern of DANGEROUS_PATTERNS) {
     if (pattern.test(trimmed)) return { level: "confirm", reason: `potentially destructive command: ${trimmed}` };
@@ -52,6 +83,15 @@ export function assessCommandRisk(command: string): { level: "safe" | "confirm";
   // a person finds out about rather than something contained quietly.
   if (mentionsSecretFile(trimmed)) {
     return { level: "confirm", reason: `command names a credentials file: ${trimmed.slice(0, 200)}` };
+  }
+
+  // Production PHI mode: reading the store is an access, whatever the command
+  // looks like. Not applied in education mode — see PHI_STORE_PATTERNS.
+  if (opts.phiMode === "production" && mentionsPhiStore(trimmed)) {
+    return {
+      level: "confirm",
+      reason: `command reads the patient data store: ${trimmed.slice(0, 200)}`,
+    };
   }
 
   // A separator anywhere means there is a second command, and its safety is not
@@ -72,7 +112,7 @@ export function assessCommandRisk(command: string): { level: "safe" | "confirm";
   return { level: "confirm", reason: `run shell command: ${trimmed.slice(0, 200)}` };
 }
 
-export function createShellTool(opts: { defaultTimeoutS: number; maxOutputKb: number }) {
+export function createShellTool(opts: { defaultTimeoutS: number; maxOutputKb: number; phiMode?: "education" | "production" }) {
   return defineTool({
     name: "run_command",
     description:
@@ -81,7 +121,7 @@ export function createShellTool(opts: { defaultTimeoutS: number; maxOutputKb: nu
       command: z.string().describe("The shell command to run (bash, or cmd.exe on Windows)"),
       timeout_s: z.number().int().min(1).max(300).optional().describe("Timeout in seconds (default 30)"),
     }),
-    assessRisk: (input) => assessCommandRisk(input.command),
+    assessRisk: (input) => assessCommandRisk(input.command, { phiMode: opts.phiMode }),
     execute: async (input, ctx) => {
       const timeoutMs = (input.timeout_s ?? opts.defaultTimeoutS) * 1000;
       const maxBytes = opts.maxOutputKb * 1024;

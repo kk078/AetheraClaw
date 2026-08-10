@@ -209,7 +209,7 @@ Updated as each phase lands. Unchecked means not started or not finished — it
 does not mean "mostly done".
 
 - [x] **Phase 0** — this document
-- [ ] **Phase 1** — PHI mode. **Partly landed.** Ticking this box needs all five:
+- [x] **Phase 1** — PHI mode. Complete:
   - [x] `src/compliance/phi-detect.ts` — patterns moved out of the email
         classifier; `detectPhi` frozen so the ingress gate is unchanged;
         `scanText` + `phiVerdict` added for the wider production scan
@@ -221,8 +221,16 @@ does not mean "mostly done".
         per-page sections; plaintext rows stay readable; a wrong key refuses
         rather than returning an empty document; tampering is a decryption
         failure rather than a silent alteration
-  - [ ] Per-file upload acknowledgment, retention enforcement, and shell/fs
-        confirmation over credential and document paths in PHI mode
+  - [x] Per-file upload acknowledgment — 428 with the filename named, per file
+        rather than per session, because a blanket acknowledgement is
+        indistinguishable from none within a day of being granted
+  - [x] Retention enforcement — `documentRetentionDays`, applied at startup,
+        with the delete logged. 0 means indefinitely, and 0 is OFF rather than
+        "delete everything"
+  - [x] Shell hardening — in production mode a read of the patient data store
+        asks, even for a command that is read-only by every other test. `grep -r
+        1EG4 /data` was a search of every stored document with no prompt and no
+        access row
 - [ ] **Phase 2** — `ClearinghouseConnector` + one real implementation, credential storage, submission audit trail, `docs/CLEARINGHOUSE-SETUP.md`
 - [ ] **Phase 3** — intent router, pinned tools, structured context compaction, correctness eval
 - [ ] **Phase 4** — `orion data refresh|status`, startup staleness warning, per-profile required datasets

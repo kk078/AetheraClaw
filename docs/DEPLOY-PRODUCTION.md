@@ -180,20 +180,22 @@ into a different one that still reads — it becomes a decryption failure instea
 
 ## What Phase 1 does NOT cover
 
-Stated because a checklist that omits its own gaps is worse than no checklist.
+Phase 1 is complete. What follows is what the OTHER phases still owe, stated
+here because somebody reading this file is deciding whether to trust the
+deployment with a real record.
 
-- **Per-file upload acknowledgment is not implemented.** Uploads are still
-  screened by the ingress posture, which refuses identifier-bearing documents
-  outright while `ORION_PHI=blocked`. The production-mode acknowledgment flow is
-  Phase 1 work that has not landed.
-- **Retention enforcement is not implemented.** `documents purge` exists as a
-  manual command; nothing enforces a period.
-- **Shell and filesystem hardening in PHI mode** — confirmation on `cat`/`grep`
-  over credential and document paths — is not implemented.
 - **No clearinghouse connector exists.** Nothing has ever been sent to a payer.
-  That is Phase 2, and it is the phase to be slow about.
+  Eligibility, claim status and submission are local-only. That is Phase 2, and
+  it is the phase to be slow about.
+- **No automated reference-data refresh.** NCCI, MUE, MPFS and ICD-10 are
+  installed by hand and nothing warns when they go stale (Phase 4).
+- **Long operations block a turn**, and the single container has a concurrency
+  ceiling a demonstration can reach (Phase 6).
+- **No metrics endpoint, no structured logs, no runbook** (Phase 10).
 
----
+Key rotation is also not automated: rotating `ORION_ENCRYPTION_KEY` without
+re-encrypting existing rows leaves those rows unreadable. There is no
+re-encryption command yet.
 
 ## Verifying the gate
 

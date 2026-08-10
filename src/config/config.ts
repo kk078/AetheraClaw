@@ -106,6 +106,16 @@ export const ConfigSchema = z.object({
       // Defaults to education, so upgrading and changing nothing changes
       // nothing.
       phiMode: z.enum(["education", "production"]).default("education"),
+      // ── How long extracted document text is kept ───────────────────────────
+      // 0 means indefinitely, which is every existing install's behaviour and
+      // therefore the default. A zero is OFF rather than "delete everything":
+      // the failure mode of misreading this must be keeping data too long,
+      // which is recoverable, not destroying a practice's documents because a
+      // value was blank.
+      //
+      // Enforced at startup, in the same place the tool log and view retention
+      // are already pruned.
+      documentRetentionDays: z.number().int().min(0).default(0),
     })
     .default({}),
   email: z

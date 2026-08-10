@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { detectPhi, phiVerdict, redact, scanText } from "../src/compliance/phi-detect.js";
 import { checkProduction } from "../src/config/production-check.js";
 import { phiSection, buildSystemPrompt } from "../src/agent/system-prompt.js";
+import { retentionDecision, retentionReport } from "../src/compliance/retention.js";
+import { assessCommandRisk } from "../src/tools/shell.js";
+import { uploadGate } from "../src/compliance/upload-gate.js";
 
 // Phase 1 of the production programme. These tests exist because every one of
 // them is a specific way real patient data ends up somewhere it was promised
@@ -195,5 +198,95 @@ describe("checkProduction", () => {
     expect(r.fatal).toBe(false);
     expect(r.checks.find((c) => c.id === "posture")?.level).toBe("warn");
     expect(r.checks.find((c) => c.id === "encryption")?.level).toBe("warn");
+  });
+});
+
+// ── Retention and shell hardening — the rest of Phase 1 ─────────────────────
+
+describe("retentionDecision", () => {
+  const NOW = 1_700_000_000_000;
+
+  it("is OFF at zero, and zero is not 'delete everything'", () => {
+    // The asymmetry is deliberate. Misreading this setting must mean keeping
+    // data too long, which is recoverable — not destroying a practice's
+    // documents because a config value was blank.
+    for (const days of [0, -1, Number.NaN]) {
+      expect(retentionDecision({ documentDays: days }, NOW).enforce, String(days)).toBe(false);
+    }
+  });
+
+  it("computes the cut-off from the clock it is given", () => {
+    const d = retentionDecision({ documentDays: 30 }, NOW);
+    expect(d.enforce).toBe(true);
+    expect(d.cutoff).toBe(NOW - 30 * 86_400_000);
+    expect(d.note).toMatch(/30 day/);
+  });
+
+  it("says nothing when nothing was deleted", () => {
+    // A daily "removed 0 documents" trains people to skip the line where the
+    // real number will one day be.
+    expect(retentionReport(0, 0, 30)).toBe("");
+    expect(retentionReport(4, 12000, 30)).toMatch(/deleted 4 document/);
+  });
+});
+
+describe("shell risk in production PHI mode", () => {
+  it("makes a read of the patient data store ask, even with a read-only command", () => {
+    // `grep -r 1EG4 /data` is a read-only command by every other test in this
+    // file, and it is also a search of every stored document with no prompt and
+    // no PHI access row — the read trail routed around by a tool that was never
+    // asked to think about it.
+    for (const cmd of ["grep -r Rivera /data", "cat ~/.orion/orion.db", "ls /data/"]) {
+      expect(assessCommandRisk(cmd, { phiMode: "production" }).level, cmd).toBe("confirm");
+      expect(assessCommandRisk(cmd, { phiMode: "production" }).reason).toMatch(/patient data store|credentials/);
+    }
+  });
+
+  it("does NOT add that friction in education mode", () => {
+    // On a laptop full of synthetic claims, making every `ls ~/.orion` ask is
+    // the kind of friction that gets a control switched off.
+    expect(assessCommandRisk("ls /data/").level).toBe("safe");
+    expect(assessCommandRisk("ls /data/", { phiMode: "education" }).level).toBe("safe");
+  });
+
+  it("leaves ordinary workspace commands alone in both modes", () => {
+    for (const mode of ["education", "production"] as const) {
+      expect(assessCommandRisk("cat README.md", { phiMode: mode }).level, mode).toBe("safe");
+      expect(assessCommandRisk("git status", { phiMode: mode }).level, mode).toBe("safe");
+    }
+  });
+
+  it("still refuses credentials and separators regardless of mode", () => {
+    expect(assessCommandRisk("cat .env", { phiMode: "education" }).level).toBe("confirm");
+    expect(assessCommandRisk("ls\nrm -rf ~", { phiMode: "production" }).level).toBe("confirm");
+  });
+});
+
+describe("uploadGate — per-file acknowledgement", () => {
+  it("does nothing in education mode", () => {
+    expect(uploadGate({ mode: "education", acknowledged: false, filename: "eob.pdf" }).allow).toBe(true);
+  });
+
+  it("requires an acknowledgement per file in production", () => {
+    const d = uploadGate({ mode: "production", acknowledged: false, filename: "eob.pdf" });
+    expect(d.allow).toBe(false);
+    expect(d.status).toBe(428);
+  });
+
+  it("answers 428, not 403 or 400", () => {
+    // The upload is permitted once somebody says so. A 403 would tell the
+    // client it was forbidden; a 400 would send a developer hunting for a bug
+    // in their own code. 428 is "your request is fine and is missing a
+    // precondition you can satisfy and retry".
+    expect(uploadGate({ mode: "production", acknowledged: false, filename: "x" }).status).toBe(428);
+  });
+
+  it("names the file, so the prompt is about a specific record", () => {
+    const d = uploadGate({ mode: "production", acknowledged: false, filename: "remit-march.pdf" });
+    expect(d.why).toContain("remit-march.pdf");
+  });
+
+  it("proceeds once acknowledged", () => {
+    expect(uploadGate({ mode: "production", acknowledged: true, filename: "eob.pdf" }).allow).toBe(true);
   });
 });

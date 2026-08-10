@@ -50,6 +50,9 @@ export const DEFAULT_CONFIG_JSON5 = `{
     // uploaded file, and tells the model it is working on real records.
     // Separate from ORION_PHI, which decides whether PHI may be STORED at all.
     phiMode: "education",
+    // Days to keep extracted document text. 0 keeps it indefinitely.
+    // Set this to the practice's retention period once there is real data.
+    documentRetentionDays: 0,
   },
 
   // Email channel. Disabled until a mailbox is configured; passwords come from
