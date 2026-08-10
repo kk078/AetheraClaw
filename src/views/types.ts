@@ -32,7 +32,8 @@ export type ViewKind =
   | "cms1500"
   | "appeal_letter"
   | "batch_heal"
-  | "document";
+  | "document"
+  | "archive_manifest";
 
 export interface ToolView {
   kind: ViewKind;

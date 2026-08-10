@@ -46,6 +46,7 @@
     "vitest": "^3.0.0"
   },
   "optionalDependencies": {
-    "better-sqlite3": "^13.0.0"
+    "better-sqlite3": "^13.0.0",
+    "tesseract.js": "^7.0.0"
   }
 }

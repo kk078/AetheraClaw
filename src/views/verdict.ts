@@ -3,6 +3,7 @@ import type { Cms1500View } from "./cms1500.js";
 import type { AppealLetterView } from "./appeal.js";
 import type { BatchHealView } from "./batch-heal.js";
 import type { DocumentView } from "./document.js";
+import type { ArchiveViewData } from "./archive.js";
 
 // ── Card summaries ───────────────────────────────────────────────────────────
 // The console showed a vertical stack of `tool_invoke` boxes tagged done/error.
@@ -250,6 +251,62 @@ function documentCard(v: DocumentView): CardSummary {
   };
 }
 
+function archiveCard(v: ArchiveViewData): CardSummary {
+  // An entry the ZIP reader could not decode is HOLD for the same reason an
+  // unreadable upload is: nothing is broken, and a file the operator believes
+  // they delivered is not in the system. So is a failed run — it stopped
+  // partway, and every count below it is a partial count.
+  //
+  // A refusal is REVIEW. The reader made a decision and said why, so the entry
+  // is accounted for; somebody still has to deal with the encrypted PDF, but
+  // they are not hunting for a file that vanished.
+  const needsHuman = v.refused + v.skipped;
+  const verdict: VerdictLevel =
+    v.status === "failed" || v.skipped > 0 ? "hold" : v.refused > 0 ? "review" : "clear";
+
+  // Said in `because` rather than in the badge. The verdict describes what is
+  // IN the archive; that the run is still going is a separate fact, and
+  // colouring it would make one badge mean two things.
+  const running = v.status === "processing" ? " Extraction is still running, so these counts will change." : "";
+
+  return {
+    title: `Archive — ${v.filename || "(unnamed)"}`,
+    // No subject, for the reason documentCard gives: it would be the archive
+    // id, and a run group headed by an opaque string says less than the
+    // filename already on the card.
+    verdict,
+    verdictLabel: VERDICT_LABELS[verdict],
+    because:
+      v.status === "failed"
+        ? `The archive did not finish processing. ${v.total} entry(s) were enumerated before it stopped, and every count here is partial.${running}`
+        : v.skipped > 0
+          ? `${v.skipped} entry(s) could not be decoded at all — those files are not in the system, and nothing here says what was in them.${running}`
+          : v.refused > 0
+            ? `${v.refused} entry(s) were refused with a reason. Each needs a person, but each is accounted for.${running}`
+            : v.total === 0
+              ? `No entries in the archive, so this is not a statement that its contents were read.${running}`
+              : `Every entry came out with text.${v.ocr > 0 ? ` ${v.ocr} of them via OCR — that text is a machine's reading, not the file's own.` : ""}${running}`,
+    facts: [
+      // The work leads. A total at the top of the card is the number that made
+      // "47 of 50 read" sound like a success.
+      {
+        label: "Needs attention",
+        value:
+          needsHuman === 0
+            ? "none"
+            : `${needsHuman} — ${v.refused} refused, ${v.skipped} unreadable`,
+      },
+      // Shown even at zero: OCR'd text is a guess, and the absence of the row
+      // is what would let it pass as extracted text.
+      { label: "Machine-read (OCR)", value: v.ocr === 0 ? "none" : `${v.ocr} of ${v.total}` },
+      {
+        label: "Entries",
+        value: v.truncated > 0 ? `${v.total} (${v.truncated} not listed below)` : String(v.total),
+      },
+    ],
+  };
+}
+
 function waterfallCard(v: MoneyWaterfallView): CardSummary {
   return {
     title: v.title,
@@ -287,6 +344,8 @@ export function summarize(view: ToolView): CardSummary | null {
       return batchHealCard(view.data as BatchHealView);
     case "document":
       return documentCard(view.data as DocumentView);
+    case "archive_manifest":
+      return archiveCard(view.data as ArchiveViewData);
     case "kpi_tiles":
       // The tiles ARE the summary; a card above them would restate them.
       return null;

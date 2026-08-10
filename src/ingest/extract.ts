@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { detectPhi, type PhiSignal } from "../channels/email/classify.js";
 import { extractDocx, extractXlsx, renderWorkbook, type XlsxWorkbook } from "./ooxml.js";
 import { MIN_CONFIDENCE, extractPdf, readingConfidence, type PdfText } from "./pdf.js";
-import { looksLikeZip } from "./zip.js";
+import { looksLikeZip, readZipReport } from "./zip.js";
 
 // ── Document ingest ──────────────────────────────────────────────────────────
 // One entry point for "the user handed us a file". It decides what the file IS,
@@ -24,7 +24,7 @@ import { looksLikeZip } from "./zip.js";
 //   deployment is configured against is text-only, so there is no fallback to
 //   a vision model either. Both are said plainly rather than one being implied.
 
-export type DocumentKind = "pdf" | "docx" | "xlsx" | "csv" | "text" | "image" | "x12" | "unknown";
+export type DocumentKind = "pdf" | "docx" | "xlsx" | "csv" | "text" | "image" | "x12" | "archive" | "unknown";
 
 export interface ExtractionSection {
   /** "Page 3", "Sheet: Remittance" — how a person refers to this part. */
@@ -90,7 +90,11 @@ export function detectKind(filename: string, buf: Buffer): DocumentKind {
     const lower = filename.toLowerCase();
     if (lower.endsWith(".docx")) return "docx";
     if (lower.endsWith(".xlsx")) return "xlsx";
-    return "unknown";
+    // A ZIP that is not an Office container is an archive of documents, which
+    // is how a payer portal hands over a batch: one .zip of forty EOBs. Calling
+    // it "unknown" refused the whole batch on the grounds that the wrapper was
+    // not a document, when every file inside it was.
+    return "archive";
   }
 
   // Binary vs text is decided on the RAW BYTES, not a latin1 decode. The old
@@ -216,6 +220,23 @@ export function extractDocument(filename: string, buf: Buffer): Extraction {
         sections = xlsxSections(wb);
         notes.push(`${wb.sheets.length} sheet(s): ${wb.sheets.map((s) => `${s.name} (${s.rows.length} rows)`).join(", ")}.`);
         notes.push("Cell values are the stored values. A formula cell gives its last computed result, which is absent if the file was written by a tool that never evaluated it.");
+        break;
+      }
+      case "archive": {
+        // A LISTING, not the contents. Each member is identified — name, size,
+        // what it is — and nothing inside it is read, because forty EOBs
+        // flattened into one blob of text is a batch with no way to say which
+        // file was the scan. Reading them one at a time is expandArchive's job;
+        // this case exists so that every caller that already had a file in its
+        // hand gets a sane answer instead of "not a format this reads".
+        const report = readZipReport(buf);
+        const lines = [...report.entries].map(
+          ([name, bytes]) => `${name} — ${detectKind(name, bytes)}, ${(bytes.length / 1024).toFixed(1)} KB`,
+        );
+        for (const s of report.skipped) lines.push(`${s.name} — NOT READ: ${s.reason}`);
+        sections = [{ label: "Archive contents", text: lines.join("\n") }];
+        notes.push(`${report.entries.size} file(s) in this archive, ${report.skipped.length} of them unreadable.`);
+        notes.push("This is the manifest, not the text. Nothing inside has been read yet — each file has to be extracted on its own.");
         break;
       }
       case "csv":
