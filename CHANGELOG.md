@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.1 — 2026-08-10
+
+- fix: finish the ORION rename in the part people actually look at (#9)
+
+
 ## v0.2.0 — 2026-08-10
 
 - feat: serve the console publicly, deliberately rather than by deletion (#8)
