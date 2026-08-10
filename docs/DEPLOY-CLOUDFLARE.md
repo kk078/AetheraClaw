@@ -67,10 +67,10 @@ which is the path Cloudflare uses to stop an idle instance.
 
 None of this is done by the pipeline, because none of it should be automatic.
 
-1. **DNS** — `aetheraonline.com` on Cloudflare, and `app.aetheraonline.com`
+1. **DNS** — `aetheraonline.com` on Cloudflare, and `orion.aetheraonline.com`
    as the custom domain in `wrangler.jsonc`.
 2. **R2 bucket** — `npx wrangler r2 bucket create orion-snapshots`.
-3. **Access application** over `app.aetheraonline.com` in Zero Trust. Take the
+3. **Access application** over `orion.aetheraonline.com` in Zero Trust. Take the
    **AUD tag** and put it in `wrangler.jsonc` under `vars.ACCESS_AUD`, and set
    `ACCESS_TEAM_DOMAIN` to your team domain. The AUD check is what stops a valid
    token for a *different* Access application in the same account working here.

@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: production
-      url: https://app.aetheraonline.com
+      url: https://orion.aetheraonline.com
     steps:
       - uses: actions/checkout@v4
         with:
@@ -115,7 +115,7 @@ jobs:
       - name: Verify the deployment answers
         run: |
           for i in $(seq 1 30); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" https://app.aetheraonline.com/healthz || true)
+            code=$(curl -s -o /dev/null -w "%{http_code}" https://orion.aetheraonline.com/healthz || true)
             if [ "$code" = "200" ]; then echo "healthy after ${i} attempt(s)"; exit 0; fi
             echo "attempt $i: HTTP $code"
             sleep 10

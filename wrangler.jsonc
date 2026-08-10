@@ -16,7 +16,7 @@
   // so a missing Access application fails closed rather than publishing the app.
   "routes": [
     {
-      "pattern": "app.aetheraonline.com",
+      "pattern": "orion.aetheraonline.com",
       "custom_domain": true
     }
   ],
@@ -60,7 +60,7 @@
     // Not secrets. The AUD is an identifier, not a credential — but it must be
     // right, or a token minted for another Access application would verify.
     "ACCESS_TEAM_DOMAIN": "aetherahealthcare.cloudflareaccess.com",
-    "ACCESS_AUD": "f45e230ce9b7e1d5964d6165ec0b2cbfedf76c24408bf49e72461aba5ea58d87"
+    "ACCESS_AUD": "REPLACE_WITH_ACCESS_APPLICATION_AUD"
   },
 
   // GATEWAY_TOKEN is deliberately absent from this file. It is set with
