@@ -1007,3 +1007,79 @@ CREATE INDEX IF NOT EXISTS idx_archives_session ON document_archives(session_id,
 -- not here. On a database that predates the column, this file runs BEFORE the
 -- back-fill, so an index over archive_id fails with "no such column" and the
 -- store will not open at all. Measured, not theorised.
+
+-- ── Compaction records ──────────────────────────────────────────────────────
+-- One row per time a session's history was folded down to fit the context
+-- window. Kept rather than discarded for two reasons that pull in the same
+-- direction: the agent replays them so a twice-compacted session does not
+-- forget its first hour, and an operator asking "why did it not know that"
+-- gets an answer instead of a shrug.
+--
+-- `facts_json` is the structured extraction; `summary` is the rendered text
+-- actually put in front of the model. Both, because the rendering will change
+-- and the facts should not have to be re-derived from prose when it does.
+CREATE TABLE IF NOT EXISTS session_summaries (
+  id            TEXT PRIMARY KEY,
+  session_id    TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  seq           INTEGER NOT NULL,
+  summary       TEXT NOT NULL,
+  facts_json    TEXT NOT NULL DEFAULT '{}',
+  dropped_count INTEGER NOT NULL DEFAULT 0,
+  created_at    INTEGER NOT NULL,
+  UNIQUE (session_id, seq)
+);
+CREATE INDEX IF NOT EXISTS idx_session_summaries ON session_summaries(session_id, seq);
+
+-- ── Job queue ───────────────────────────────────────────────────────────────
+-- One row per unit of deferred work. SQLite rather than Redis, and one consumer
+-- rather than many — see src/jobs/queue.ts for the tradeoff and the limit that
+-- buys.
+--
+-- dedupe_key is UNIQUE, and that constraint is the whole idempotency story: a
+-- second enqueue of the same work collides at the database instead of relying on
+-- the caller to check first, which is a check that races.
+CREATE TABLE IF NOT EXISTS jobs (
+  id          TEXT PRIMARY KEY,
+  kind        TEXT NOT NULL,
+  payload     TEXT NOT NULL DEFAULT '{}',
+  status      TEXT NOT NULL DEFAULT 'queued',  -- queued | running | done | failed | dead
+  attempts    INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 1,
+  run_after   INTEGER NOT NULL DEFAULT 0,
+  -- Set while a worker holds the job. An expired lease means the worker died,
+  -- which is not the same fact as the work having failed.
+  lease_until INTEGER NOT NULL DEFAULT 0,
+  dedupe_key  TEXT NOT NULL UNIQUE,
+  last_error  TEXT NOT NULL DEFAULT '',
+  session_id  TEXT NOT NULL DEFAULT '',
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_runnable ON jobs(status, run_after);
+CREATE INDEX IF NOT EXISTS idx_jobs_session ON jobs(session_id, created_at DESC);
+
+-- ── Swarm run log ───────────────────────────────────────────────────────────
+-- Every stage transition, append-only. The board holds the CURRENT stage; this
+-- holds how it got there, which is the only way to answer "why has this claim
+-- been sitting for a week" after the fact.
+--
+-- REPLAY SAFETY lives in the UNIQUE constraint. A transition is identified by
+-- (item, from, to, idempotency_key), so applying the same transition twice —
+-- a retried job, a double-clicked button, a re-delivered webhook — inserts once
+-- and the second attempt is a no-op rather than a second advance. Without it a
+-- replayed advance moves a claim two stages, and a claim that skipped scrubbing
+-- because a request was retried is a defect nobody would think to look for.
+CREATE TABLE IF NOT EXISTS swarm_runs (
+  id              TEXT PRIMARY KEY,
+  item_id         TEXT NOT NULL,
+  claim_ref       TEXT NOT NULL DEFAULT '',
+  from_stage      TEXT NOT NULL,
+  to_stage        TEXT NOT NULL,
+  actor           TEXT NOT NULL DEFAULT '',   -- who or what advanced it
+  automated       INTEGER NOT NULL DEFAULT 0,
+  note            TEXT NOT NULL DEFAULT '',
+  idempotency_key TEXT NOT NULL DEFAULT '',
+  created_at      INTEGER NOT NULL,
+  UNIQUE (item_id, from_stage, to_stage, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_swarm_runs_item ON swarm_runs(item_id, created_at);

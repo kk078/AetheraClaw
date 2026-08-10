@@ -48,12 +48,15 @@
       <div class="navitem" data-domain="variance"><span class="g">◊</span> Underpayment variance</div>
       <div class="navitem" data-domain="denials"><span class="g">▽</span> Denials &amp; appeals</div>
       <div class="navitem" data-domain="cob"><span class="g">⇉</span> COB engine</div>
+      <div class="navitem" data-view="analytics"><span class="g">◧</span> Analytics</div>
+      <div class="navitem" data-view="forecast"><span class="g">◜</span> Cash forecast</div>
 
       <div class="navgroup">Ops &amp; support</div>
       <div class="navitem" data-domain="trace"><span class="g">⇢</span> Claim lifecycle trace</div>
       <div class="navitem" data-domain="fmea"><span class="g">⚙</span> FMEA diagnostics</div>
       <div class="navitem" data-domain="patch"><span class="g">◔</span> Database patch preview</div>
       <div class="navitem" data-domain="telemetry"><span class="g">◈</span> System telemetry</div>
+      <div class="navitem" data-view="swarm"><span class="g">⌗</span> Swarm board</div>
       <div class="navitem" data-view="modules"><span class="g">▦</span> All modules <span class="count" id="c-modules"></span></div>
       <div class="navitem" data-view="workbench"><span class="g">◫</span> Workbench</div>
       <div class="navitem" data-view="providers"><span class="g">◉</span> Providers &amp; keys</div>
@@ -194,11 +197,37 @@
             <p>Build a clean claim from a structured form — diagnosis pointers are derived from the codes each line names, then it is ready to scrub.</p>
           </a>
         </div>
-        <h3 class="section">Not yet built</h3>
+        <h3 class="section">Also here</h3>
         <p class="sub">
-          The analytics dashboard, the forecast fan chart and the swarm supervisor board were planned and never built as pages.
-          Their tools exist and work — <code>analytics_query</code>, <code>forecast_chart</code>, <code>swarm_board</code> — so they are reachable from the console today.
+          Analytics, the cash forecast and the swarm board are screens of their own now — see the rail, or
+          <a href="#analytics">#analytics</a>, <a href="#forecast">#forecast</a> and <a href="#swarm">#swarm</a>.
+          Every figure on them is computed on the server; the browser paints what it is told.
         </p>
+      </div>
+    </section>
+
+
+    <section class="view" id="view-analytics">
+      <div class="pad">
+        <h2 class="title">Analytics</h2>
+        <p class="sub">Computed from the claims and remittances actually stored here. A figure that cannot be computed says so rather than showing a zero.</p>
+        <div id="analytics-body" class="sub">Loading…</div>
+      </div>
+    </section>
+
+    <section class="view" id="view-forecast">
+      <div class="pad">
+        <h2 class="title">Cash forecast</h2>
+        <p class="sub">Money posted per week, and what recent weeks suggest about the next one.</p>
+        <div id="forecast-body" class="sub">Loading…</div>
+      </div>
+    </section>
+
+    <section class="view" id="view-swarm">
+      <div class="pad">
+        <h2 class="title">Swarm board</h2>
+        <p class="sub">What the pipeline is holding, by stage. Failures are listed individually — a count tells nobody which claim stopped moving.</p>
+        <div id="swarm-body" class="sub">Loading…</div>
       </div>
     </section>
 

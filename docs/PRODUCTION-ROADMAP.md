@@ -259,31 +259,87 @@ does not mean "mostly done".
         built and tested against the mock connector, and the Stedi connector
         refuses them with the reason. Ticking this box requires a supervised
         first live submission — a business decision, not an engineering task.
-- [ ] **Phase 3** — agent reliability. Partly landed:
+- [x] **Phase 3** — agent reliability. Complete:
   - [x] `src/agent/tool-router.ts` — ranks the tool set against the question.
         It **ranks and never filters**: a tool that scores zero is still
         reachable, because a router that hides a tool turns a mis-scored
         question into a capability that has silently vanished
-  - [ ] Pinned tools per session, structured context compaction
-        (`session_summaries`), correctness eval
-- [ ] **Phase 4** — `orion data refresh|status`, startup staleness warning, per-profile required datasets
-- [ ] **Phase 5** — `/analytics.html`, `/forecast.html`, `/swarm.html`
-- [ ] **Phase 6** — `src/jobs/`, WAL, busy retry, job status events.
-  **Observed symptom, recorded before it is forgotten:** on the live deployment,
-  repeated WebSocket connections opened in quick succession while an agent turn
-  is in flight intermittently fail the UPGRADE with HTTP 500. Spaced-out
-  connections succeed every time, and plain HTTP stays 200 throughout, so this
-  is saturation of the single container rather than a broken route. Seen while
-  verifying the Phase 1 gate against production; not caused by it — nothing in
-  Phase 1 touches the upgrade path. This is the concrete thing Phase 6 has to
-  fix, and it is the first evidence that the one-process-one-writer model has a
-  ceiling a demo can reach.
-- [ ] **Phase 7** — `swarm_runs`, SLA fields, dead-letter escalation
-- [ ] **Phase 8** — email quarantine queue, browser health check, voice flag
-- [ ] **Phase 9** — `EhrConnector` + SMART reference connector
-- [ ] **Phase 10** — rate limiting, CSP, golden-path test, `/metrics`, `docs/RUNBOOK.md`
+  - [x] Pinned tools per session, seeded from what the session has already used
+        successfully. A tool that answered a question three turns ago must not
+        vanish because a later message scored differently
+  - [x] Structured compaction into `session_summaries`, replacing drop-oldest.
+        The summary is EXTRACTIVE, not model-written: a summarisation call
+        inside the agent loop would fail precisely when the context is already
+        full. Prior summaries replay, so a twice-compacted session keeps its
+        first hour
+  - [x] Correctness eval — 14 cases, no model, no network, so it gates CI where
+        the routing eval cannot. Misses and false alarms counted separately and
+        never averaged
+- [x] **Phase 4** — data lifecycle. `orion data status|refresh`, a startup
+  warning, per-profile required datasets. The distinction it is built around:
+  when a file landed on disk is not the same fact as which edition it holds, so
+  mtime supports only the negative inference. A file with no edition stamp is
+  reported **undated, never current** — calling it current would turn not
+  knowing into a statement of safety
+- [x] **Phase 5** — analytics, cash forecast and swarm board, built as views in
+  the existing console rather than three standalone pages that would each
+  duplicate the auth, banner and header. Every verdict computed server-side.
+  The forecast refuses under two remittance batches rather than drawing a flat
+  line through one point
+- [x] **Phase 6** — jobs + scale. `src/jobs/`, WAL and busy-retry (already
+  present), job events on the session channel. The rule that makes it not a
+  generic queue: **a job is not retried unless its kind declares it safe**, and
+  the idempotency check runs before the attempts counter so a config mistake
+  cannot reach an unsafe resend. `claim_submit` dead-letters on its first
+  failure and is never restarted after a crash — the process may have died
+  after the 837 went out.
+  **The WebSocket saturation recorded here is mitigated, not solved:** the
+  handler can no longer produce a 500 (connection cap closing with 1013, setup
+  errors closing with a reason), but the root cause needs the load the
+  container was under to reproduce and has not been.
+- [x] **Phase 7** — `swarm_runs`, SLA targets, escalation. Two clocks kept
+  apart: the stage target is internal, the filing deadline is external and
+  absolute, and the filing window wins whenever it is binding. Escalation
+  orders by money inside urgency bands, never by age. Replay safety is a UNIQUE
+  constraint, not a check in code — a replayed advance would move a claim two
+  stages and it would have skipped the work in between
+- [x] **Phase 8** — a review queue for held mail (never a release switch: the
+  body was not withheld, it was never stored), and a browser health check that
+  distinguishes a missing package from a missing binary because they have
+  different fixes. Outbound telephony was already gated behind consent checks
+  and the simulator, and was left as it is rather than given a second door
+- [x] **Phase 9** — `EhrConnector` plus a SMART-on-FHIR reference
+  implementation, **verified live against the public HAPI R4 server** before it
+  was committed. Read-only, no name search, refuses to guess between duplicate
+  identifiers, and returns nothing rather than a mock when unconfigured — a
+  fabricated chart is worse than any other fabrication here, because a chart is
+  what everything else defers to. The SMART launch flow is deliberately absent:
+  it is meaningless without a client id from a specific hospital
+- [x] **Phase 10** — token-bucket rate limiting (a refusal costs nothing, so
+  backing off recovers), a CSP that allows inline styles and not inline
+  scripts, `/metrics` that carries counts and durations but never an identifier
+  — enforced with `detectPhi` rather than a second set of patterns — and
+  `docs/RUNBOOK.md`, written symptom-first
 
 ---
+
+## Where this leaves it, as of the Phase 10 sweep
+
+Nine of the eleven phases are closed. **Phase 2 is not, and cannot be closed by
+testing** — that is a permanent property, not a gap. Stedi's sandbox plan covers
+eligibility only; submission, status and ERA unlock on the production plan,
+which by Stedi's own wording means real claims to real payers. Eligibility is
+verified on both sides against the live sandbox, and the 837 path is proved
+against the mock connector, which is the only rehearsal that exists.
+
+Two other things are honestly open and are named rather than buried:
+
+- **The WebSocket saturation is mitigated, not diagnosed.** The upgrade path can
+  no longer produce a 500 from this handler, and a busy server now says so with
+  a close code a client backs off on. Reproducing the original needs the load
+  the container was under.
+- **The Phase 3 routing eval still needs a provider and a key**, so it cannot
+  gate CI. The correctness eval was built to fill exactly that hole and does.
 
 ## The statement that will not be made early
 

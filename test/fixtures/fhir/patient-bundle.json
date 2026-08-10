@@ -1,0 +1,33 @@
+{
+  "resourceType": "Bundle",
+  "meta": {
+    "lastUpdated": "2026-08-10T05:41:56.852-04:00"
+  },
+  "type": "searchset",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "sindhu-syn-000022",
+        "identifier": [
+          {
+            "system": "https://sindhu-ecrf.local/synthetic-patient-id",
+            "value": "SYN-000022"
+          }
+        ],
+        "active": true,
+        "name": [
+          {
+            "text": "Synthetic Patient SYN-000022",
+            "family": "SYN-000022",
+            "given": [
+              "Synthetic"
+            ]
+          }
+        ],
+        "gender": "male",
+        "birthDate": "1950-01-01"
+      }
+    }
+  ]
+}

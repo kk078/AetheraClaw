@@ -6,7 +6,7 @@ import { z } from "zod";
 import { confinePath } from "../src/tools/path-guard.js";
 import { assessCommandRisk } from "../src/tools/shell.js";
 import { ToolRegistry, defineTool } from "../src/tools/registry.js";
-import { truncateToBudget } from "../src/agent/context-window.js";
+import { compactHistory } from "../src/agent/compaction.js";
 import { zodToJsonSchema } from "../src/tools/zod-schema.js";
 import type { ToolContext } from "../src/tools/types.js";
 import type { NormalizedMessage } from "../src/providers/types.js";
@@ -114,26 +114,34 @@ describe("zod → JSON schema", () => {
   });
 });
 
-describe("context window truncation", () => {
+describe("context window compaction", () => {
   const text = (s: string): NormalizedMessage => ({ role: "user", content: [{ type: "text", text: s }] });
   const asst = (s: string): NormalizedMessage => ({ role: "assistant", content: [{ type: "text", text: s }] });
 
-  it("keeps everything under budget", () => {
+  it("keeps everything under budget and writes no summary", () => {
     const msgs = [text("hi"), asst("hello")];
-    expect(truncateToBudget(msgs, 1000)).toHaveLength(2);
+    const out = compactHistory(msgs, 1000);
+    expect(out.messages).toHaveLength(2);
+    expect(out.summary).toBe("");
+    expect(out.droppedCount).toBe(0);
   });
 
-  it("drops oldest turns and marks truncation", () => {
+  it("replaces the dropped turns with a summary rather than a bare marker", () => {
     const msgs: NormalizedMessage[] = [];
     for (let i = 0; i < 20; i++) {
       msgs.push(text("x".repeat(4000)));
       msgs.push(asst("y".repeat(4000)));
     }
-    const out = truncateToBudget(msgs, 5000);
-    expect(out.length).toBeLessThan(msgs.length);
-    const first = out[0];
+    const out = compactHistory(msgs, 5000);
+    expect(out.messages.length).toBeLessThan(msgs.length);
+    expect(out.droppedCount).toBeGreaterThan(0);
+    const first = out.messages[0];
     expect(first.role).toBe("user");
-    expect(first.content[0]).toMatchObject({ type: "text", text: "[Earlier conversation truncated]" });
+    // The point of the whole module: what replaces the dropped turns says what
+    // happened in them. "[Earlier conversation truncated]" said only that
+    // something was lost, which the model cannot act on.
+    expect(String((first.content[0] as { text: string }).text)).toContain("compacted");
+    expect(out.summary).not.toBe("");
   });
 
   it("never orphans a tool_use from its result", () => {
@@ -144,10 +152,11 @@ describe("context window truncation", () => {
       text("next question"),
       asst("answer"),
     ];
-    const out = truncateToBudget(msgs, 500);
-    // The cut must land on the plain user message, not between tool_use and tool_result.
-    const hasOrphanResult = out.some(
-      (m, i) => m.content.some((b) => b.type === "tool_result") && !out[i - 1]?.content.some((b) => b.type === "tool_use"),
+    const out = compactHistory(msgs, 500);
+    const hasOrphanResult = out.messages.some(
+      (m, i) =>
+        m.content.some((b) => b.type === "tool_result") &&
+        !out.messages[i - 1]?.content.some((b) => b.type === "tool_use"),
     );
     expect(hasOrphanResult).toBe(false);
   });

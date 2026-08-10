@@ -11,6 +11,16 @@ import { createProvider } from "../providers/index.js";
 import { CASES } from "../eval/cases.js";
 import { renderReport, runEval } from "../eval/run.js";
 import { renderVoiceReport, runVoiceEval } from "../eval/voice-run.js";
+import { renderCorrectness, runCorrectness } from "../eval/correctness.js";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { datasetProbes } from "../tools/healthcare/datasets.js";
+import { assessDataset, assessReadiness, renderReadiness, renderStartupWarning } from "../tools/healthcare/data-lifecycle.js";
+import { todayYmd } from "../tools/healthcare/audit/deadlines.js";
+import { JobWorker, describeKinds } from "../jobs/worker.js";
+import { jobEnqueueTool } from "../jobs/tools.js";
+import { listJobs, pruneJobs } from "../jobs/store.js";
+import { renderQueue } from "../jobs/queue.js";
 import { describeManifest, installReference, managedDbPath, readManifest, verifyInstalled, writeManifest } from "../tools/healthcare/reference-store.js";
 import { MemoryStore } from "../memory/store.js";
 import { ToolRegistry } from "../tools/registry.js";
@@ -220,6 +230,28 @@ program
       process.exit(1);
     }
 
+    // ── Reference data, said at boot ────────────────────────────────────────
+    // A WARNING, never fatal. Missing NCCI edits are a degraded install, not an
+    // unsafe one — the tools already refuse rather than guess. But an operator
+    // who never hears about it runs the claims profile for a quarter believing
+    // bundling is being checked, because "no edit found" reads identically
+    // whether the table was consulted or absent.
+    //
+    // Silent when there is nothing to say. A banner that prints every boot is
+    // one people learn to scroll past, which costs the warnings that matter.
+    try {
+      const asOf = todayYmd();
+      const readiness = assessReadiness(
+        datasetProbes().map((p) => assessDataset(p, asOf)),
+        config.toolProfile,
+      );
+      const warning = renderStartupWarning(readiness);
+      if (warning) console.error(warning);
+    } catch {
+      // A broken data directory must not stop the gateway starting. The tools
+      // that need those files report their own absence at the point of use.
+    }
+
     const choice = resolveProvider(config, { explicit: opts.provider });
     if (choice.error) {
       console.error(choice.error);
@@ -248,6 +280,29 @@ program
     // `tenant` is passed as a service, not as tool input — nothing the model
     // emits can reach it, which is the whole point of the binding.
     const sessions = new SessionManager(store, registry, config, { store, config, registry, tenant });
+
+    // ── Deferred work ───────────────────────────────────────────────────────
+    // One worker, in this process. `start()` reclaims anything a dead process
+    // left behind BEFORE it begins ticking — a lease expires because the
+    // process holding it stopped, and boot is the only moment a new process
+    // exists to notice that.
+    //
+    // Handlers are registered per kind. A kind with no handler dead-letters
+    // rather than spinning, so a half-deployed build says so instead of
+    // burning attempts quietly.
+    const worker = new JobWorker({
+      store,
+      handlers: {},
+      // Job events ride the session channel the browser already listens on, so
+      // background progress reaches the UI with no second transport.
+      emit: (event) => {
+        const sessionId = typeof event.sessionId === "string" ? event.sessionId : "";
+        if (sessionId) sessions.broadcast(sessionId, event);
+      },
+    });
+    registry.register(jobEnqueueTool(worker));
+    worker.start();
+
     const app = await buildServer({ config, store, sessions, registry });
 
     const email = new EmailChannel({
@@ -514,11 +569,21 @@ program
 program
   .command("eval")
   .description("Measure whether the model reaches the right tool — especially the ones deferred behind tool_search")
+  .option("--correctness", "score the SCRUBBER's answers instead of the model's routing — offline, no provider, no key")
   .option("--provider <name>", "anthropic | openai | gemini | ollama")
   .option("--profile <name>", "tool profile")
   .option("--case <id>", "run one case by id")
   .option("--voice", "add the voice families: spoken code recognition, spoken phrasing, and pronunciation")
-  .action(async (opts: { provider?: string; profile?: string; case?: string; voice?: boolean }) => {
+  .action(async (opts: { correctness?: boolean; provider?: string; profile?: string; case?: string; voice?: boolean }) => {
+    // Handled before anything else, because this branch needs no provider, no
+    // key and no database. Routing and correctness are different questions —
+    // the model can reach flawlessly for a scrubber that misses a bundling
+    // violation, and the claim still denies.
+    if (opts.correctness) {
+      const report = runCorrectness();
+      console.log(renderCorrectness(report));
+      process.exit(report.passed === report.total ? 0 : 1);
+    }
     const config = loadConfig();
     if (opts.profile) config.toolProfile = opts.profile;
     const choice = resolveProvider(config, { explicit: opts.provider });
@@ -816,6 +881,99 @@ auth
         console.log(`  ${p.padEnd(10)} FAIL  ${Date.now() - started}ms  ${msg.slice(0, 160)}`);
       }
     }
+  });
+
+const jobs = program.command("jobs").description("Deferred background work: what ran, what is waiting, and what needs a decision");
+
+jobs
+  .command("list")
+  .description("Show the queue, with dead-lettered work listed individually")
+  .option("--limit <n>", "how many rows", "50")
+  .action((opts: { limit?: string }) => {
+    const store = new MemoryStore(resolveDbFile(configDir()));
+    const rows = listJobs(store, { limit: Number(opts.limit ?? 50) });
+    if (rows.length === 0) {
+      console.log("No jobs recorded.");
+      return;
+    }
+    console.log(renderQueue(rows, Date.now()));
+    console.log("");
+    for (const j of rows) {
+      console.log(
+        `  ${j.status.padEnd(8)} ${j.kind.padEnd(18)} ${j.id}` +
+          (j.attempts > 1 ? `  attempt ${j.attempts}/${j.maxAttempts}` : "") +
+          (j.lastError ? `  — ${j.lastError}` : ""),
+      );
+    }
+  });
+
+jobs
+  .command("kinds")
+  .description("Which kinds of work exist, and whether a failure of each is retried automatically")
+  .action(() => console.log(describeKinds()));
+
+jobs
+  .command("prune")
+  .description("Delete FINISHED jobs older than a cutoff. Dead-lettered rows are never removed — they still need a decision")
+  .option("--days <n>", "keep this many days of completed jobs", "30")
+  .action((opts: { days?: string }) => {
+    const store = new MemoryStore(resolveDbFile(configDir()));
+    const days = Number(opts.days ?? 30);
+    const removed = pruneJobs(store, Date.now() - days * 86_400_000);
+    console.log(`Removed ${removed} completed job(s) older than ${days} days. Dead-lettered rows were kept.`);
+  });
+
+// ── orion data ───────────────────────────────────────────────────────────────
+// `data_status` (the tool) says whether a file is there. This says whether it is
+// still the RIGHT file — which is the question a practice billing last quarter's
+// NCCI edits needs answered, and the one they otherwise get answered by denials.
+const data = program.command("data").description("Local CMS reference datasets: what is installed, how old, and how to refresh");
+
+data
+  .command("status")
+  .description("Which datasets are installed, which have fallen behind a published release, and which this profile needs")
+  .option("--profile <name>", "score against a specific tool profile instead of the configured one")
+  .action((opts: { profile?: string }) => {
+    const config = loadConfig();
+    const profile = opts.profile ?? config.toolProfile;
+    // todayYmd() is called HERE and passed down. Nothing inside the lifecycle
+    // module reads a clock, which is what lets a test put the machine in any
+    // quarter without touching the system time.
+    const asOf = todayYmd();
+    const lifecycles = datasetProbes().map((p) => assessDataset(p, asOf));
+    const report = assessReadiness(lifecycles, profile);
+    console.log(renderReadiness(report, lifecycles));
+    // Exit 1 on a real problem so this can gate a deployment script. "Undated"
+    // is not a real problem — it is the normal state of a correct install.
+    process.exit(report.warn ? 1 : 0);
+  });
+
+data
+  .command("refresh")
+  .description("Fetch the current public CMS files (NCCI, MUE, MPFS, GPCI, HCPCS) into the local data directory")
+  .action(() => {
+    // Delegates to the existing fetcher rather than reimplementing it. That
+    // script carries the licence reasoning about AMA-copyrighted CPT content in
+    // the NCCI and MPFS files, and having two copies of that reasoning is how
+    // one of them ends up wrong.
+    // Resolved relative to this file, then up out of dist/ or src/ — the same
+    // shape store.ts uses to find schema.sql, so a built install and a source
+    // checkout both land on the script.
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const candidates = [
+      path.resolve(here, "..", "..", "scripts", "fetch-cms-data.mjs"),
+      path.resolve(here, "..", "..", "..", "scripts", "fetch-cms-data.mjs"),
+    ];
+    const script = candidates.find((p) => fs.existsSync(p));
+    if (!script) {
+      console.error(
+        `Cannot find scripts/fetch-cms-data.mjs (looked in ${candidates.join(" and ")}). ` +
+          "Run it directly from a source checkout: node scripts/fetch-cms-data.mjs",
+      );
+      process.exit(2);
+    }
+    const res = spawnSync(process.execPath, [script], { stdio: "inherit" });
+    process.exit(res.status ?? 1);
   });
 
 const reference = program.command("reference").description("Manage the attached reference code database");

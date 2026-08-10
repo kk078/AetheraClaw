@@ -331,3 +331,41 @@ export const hcpcsLookupTool = defineTool({
     };
   },
 });
+
+// ── Probing the files for the lifecycle check ────────────────────────────────
+// The I/O half of src/tools/healthcare/data-lifecycle.ts, kept here because this
+// is the module that already knows where the files live. Everything that makes a
+// JUDGEMENT about the result is over there, pure and clock-injected.
+
+/** When a dataset file landed on disk, as YYYYMMDD. Empty when it is absent. */
+export function datasetInstalledOn(file: string): string {
+  try {
+    const s = fs.statSync(path.join(dataDir(), file));
+    return new Date(s.mtimeMs).toISOString().slice(0, 10).replace(/-/g, "");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * The edition a file declares, as the YYYYMMDD its release took effect.
+ *
+ * Only ICD-10-CM declares one today — every other CMS file we read is a bare
+ * table with no version field. That is a property of the source data, not an
+ * omission here, and it is exactly why the lifecycle check treats "no stamp" as
+ * unknown rather than as current.
+ */
+export function datasetDeclaredEffective(file: string): string {
+  if (file !== "icd10.json") return "";
+  const fy = icd10Table()?.fy;
+  // FY2026 runs from 1 October 2025.
+  return fy ? `${fy - 1}1001` : "";
+}
+
+export function datasetProbes(): Array<{ status: DatasetStatus; installedOn: string; declaredEffective: string }> {
+  return datasetStatuses().map((status) => ({
+    status,
+    installedOn: datasetInstalledOn(status.file),
+    declaredEffective: status.installed ? datasetDeclaredEffective(status.file) : "",
+  }));
+}

@@ -9,7 +9,7 @@ import { isPlumbing, previewCard } from "../views/workflow.js";
 import type { AgentEvent } from "../shared/events.js";
 import { configuredSecretValues, knownSecretValues } from "../config/credentials.js";
 import { buildSystemPrompt, catalogueBlock } from "./system-prompt.js";
-import { truncateToBudget } from "./context-window.js";
+import { compactHistory } from "./compaction.js";
 
 const MAX_TOOL_ROUNDS = 40;
 
@@ -99,7 +99,21 @@ export async function runTurn(deps: RunnerDeps, sessionId: string, userText: str
         emit({ type: "turn_completed", sessionId, stopReason: "error" });
         break;
       }
-      const messages = truncateToBudget(loadHistory(store, sessionId), config.contextTokenBudget);
+      // Compaction, not truncation. Drop-oldest threw away the claim id, the
+      // payer and the verdict — all established early and referred to for the
+      // rest of the session — and kept the recent chat about them, leaving the
+      // model holding pronouns with no referents. It answered anyway.
+      //
+      // Prior summaries are replayed so a twice-compacted session does not lose
+      // its first hour: without them the second compaction folds the first
+      // summary away with everything else, and the loss is total but invisible.
+      const priorSummaries = store.loadSessionSummaries(sessionId).map((s) => s.summary);
+      const compacted = compactHistory(loadHistory(store, sessionId), config.contextTokenBudget, priorSummaries);
+      if (compacted.summary !== "") {
+        store.saveSessionSummary(sessionId, compacted.summary, compacted.facts, compacted.droppedCount);
+        console.error(`[context] compacted ${compacted.droppedCount} message(s) into a summary`);
+      }
+      const messages = compacted.messages;
       // Chosen per provider: OpenAI rejects more than 128 tools outright, and
       // nobody but Anthropic caches the definition block.
       // The user's message is the hint. Which tools overflow the provider's cap
@@ -111,7 +125,12 @@ export async function runTurn(deps: RunnerDeps, sessionId: string, userText: str
         config.toolProfile,
         provider.name,
         config.toolLimits[provider.name],
-        { hint: userText },
+        // Pinned: what this session has already used successfully. A tool that
+        // answered a question three turns ago must not vanish from the
+        // catalogue because a later message scored differently — the model does
+        // not report a missing tool, it answers from memory, which is the
+        // failure this codebase exists to prevent.
+        { hint: userText, pinned: store.sessionToolsUsed(sessionId) },
       );
       const toolSpecs = selection.specs;
       // Logged rather than emitted as errors: these are notes about how the

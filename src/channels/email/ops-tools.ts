@@ -6,6 +6,7 @@ import type { MemoryStore } from "../../memory/store.js";
 import { classify, type Classification, type CorrespondenceKind } from "./classify.js";
 import { recommend, renderRecommendation, type LocalFacts, type Urgency } from "./recommend.js";
 import { renderTriage, triageAttachments } from "./attachments.js";
+import { renderQueueReview, resolveVerdict, reviewQueue } from "./quarantine.js";
 import {
   buildBriefing,
   payerLatency,
@@ -279,3 +280,87 @@ export const mailOpsBriefingTool = defineTool({
 });
 
 export const MAIL_OPS_TOOLS = [mailInboxSweepTool, mailAttachmentScanTool, mailRecommendActionTool, mailOpsBriefingTool];
+
+// ── The held queue ──────────────────────────────────────────────────────────
+
+export const mailHeldQueueTool = defineTool({
+  name: "mail_held_queue",
+  description:
+    "List mail held at the PHI boundary, worst first. These messages have NO stored body — quarantine dropped it — " +
+    "so this reports metadata and what a person should do, and nothing here can open or un-redact one. Call it before " +
+    "saying the inbox is clear: held mail is invisible to every other mail tool.",
+  schema: z.object({ limit: z.number().int().min(1).max(200).default(50) }),
+  execute: async (input, ctx) => {
+    const s = ctx.services.store as MemoryStore | undefined;
+    if (!s) return { content: "No store attached." };
+    const rows = (s as unknown as { db: { prepare: (q: string) => { all: (...a: unknown[]) => unknown[] } } }).db
+      .prepare(
+        `SELECT id, sender, subject, status, received_at, phi_json, claim_refs_json, deadlines_json
+         FROM inbound_mail WHERE quarantined = 1 AND status = 'new' ORDER BY received_at ASC LIMIT ?`,
+      )
+      .all(input.limit) as Array<Record<string, unknown>>;
+
+    const parse = (v: unknown): string[] => {
+      try {
+        const out = JSON.parse(String(v ?? "[]"));
+        return Array.isArray(out) ? out.map((x) => (typeof x === "string" ? x : JSON.stringify(x))) : [];
+      } catch {
+        return [];
+      }
+    };
+
+    return {
+      content: renderQueueReview(
+        reviewQueue(
+          rows.map((r) => ({
+            id: String(r.id),
+            sender: String(r.sender ?? ""),
+            subject: String(r.subject ?? ""),
+            status: String(r.status ?? ""),
+            receivedAt: Number(r.received_at ?? 0),
+            phiKinds: parse(r.phi_json),
+            claimRefs: parse(r.claim_refs_json),
+            deadlines: parse(r.deadlines_json),
+          })),
+          Date.now(),
+        ),
+      ),
+    };
+  },
+});
+
+export const mailHeldResolveTool = defineTool({
+  name: "mail_held_resolve",
+  description:
+    "Record that a held message has been dealt with, and how. Does NOT release or un-redact anything — the body was " +
+    "never stored. This drains the queue and leaves a record of what was done, which is the only reason draining it " +
+    "is safe.",
+  schema: z.object({
+    id: z.string(),
+    outcome: z.string().describe("What the message was and what was done about it. Required, and checked for substance."),
+  }),
+  execute: async (input, ctx) => {
+    const s = ctx.services.store as MemoryStore | undefined;
+    if (!s) return { content: "No store attached." };
+    const actor = String((ctx.services.identity as { name?: string } | undefined)?.name ?? "");
+    const verdict = resolveVerdict({ id: input.id, outcome: input.outcome, actor });
+    if (!verdict.ok) return { content: verdict.why, isError: true };
+
+    const db = (s as unknown as { db: { prepare: (q: string) => { run: (...a: unknown[]) => { changes?: number } } } }).db;
+    // The outcome is appended to the existing summary rather than replacing a
+    // field. Nothing about a quarantined row is overwritten — the record of
+    // what was held is as important as the record of what was done about it.
+    const res = db
+      .prepare(
+        `UPDATE inbound_mail SET status = 'resolved', summary = TRIM(COALESCE(summary,'') || ' | resolved: ' || ?)
+         WHERE id = ? AND quarantined = 1`,
+      )
+      .run(input.outcome.trim(), input.id);
+    if ((res.changes ?? 0) === 0) {
+      return { content: `No held message with id ${input.id}. mail_held_queue lists the ones that exist.`, isError: true };
+    }
+    return { content: `Recorded. ${input.id} is out of the held queue: ${input.outcome.trim()}` };
+  },
+});
+
+export const MAIL_HELD_TOOLS = [mailHeldQueueTool, mailHeldResolveTool];
