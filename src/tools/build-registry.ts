@@ -133,7 +133,7 @@ import { contractRateListTool, contractRateSetTool } from "../tools/healthcare/i
 
 export function buildRegistry(config: Config, store: MemoryStore): ToolRegistry {
   const registry = new ToolRegistry();
-  registry.register(createShellTool(config.shell));
+  registry.register(createShellTool({ ...config.shell, phiMode: config.healthcare.phiMode }));
   registry.registerAll([readFileTool, writeFileTool, listDirTool, webFetchTool]);
   registry.registerAll(META_TOOLS);
   if (config.provider !== "anthropic") registry.register(webSearchFallbackTool);

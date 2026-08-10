@@ -82,6 +82,16 @@ export const ConfigSchema = z.object({
       // default cannot be a decision about somebody else's licence.
       referenceDbLicensedRoles: z.array(z.string()).default([]),
       clearinghouse: z.string().default("mock"),
+      // "sandbox" or "production". A SEPARATE axis from the connector choice,
+      // because "which vendor" and "does this reach real payers" are different
+      // questions and conflating them is how somebody selects a connector and
+      // discovers they selected a production network.
+      //
+      // Stedi's sandbox plan covers ELIGIBILITY ONLY — claim status, submission
+      // and ERA unlock on the production plan, which sends real claims to real
+      // payers. There is no test network for the 837 path, so the mock
+      // connector is the only rehearsal that exists for it.
+      clearinghouseEnv: z.enum(["sandbox", "production"]).default("sandbox"),
       // ── How this deployment behaves around patient data ────────────────────
       // Distinct from ORION_PHI / src/config/posture.ts, and the distinction is
       // load-bearing. The posture answers a LEGAL question — may this
@@ -106,6 +116,16 @@ export const ConfigSchema = z.object({
       // Defaults to education, so upgrading and changing nothing changes
       // nothing.
       phiMode: z.enum(["education", "production"]).default("education"),
+      // ── How long extracted document text is kept ───────────────────────────
+      // 0 means indefinitely, which is every existing install's behaviour and
+      // therefore the default. A zero is OFF rather than "delete everything":
+      // the failure mode of misreading this must be keeping data too long,
+      // which is recoverable, not destroying a practice's documents because a
+      // value was blank.
+      //
+      // Enforced at startup, in the same place the tool log and view retention
+      // are already pruned.
+      documentRetentionDays: z.number().int().min(0).default(0),
     })
     .default({}),
   email: z

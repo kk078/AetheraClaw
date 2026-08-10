@@ -209,7 +209,7 @@ Updated as each phase lands. Unchecked means not started or not finished — it
 does not mean "mostly done".
 
 - [x] **Phase 0** — this document
-- [ ] **Phase 1** — PHI mode. **Partly landed.** Ticking this box needs all five:
+- [x] **Phase 1** — PHI mode. Complete:
   - [x] `src/compliance/phi-detect.ts` — patterns moved out of the email
         classifier; `detectPhi` frozen so the ingress gate is unchanged;
         `scanText` + `phiVerdict` added for the wider production scan
@@ -217,17 +217,67 @@ does not mean "mostly done".
         system-prompt variant, `docs/DEPLOY-PRODUCTION.md`
   - [x] Gateway refuses to **start** when exposed without a token;
         `orion serve --check-production`; two config combinations refused
-  - [ ] Encryption at rest — `ORION_ENCRYPTION_KEY` is checked for and warned
-        about; nothing encrypts `documents.text` yet. Deferred rather than
-        half-built: a partly-tested encryption layer over PHI is worse than a
-        documented absence
-  - [ ] Per-file upload acknowledgment, retention enforcement, and shell/fs
-        confirmation over credential and document paths in PHI mode
-- [ ] **Phase 2** — `ClearinghouseConnector` + one real implementation, credential storage, submission audit trail, `docs/CLEARINGHOUSE-SETUP.md`
-- [ ] **Phase 3** — intent router, pinned tools, structured context compaction, correctness eval
+  - [x] Encryption at rest — AES-256-GCM over document text **and** its
+        per-page sections; plaintext rows stay readable; a wrong key refuses
+        rather than returning an empty document; tampering is a decryption
+        failure rather than a silent alteration
+  - [x] Per-file upload acknowledgment — 428 with the filename named, per file
+        rather than per session, because a blanket acknowledgement is
+        indistinguishable from none within a day of being granted
+  - [x] Retention enforcement — `documentRetentionDays`, applied at startup,
+        with the delete logged. 0 means indefinitely, and 0 is OFF rather than
+        "delete everything"
+  - [x] Shell hardening — in production mode a read of the patient data store
+        asks, even for a command that is read-only by every other test. `grep -r
+        1EG4 /data` was a search of every stored document with no prompt and no
+        access row
+- [ ] **Phase 2** — clearinghouse. **This phase cannot be fully ticked by
+  testing**, and that is a permanent property rather than a temporary gap:
+  - [x] `ClearinghouseConnector`, `MockConnector`, `getConnector`, config on two
+        axes (which vendor, and whether it reaches real payers)
+  - [x] Stedi eligibility, **verified against the live sandbox** — auth scheme,
+        request shape, response parsing, and all three rejection codes (71 DOB
+        mismatch, 72 unknown member, 79 invalid participant)
+  - [x] A successful benefits response — captured live: UnitedHealthcare,
+        thirty-eight benefit lines, no AAA segment. Until this landed the parser
+        was only ever proved against rejections, and a mapping that handles
+        every failure and mangles the success is a perfectly ordinary bug. The
+        fixture pins the parts a naive mapping loses: the cost-share amounts,
+        and the fact that individual and family deductibles are separate lines
+        that must not be collapsed
+  - [x] A claim across the seams — `test/claim-lifecycle.test.ts` follows one
+        claim from eligibility through scrub, gate, 837, submit, status and 835
+        posting. Every stage already had unit tests; none covered the HANDOFF,
+        which is where an integration breaks quietly. The member id eligibility
+        confirmed must appear on the wire, and the charge submitted must equal
+        the charge adjudicated — when it does not, the claim in the system was
+        not the claim on the wire and every KPI after it is fiction
+  - [ ] **Submit / status / ERA against a real network — NOT POSSIBLE.**
+        Stedi's sandbox plan covers eligibility ONLY. Those three unlock on the
+        production plan, which by Stedi's own wording means sending real claims
+        to real payers. **There is no test network for the 837 path.** They are
+        built and tested against the mock connector, and the Stedi connector
+        refuses them with the reason. Ticking this box requires a supervised
+        first live submission — a business decision, not an engineering task.
+- [ ] **Phase 3** — agent reliability. Partly landed:
+  - [x] `src/agent/tool-router.ts` — ranks the tool set against the question.
+        It **ranks and never filters**: a tool that scores zero is still
+        reachable, because a router that hides a tool turns a mis-scored
+        question into a capability that has silently vanished
+  - [ ] Pinned tools per session, structured context compaction
+        (`session_summaries`), correctness eval
 - [ ] **Phase 4** — `orion data refresh|status`, startup staleness warning, per-profile required datasets
 - [ ] **Phase 5** — `/analytics.html`, `/forecast.html`, `/swarm.html`
-- [ ] **Phase 6** — `src/jobs/`, WAL, busy retry, job status events
+- [ ] **Phase 6** — `src/jobs/`, WAL, busy retry, job status events.
+  **Observed symptom, recorded before it is forgotten:** on the live deployment,
+  repeated WebSocket connections opened in quick succession while an agent turn
+  is in flight intermittently fail the UPGRADE with HTTP 500. Spaced-out
+  connections succeed every time, and plain HTTP stays 200 throughout, so this
+  is saturation of the single container rather than a broken route. Seen while
+  verifying the Phase 1 gate against production; not caused by it — nothing in
+  Phase 1 touches the upgrade path. This is the concrete thing Phase 6 has to
+  fix, and it is the first evidence that the one-process-one-writer model has a
+  ceiling a demo can reach.
 - [ ] **Phase 7** — `swarm_runs`, SLA fields, dead-letter escalation
 - [ ] **Phase 8** — email quarantine queue, browser health check, voice flag
 - [ ] **Phase 9** — `EhrConnector` + SMART reference connector

@@ -140,6 +140,7 @@ import { buildServer } from "../gateway/server.js";
 import { classifyBind, isPublicAccess } from "../gateway/auth.js";
 import { checkProduction, renderProductionReport } from "../config/production-check.js";
 import { resolvePosture } from "../config/posture.js";
+import { resolveEncryptionKey } from "../compliance/encryption.js";
 import { listDocuments, purgeDocuments } from "../ingest/store.js";
 import { ALL_PROVIDERS, evaluateSet, importFromEnv, promptHidden, renderList } from "./auth.js";
 import { credentialsPath, knownSecretValues, maskKey, removeCredential, setCredential } from "../config/credentials.js";
@@ -152,6 +153,7 @@ import { resolveStore, tenancyRoot } from "../tenancy/resolve.js";
 import { TenantRegistry } from "../tenancy/registry.js";
 import { checkSlug, tenantDbPath } from "../tenancy/tenant.js";
 import { retentionPlan } from "../support/tool-log.js";
+import { retentionDecision, retentionReport } from "../compliance/retention.js";
 import { VIEW_RETAIN_DAYS, viewRetentionPlan } from "../views/retention.js";
 
 const program = new Command();
@@ -297,6 +299,9 @@ program
           "  Unset ORION_PUBLIC to require Cloudflare Access again.",
       );
     }
+    // Said out loud at every start. Encryption that is silently off is the
+    // failure people discover from a breach notification rather than a log.
+    console.log(resolveEncryptionKey(readEnv("ENCRYPTION_KEY")).note);
     console.log(`Provider: ${config.provider} · Workspace: ${config.workspaceRoot}`);
     console.log(`SQLite: ${store.db.driver}`);
     // Say which names are actually in use. An install that predates the rename
@@ -307,6 +312,19 @@ program
     if (notice !== "") console.log(notice);
     // Amortized retention: once at startup rather than on every tool call, so
     // the log's cost does not scale with the log's size.
+    // Document retention, enforced rather than documented. Before the other
+    // prunes because this is the one that removes CONTENT — the tool log and
+    // the view cache hold references, this holds a chart.
+    const retention = retentionDecision(
+      { documentDays: config.healthcare.documentRetentionDays },
+      Date.now(),
+    );
+    if (retention.enforce) {
+      console.log(retention.note);
+      const purged = purgeDocuments(store, { olderThanMs: retention.cutoff, actor: "retention" });
+      const line = retentionReport(purged.deleted, purged.charactersRemoved, config.healthcare.documentRetentionDays);
+      if (line !== "") console.log(line);
+    }
     const pruned = store.pruneToolCalls(retentionPlan(Date.now()));
     if (pruned > 0) console.log(`Tool log: pruned ${pruned} row(s) past retention`);
     const views = store.pruneToolViews(viewRetentionPlan(Date.now()));

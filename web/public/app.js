@@ -1029,11 +1029,34 @@ async function uploadFiles(files) {
     pending.push(slot);
     renderAttachments();
     try {
-      const res = await fetch(
-        `/api/upload?session=${encodeURIComponent(state.sessionId)}&filename=${encodeURIComponent(file.name)}`,
-        { method: "POST", headers: { "content-type": file.type || "application/octet-stream" }, body: file },
-      );
-      const out = await res.json();
+      // ── Per-file acknowledgement in production PHI mode ──────────────────
+      // The server answers 428 for a file it is willing to store once somebody
+      // takes responsibility for it. Asking per file rather than once per
+      // session is the whole point: a blanket acknowledgement is
+      // indistinguishable from none within a day of being granted, and the
+      // value of the prompt is that it names THIS chart at the moment it is
+      // about to be handed over.
+      const post = (ack) =>
+        fetch(
+          `/api/upload?session=${encodeURIComponent(state.sessionId)}&filename=${encodeURIComponent(file.name)}` +
+            (ack ? "&ack=1" : ""),
+          { method: "POST", headers: { "content-type": file.type || "application/octet-stream" }, body: file },
+        );
+
+      let res = await post(false);
+      let out = await res.json();
+      if (res.status === 428 && out.needsAcknowledgement) {
+        // A blocking confirm, deliberately. This is a decision about a
+        // patient's record, and a toast that disappears is not a decision.
+        if (window.confirm(out.error)) {
+          res = await post(true);
+          out = await res.json();
+        } else {
+          Object.assign(slot, { uploading: false, readable: false, refusal: "Not acknowledged — nothing was stored." });
+          renderAttachments();
+          continue;
+        }
+      }
       Object.assign(slot, out, { uploading: false });
       if (!res.ok) Object.assign(slot, { readable: false, refusal: out.error || `upload failed (${res.status})` });
     } catch (err) {

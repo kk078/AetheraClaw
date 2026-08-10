@@ -53,6 +53,7 @@ import {
 } from "./auth.js";
 import { readEnv } from "../config/legacy.js";
 import { resolvePosture, screenIngress } from "../config/posture.js";
+import { uploadGate } from "../compliance/upload-gate.js";
 import {
   announceWorklistStart,
   applyCommand,
@@ -405,9 +406,26 @@ export async function buildServer(opts: {
   }));
 
   app.post("/api/upload", async (req, reply) => {
-    const q = req.query as { session?: string; filename?: string };
+    const q = req.query as { session?: string; filename?: string; ack?: string };
     const sessionId = String(q.session ?? "");
     if (!sessionId || !store.getSession(sessionId)) return reply.code(400).send({ error: "unknown session" });
+
+    // ── Per-file acknowledgment, in production mode only ───────────────────
+    // Before the body is read, let alone extracted or stored. A gate that runs
+    // after extraction has already had the chart in memory and in a temporary
+    // buffer, which is most of what it was meant to prevent.
+    //
+    // 428 rather than 403: the upload is permitted, once somebody says so. A
+    // 403 would tell the client it was forbidden and a 400 would send a
+    // developer hunting for a bug in their own code.
+    const ack = uploadGate({
+      mode: config.healthcare.phiMode,
+      acknowledged: String(q.ack ?? "") === "1",
+      filename: String(q.filename ?? "this file"),
+    });
+    if (!ack.allow) {
+      return reply.code(ack.status).send({ error: ack.why, needsAcknowledgement: true });
+    }
 
     // A string or a parsed object can still arrive when a built-in parser wins
     // over the catch-all, and losing an upload to a type-check is a worse failure

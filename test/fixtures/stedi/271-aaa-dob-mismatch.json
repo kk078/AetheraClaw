@@ -1,0 +1,63 @@
+{
+  "meta": {
+    "senderId": "STEDI",
+    "submitterId": "REDACTED",
+    "applicationMode": "test",
+    "traceId": "REDACTED",
+    "outboundTraceId": "REDACTED"
+  },
+  "controlNumber": "REDACTED",
+  "reassociationKey": "REDACTED",
+  "tradingPartnerServiceId": "87726",
+  "provider": {
+    "providerName": "ACME Health",
+    "entityIdentifier": "Provider",
+    "entityType": "Non-Person Entity",
+    "npi": "1999999984"
+  },
+  "subscriber": {
+    "memberId": "UHC202649",
+    "firstName": "Jane",
+    "lastName": "Doe",
+    "entityIdentifier": "Insured or Subscriber",
+    "entityType": "Person",
+    "dateOfBirth": "19700101",
+    "aaaErrors": [
+      {
+        "field": "AAA",
+        "code": "71",
+        "description": "Patient Birth Date Does Not Match That for the Patient on the Database",
+        "followupAction": "Please Correct and Resubmit",
+        "location": "Loop 2100C",
+        "possibleResolutions": "The subscriber's birth date doesn't match what's in the payer's database.\n\u2022 Check that the `subscriber.dateOfBirth` is correct.\n\u2022 If so, contact the payer to resolve this issue."
+      }
+    ]
+  },
+  "subscriberTraceNumbers": [
+    {
+      "traceTypeCode": "1",
+      "traceType": "Current Transaction Trace Numbers",
+      "referenceIdentification": "01KZN5MCW0PFZBXQ0Z4FPMW4Q9",
+      "originatingCompanyIdentifier": "3117151744"
+    }
+  ],
+  "payer": {
+    "entityIdentifier": "Payer",
+    "entityType": "Non-Person Entity",
+    "name": "UNITEDHEALTHCARE",
+    "payorIdentification": "87726"
+  },
+  "errors": [
+    {
+      "field": "AAA",
+      "code": "71",
+      "description": "Patient Birth Date Does Not Match That for the Patient on the Database",
+      "followupAction": "Please Correct and Resubmit",
+      "location": "Loop 2100C",
+      "possibleResolutions": "The subscriber's birth date doesn't match what's in the payer's database.\n\u2022 Check that the `subscriber.dateOfBirth` is correct.\n\u2022 If so, contact the payer to resolve this issue."
+    }
+  ],
+  "x12": "REDACTED \u2014 the raw 271, omitted from the fixture",
+  "eligibilitySearchId": "REDACTED",
+  "id": "REDACTED"
+}

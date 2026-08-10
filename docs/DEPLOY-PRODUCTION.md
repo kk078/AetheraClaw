@@ -134,28 +134,68 @@ least one FATAL. Use it in a deploy pipeline before cutting traffic over.
 
 ---
 
-## What Phase 1 does NOT cover
+## Encryption at rest
 
-Stated because a checklist that omits its own gaps is worse than no checklist.
+`ORION_ENCRYPTION_KEY` encrypts the extracted **text** of uploaded documents and
+its per-page **sections**, with AES-256-GCM. Both, or neither — sections carry
+the same content split by page, so encrypting one and not the other would be a
+feature that reads as protection and provides none.
 
-- **Encryption at rest is not implemented.** `ORION_ENCRYPTION_KEY` is checked
-  for and warned about; nothing encrypts `documents.text` yet. The SQLite file
-  is unencrypted regardless — if the disk underneath is not encrypted, the
-  database is readable by anything that can read the volume. Deferred rather
-  than half-built: a partly-tested encryption layer over PHI is worse than a
-  documented absence.
-- **Per-file upload acknowledgment is not implemented.** Uploads are still
-  screened by the ingress posture, which refuses identifier-bearing documents
-  outright while `ORION_PHI=blocked`. The production-mode acknowledgment flow is
-  Phase 1 work that has not landed.
-- **Retention enforcement is not implemented.** `documents purge` exists as a
-  manual command; nothing enforces a period.
-- **Shell and filesystem hardening in PHI mode** — confirmation on `cat`/`grep`
-  over credential and document paths — is not implemented.
-- **No clearinghouse connector exists.** Nothing has ever been sent to a payer.
-  That is Phase 2, and it is the phase to be slow about.
+```
+openssl rand -hex 32     # 64 hex characters, used directly
+```
+
+Any other value is treated as a passphrase and stretched with scrypt. That works
+and is only as strong as the passphrase; a passphrase is not refused, because
+refusing one pushes people towards turning encryption off entirely.
+
+**What it protects, stated narrowly so nobody over-trusts it:**
+
+| | |
+|---|---|
+| Protects | Document text and sections, against anyone who obtains a **copy** — the SQLite file, or an R2 snapshot — without also obtaining the key |
+| Does **not** protect | Anything else in the database. Claim numbers, amounts, payer names, worklist items, session transcripts and the audit chain are all in the clear |
+| Does **not** protect | A running process. The key is in memory and the gateway decrypts on every read — it has to, or nobody can see the document they uploaded |
+
+So it is defence against a **stolen copy**, not against a compromised host. It
+is worth having because a snapshot in object storage is exactly the kind of copy
+that travels. **It is not a substitute for encrypting the volume.**
+
+**Turning it on is a non-event.** Rows written before it carry no marker and are
+returned unchanged; new rows are encrypted. There is no migration step and no
+downtime.
+
+**Turning it off, or losing the key, is not.** A document stored under a key you
+no longer have cannot be read. It does not come back as an empty document —
+`readable` becomes false and the refusal text says the key is wrong or the bytes
+were altered, so a coder is sent to the key rather than to the file they
+uploaded. Rotating the key without re-encrypting existing rows leaves those rows
+unreadable; there is no automatic re-encryption yet.
+
+**Tampering is detected, not decrypted.** GCM's authentication tag means an
+attacker who can write to the database cannot alter a stored clinical document
+into a different one that still reads — it becomes a decryption failure instead.
 
 ---
+
+## What Phase 1 does NOT cover
+
+Phase 1 is complete. What follows is what the OTHER phases still owe, stated
+here because somebody reading this file is deciding whether to trust the
+deployment with a real record.
+
+- **No clearinghouse connector exists.** Nothing has ever been sent to a payer.
+  Eligibility, claim status and submission are local-only. That is Phase 2, and
+  it is the phase to be slow about.
+- **No automated reference-data refresh.** NCCI, MUE, MPFS and ICD-10 are
+  installed by hand and nothing warns when they go stale (Phase 4).
+- **Long operations block a turn**, and the single container has a concurrency
+  ceiling a demonstration can reach (Phase 6).
+- **No metrics endpoint, no structured logs, no runbook** (Phase 10).
+
+Key rotation is also not automated: rotating `ORION_ENCRYPTION_KEY` without
+re-encrypting existing rows leaves those rows unreadable. There is no
+re-encryption command yet.
 
 ## Verifying the gate
 

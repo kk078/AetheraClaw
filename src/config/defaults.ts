@@ -45,11 +45,17 @@ export const DEFAULT_CONFIG_JSON5 = `{
     // "cpt" reads CPT descriptors, which are copyright the AMA.
     // referenceDbLicensedRoles: [],
     clearinghouse: "mock",
+    // "sandbox" or "production" — separate from the connector choice on
+    // purpose. Production means real claims to real payers.
+    clearinghouseEnv: "sandbox",
     // "education" or "production". Production refuses anything that might
     // identify a patient rather than guessing, requires an acknowledgment per
     // uploaded file, and tells the model it is working on real records.
     // Separate from ORION_PHI, which decides whether PHI may be STORED at all.
     phiMode: "education",
+    // Days to keep extracted document text. 0 keeps it indefinitely.
+    // Set this to the practice's retention period once there is real data.
+    documentRetentionDays: 0,
   },
 
   // Email channel. Disabled until a mailbox is configured; passwords come from
