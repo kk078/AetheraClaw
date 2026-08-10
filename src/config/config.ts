@@ -285,11 +285,13 @@ export function configDir(): string {
 }
 
 /**
- * Let the environment set the listening address.
+ * Let the environment set what a container cannot edit.
  *
  * Needed because a container has no config file to edit and no command line to
  * extend: the image is built once and configured by environment, which is why
- * ORION_HOME already works this way.
+ * ORION_HOME already works this way. Anything a hosted deployment must be able
+ * to turn on belongs here — otherwise the only way to change it is to rebuild
+ * the image, and the feature is effectively unreachable in production.
  *
  * Applied AFTER the schema parse and BEFORE any CLI override, so precedence
  * reads the way people expect — flag beats environment beats file. A port that
@@ -306,6 +308,32 @@ export function applyGatewayEnv(cfg: Config, env: NodeJS.ProcessEnv): Config {
     const port = Number(rawPort);
     if (port > 0 && port <= 65535) cfg.gateway.port = port;
   }
+
+  // ── The microphone ─────────────────────────────────────────────────────────
+  // speech.enabled defaults to false and web/public/voice.js returns early
+  // without mounting anything when it is — so on a hosted deployment there was
+  // no mic button, no menu entry, and nothing saying why. The whole voice
+  // interface was invisible and unreachable, which is indistinguishable from
+  // not having been built.
+  //
+  // Exactly "1" turns it on, and "0" is honoured too so a config file that
+  // enables it can be overridden back off from the environment without editing
+  // the image. Anything else leaves the file's value alone.
+  const speech = readEnv("SPEECH", env)?.trim();
+  if (speech === "1") cfg.speech.enabled = true;
+  else if (speech === "0") cfg.speech.enabled = false;
+
+  // Which engine handles the audio. This is a PRIVACY decision, not a
+  // preference: "browser" means Chrome uploads the captured audio to Google
+  // for recognition, and no BAA covers that. It is the default because it
+  // needs nothing installed, and it is safe HERE only because this deployment
+  // refuses PHI. Named explicitly so the choice is visible in the deployment
+  // rather than inherited silently.
+  const engine = readEnv("SPEECH_ENGINE", env)?.trim();
+  if (engine === "browser" || engine === "local" || engine === "cloud") {
+    cfg.speech.engine = engine;
+  }
+
   return cfg;
 }
 
