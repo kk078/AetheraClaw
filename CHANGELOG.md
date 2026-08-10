@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.2.0 — 2026-08-10
+
+- feat: serve the console publicly, deliberately rather than by deletion (#8)
+
+
+## v0.1.3 — 2026-08-10
+
+- fix: give the container its token, and move to orion.aetheraonline.com (#7)
+
+
 ## v0.1.2 — 2026-08-10
 
 - fix: make the release reach the deploy, and fail fast on Containers (#6)
