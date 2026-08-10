@@ -60,6 +60,13 @@ jobs:
       # request. src/gateway/auth.ts is deliberately fail-closed: bound off
       # loopback with no token, it serves nothing — which is safe, and would be
       # a silent outage if this were not checked here.
+      - name: Preflight
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GATEWAY_TOKEN: ${{ secrets.GATEWAY_TOKEN }}
+        run: node scripts/preflight.mjs
+
       - name: Check the required secrets are present
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

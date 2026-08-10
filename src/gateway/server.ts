@@ -321,7 +321,12 @@ export async function buildServer(opts: {
    * is already an open `{ type, ... }`, and the gateway already pushes an
    * ad-hoc frame this way for cancel.
    */
-  const processArchive = async (archiveId: string, sessionId: string, expansion: ArchiveExpansion): Promise<void> => {
+  const processArchive = async (
+    archiveId: string,
+    sessionId: string,
+    expansion: ArchiveExpansion,
+    actor: string,
+  ): Promise<void> => {
     const total = expansion.entries.length;
     let processed = 0;
     let failed = 0;
@@ -364,7 +369,7 @@ export async function buildServer(opts: {
           refused.push({ name: entry.name, kinds: entryScreen.kinds });
           failed += 1;
         } else {
-          saveDocument(store, sessionId, after, Date.now(), archiveId);
+          saveDocument(store, sessionId, after, Date.now(), archiveId, actor);
           if (!after.readable) failed += 1;
         }
       } catch {
@@ -428,6 +433,9 @@ export async function buildServer(opts: {
           notes: expansion.notes,
         });
       }
+      // Captured from the REQUEST, before the background work starts. Reading
+      // it later would be reading a request that has already been answered.
+      const archiveActor = (req as { identity?: Identity }).identity?.email || "";
       const archive = createArchive(
         store,
         sessionId,
@@ -439,7 +447,7 @@ export async function buildServer(opts: {
       // Deliberately not awaited: the response goes out now and the work
       // continues. Errors are captured onto the archive row rather than
       // surfacing as an unhandled rejection that kills the gateway.
-      void processArchive(archive.id, sessionId, expansion).catch((err) => {
+      void processArchive(archive.id, sessionId, expansion, archiveActor).catch((err) => {
         updateArchive(store, archive.id, {
           status: "failed",
           error: err instanceof Error ? err.message : String(err),
@@ -472,7 +480,12 @@ export async function buildServer(opts: {
       });
     }
 
-    const doc = saveDocument(store, sessionId, extraction);
+    // The person, not the software. `identity` was put on the request by the
+    // auth hook after Cloudflare Access verified the session; on loopback it is
+    // absent and the store falls back to the agent, which is what a
+    // single-operator laptop actually means.
+    const actor = (req as { identity?: Identity }).identity?.email || "";
+    const doc = saveDocument(store, sessionId, extraction, Date.now(), "", actor);
     return {
       id: doc.id,
       filename: doc.filename,
