@@ -870,3 +870,17 @@ text.ring-txt { fill: var(--ink); font-size: 15px; font-family: var(--mono); fon
 .voice-pill[data-phase="thinking"] .dot { background: #fbbf24; }
 .voice-pill[data-phase="speaking"] { border-color: rgb(34 211 238 / .45); color: #67e8f9; }
 .voice-pill[data-phase="speaking"] .dot { background: #22d3ee; }
+
+/* The PHI posture banner.
+   Amber rather than red: this deployment is working correctly and within its
+   limits, and a red bar reads as an outage to somebody watching a demo. It sits
+   at the top of the document flow rather than fixed, so it cannot cover the
+   console on a small screen and never needs dismissing. */
+.posture-banner {
+  padding: 0.6rem 1rem;
+  background: #4a3a12;
+  color: #f5e6c8;
+  border-bottom: 1px solid #7a6220;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}

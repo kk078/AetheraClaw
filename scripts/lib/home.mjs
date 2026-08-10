@@ -24,6 +24,22 @@ function expandTilde(p) {
   return p;
 }
 
+/**
+ * The database file inside a directory, new name first.
+ *
+ * Same rule as resolveHome one level down, and needed separately: pointing
+ * ORION_HOME at a pre-rename directory still leaves a file called
+ * aetheraclaw.db inside it, and opening the wrong name there creates an empty
+ * database beside a full one.
+ */
+export function resolveDbFile(dir) {
+  const next = path.join(dir, `${APP_DIR_NAME}.db`);
+  if (fs.existsSync(next)) return next;
+  const legacy = path.join(dir, `${LEGACY_DIR_NAME}.db`);
+  if (fs.existsSync(legacy)) return legacy;
+  return next;
+}
+
 /** ORION_HOME, then AETHERACLAW_HOME, then whichever directory exists. */
 export function resolveHome(env = process.env) {
   const explicit = env.ORION_HOME || env.AETHERACLAW_HOME;

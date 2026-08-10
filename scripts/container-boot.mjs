@@ -110,6 +110,40 @@ async function checkpoint(reason) {
 
 await restore();
 
+/**
+ * Put something on the screen for a first-time visitor.
+ *
+ * A trial or a presentation that opens on an empty console shows nothing about
+ * what the product does — every KPI is null, the worklist is empty, and the
+ * honest "no data yet" notes read as a broken deployment to somebody who has
+ * never seen it working.
+ *
+ * Three conditions, all of them required, because the failure this must never
+ * cause is writing invented claims into a database that already holds real
+ * work: the operator asked for it, there is no database file at all, and the
+ * restore above found no snapshot. A populated install fails every one.
+ */
+async function seedDemoIfEmpty() {
+  if ((process.env.ORION_SEED_DEMO ?? "") !== "1") return;
+  if (fs.existsSync(DB_PATH)) {
+    log("database already exists — not seeding.");
+    return;
+  }
+  log("empty database and ORION_SEED_DEMO=1 — seeding synthetic practice data.");
+  await new Promise((resolve) => {
+    const seed = spawn(process.execPath, ["scripts/seed-synthetic.mjs"], { stdio: "inherit", env: process.env });
+    // Resolve on failure too. A demo without seed data is a worse console; a
+    // gateway that refuses to start because the seeder threw is no console.
+    seed.once("exit", (code) => {
+      if (code !== 0) log(`seeding exited ${code} — starting anyway, the console will just be empty.`);
+      resolve();
+    });
+    seed.once("error", () => resolve());
+  });
+}
+
+await seedDemoIfEmpty();
+
 const child = spawn(process.execPath, ["dist/cli/index.js", "serve"], {
   stdio: "inherit",
   env: process.env,

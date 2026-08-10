@@ -50,6 +50,7 @@ import {
   type Identity,
 } from "./auth.js";
 import { readEnv } from "../config/legacy.js";
+import { resolvePosture, screenIngress } from "../config/posture.js";
 import {
   announceWorklistStart,
   applyCommand,
@@ -147,6 +148,11 @@ export async function buildServer(opts: {
   // the only thing standing in front of an admin API over PHI.
   const exposure = classifyBind(config.gateway.host);
   const gatewayToken = readEnv("GATEWAY_TOKEN") ?? "";
+  // Resolved ONCE at startup rather than per request. The posture is a property
+  // of the deployment, and re-reading the environment per request would let a
+  // long-running process change what it accepts halfway through a session with
+  // nothing recording that it had.
+  const posture = resolvePosture({ exposure });
   app.addHook("onRequest", async (req, reply) => {
     if (isUnauthenticatedPath(req.url)) return;
     const decision = authorizeRequest({ exposure, headers: req.headers, expectedToken: gatewayToken });
@@ -320,6 +326,11 @@ export async function buildServer(opts: {
     let processed = 0;
     let failed = 0;
     let ocrCount = 0;
+    // Entries turned away by the PHI posture. Named separately from `failed`
+    // because they are a different fact about the batch: a refusal is the gate
+    // working, an unreadable file is the reader not managing, and a manifest
+    // that conflates them tells an operator to go and fix the wrong thing.
+    const refused: Array<{ name: string; kinds: string[] }> = [];
 
     const push = (current: string, status: string) =>
       sessions.broadcast(sessionId, {
@@ -329,6 +340,7 @@ export async function buildServer(opts: {
         total,
         failed,
         ocr: ocrCount,
+        refused: refused.length,
         current,
         status,
       });
@@ -342,8 +354,19 @@ export async function buildServer(opts: {
         // step, and it cannot drift from what actually happened.
         const after = await readable(before, entry.bytes);
         if (after !== before && after.readable) ocrCount += 1;
-        saveDocument(store, sessionId, after, Date.now(), archiveId);
-        if (!after.readable) failed += 1;
+        // Screened per ENTRY, not per archive. A batch is exactly where a real
+        // record slips in among synthetic ones, and refusing the whole zip
+        // because one file of forty carried an identifier would push people
+        // toward splitting the archive up until it went through — which is the
+        // gate teaching them how to get around it.
+        const entryScreen = screenIngress(after.phi, posture.posture);
+        if (!entryScreen.accept) {
+          refused.push({ name: entry.name, kinds: entryScreen.kinds });
+          failed += 1;
+        } else {
+          saveDocument(store, sessionId, after, Date.now(), archiveId);
+          if (!after.readable) failed += 1;
+        }
       } catch {
         // One bad entry must not abandon the other thirty-nine.
         failed += 1;
@@ -356,6 +379,15 @@ export async function buildServer(opts: {
     updateArchive(store, archiveId, { status: "completed", processed, failed, ocrCount });
     push("", "completed");
   };
+
+  // What this deployment will and will not hold. Read by the console on load so
+  // the banner states it before anyone uploads anything, rather than after —
+  // a prospect learning the rule from a refusal has already handed over the file.
+  app.get("/api/posture", async () => ({
+    posture: posture.posture,
+    source: posture.source,
+    why: posture.why,
+  }));
 
   app.post("/api/upload", async (req, reply) => {
     const q = req.query as { session?: string; filename?: string };
@@ -423,6 +455,23 @@ export async function buildServer(opts: {
     }
 
     const extraction = await readable(extractDocument(filename, body), body);
+
+    // Screened BEFORE saveDocument, which is the only thing that makes this a
+    // refusal rather than a deletion. Storing it and removing it afterwards
+    // would still mean the text was written to disk, replicated into the WAL,
+    // and carried into the next R2 snapshot — the bytes having arrived is
+    // precisely what the agreement is about.
+    const screen = screenIngress(extraction.phi, posture.posture);
+    if (!screen.accept) {
+      return reply.code(422).send({
+        error: screen.reason,
+        refusedKinds: screen.kinds,
+        filename,
+        stored: false,
+        posture: posture.posture,
+      });
+    }
+
     const doc = saveDocument(store, sessionId, extraction);
     return {
       id: doc.id,

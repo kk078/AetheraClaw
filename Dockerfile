@@ -60,7 +60,17 @@ COPY package.json ./
 ENV ORION_HOST=0.0.0.0 \
     ORION_PORT=8080 \
     ORION_HOME=/data \
-    NODE_ENV=production
+    NODE_ENV=production \
+    # Stated rather than left to the default, even though the default off
+    # loopback is already "blocked". A reader of this file should be able to
+    # see what the deployment will and will not accept without having to trace
+    # src/config/posture.ts, and the day the BAA is signed this is the single
+    # line that changes.
+    ORION_PHI=blocked \
+    # Seed synthetic claims into an empty database on first boot, so a trial or
+    # a presentation opens on a working console rather than on zeroes. Skipped
+    # entirely once there is data — it must never touch a populated install.
+    ORION_SEED_DEMO=1
 
 # Container disk does not survive a restart. /data is where the working copy of
 # the database lives while the instance is up; scripts/container-boot.mjs

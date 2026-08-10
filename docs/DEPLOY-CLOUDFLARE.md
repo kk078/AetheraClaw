@@ -110,25 +110,68 @@ a comment typo live.
 
 ## Not done, and needed before real patient data
 
-Stated plainly rather than left to be discovered:
+The BAA is not signed yet, and this deployment is built to be production-real
+without it. That is enforced in code, not promised in a slide.
 
-- **A BAA with Cloudflare.** PHI passing through Cloudflare compute and sitting
-  in R2 requires one, and it is available on Enterprise plans for a defined
-  subset of services. Confirm the products used here are in scope before any
-  real record is loaded. This is a commercial step no code can perform.
-- **Caching is disabled in the Worker**, but confirm no zone-level Cache Rule
-  or Page Rule re-enables it on this hostname. An edge cache of these responses
-  would put patient data in POPs worldwide.
-- **No Zaraz, no Web Analytics, no third-party tags** on this hostname. They
-  send URLs — which carry claim and document ids — to third parties.
-- **AI Gateway logging.** Useful in front of the model providers, but its
-  request logging stores prompts, and the prompts contain PHI. Enable the
-  gateway without logging, or not at all, until the BAA covers it.
-- **The identity is not yet used for PHI attribution.** `req.identity` is
-  populated by the auth hook but `phi_access_log` still records what it did
-  before. Wiring the verified email into those rows is the obvious next commit
-  and is not in this change.
-- **The licensed AMA CPT-derived data** (NCCI, MUE, MPFS) ships in the image.
-  That is fine for a licensed deployment and is not fine for a public demo.
-- **`instance_type: standard-1` gives 8 GB of disk.** A tenant whose database
-  plus datasets exceed that will fail to start, not degrade.
+### The trial posture
+
+`src/config/posture.ts` gates the ingress path. Off loopback the default is
+**blocked**: a document carrying an identifier — SSN, MBI, legacy HICN, date of
+birth — is refused with **HTTP 422** *before* `saveDocument` is called. Screened
+before rather than deleted after, because storing it and removing it afterwards
+still means the text was written to disk, replicated into the WAL, and carried
+into the next R2 snapshot. The bytes having arrived is precisely what the
+agreement is about.
+
+Nothing has to be remembered for this to hold. Exposure alone closes the door;
+forgetting a flag fails safe. Opening it requires exactly `ORION_PHI=permitted`
+— "true", "yes" and "1" all read as blocked, because guessing at an operator's
+intent is the wrong instinct when the subject is whether patient data may be
+stored.
+
+The console shows the rule **on load**, not on refusal. A prospect who learns
+the limit by having a real EOB turned away has already handed the file over; the
+refusal protected the database, not them.
+
+Archive entries are screened **individually**. Refusing a whole zip because one
+file of forty carried an identifier would teach people to split archives up
+until they went through, which is a gate demonstrating how to get around it.
+Refused entries are counted separately from unreadable ones in the manifest — a
+refusal is the gate working, an unreadable file is the reader not managing, and
+conflating them sends an operator to fix the wrong thing.
+
+Verified live against a gateway bound to `0.0.0.0`: a document containing an
+SSN and a date of birth returned 422 and left **zero** rows — not the text, not
+the filename — while a synthetic remittance in the same session stored normally.
+
+### The day the BAA is signed
+
+One line in the `Dockerfile`: `ORION_PHI=blocked` becomes `permitted`. Then the
+items below become live obligations rather than deferred ones.
+
+- Confirm the products used here are in scope of the executed BAA.
+- Confirm no zone-level Cache Rule re-enables caching on this hostname. An edge
+  cache of these responses would put patient data in POPs worldwide.
+- Keep Zaraz and Web Analytics off this hostname — URLs carry claim and
+  document ids.
+- **AI Gateway logging** stores prompts, and the prompts would then contain PHI.
+- **`req.identity` is populated by the auth hook but not yet written to
+  `phi_access_log`** — those rows still record what they did before. This is the
+  one item that should not wait for the BAA.
+
+### Still true regardless
+
+- The licensed AMA CPT-derived data (NCCI, MUE, MPFS) ships in the image. Fine
+  for a licensed deployment; not fine for a public demo.
+- `instance_type: standard-1` gives 8 GB of disk. A tenant whose database plus
+  datasets exceed that will fail to start, not degrade.
+- The R2 snapshot scheme is durable against restarts, not against concurrent
+  writers.
+
+### Demo data
+
+`ORION_SEED_DEMO=1` seeds synthetic claims on first boot — only when the
+operator asked, only when no database file exists, and only when the restore
+found no snapshot. A populated install fails every one of those conditions. It
+exists so a presentation opens on a working console rather than on nulls, which
+read as a broken deployment to somebody who has never seen it working.

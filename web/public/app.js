@@ -1039,8 +1039,24 @@ consoleView?.addEventListener("drop", (e) => {
 
 // ── Boot ───────────────────────────────────────────────────────────────
 
+// ── The posture banner ─────────────────────────────────────────────────────
+// Shown BEFORE anyone uploads anything, which is the entire point. A prospect
+// who learns this deployment will not take patient data by having a real EOB
+// refused has already handed the file over; the refusal protected the database,
+// not them. Saying it on load is what makes the rule a warning rather than a
+// verdict.
+async function loadPosture() {
+  const p = await fetch("/api/posture").then((r) => r.json()).catch(() => null);
+  if (!p || p.posture !== "blocked") return;
+  const bar = document.createElement("div");
+  bar.className = "posture-banner";
+  bar.setAttribute("role", "status");
+  bar.textContent = p.why;
+  document.body.prepend(bar);
+}
+
 (async function boot() {
-  await Promise.all([loadOverview(), loadModules(), loadSessions()]);
+  await Promise.all([loadPosture(), loadOverview(), loadModules(), loadSessions()]);
 })();
 
 // ── Canvas controls ────────────────────────────────────────────────────

@@ -32,6 +32,7 @@
 import path from "node:path";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
+import { resolveDbFile, resolveHome } from "./lib/home.mjs";
 
 const dist = (p) => pathToFileURL(path.join(process.cwd(), "dist", p)).href;
 const { MemoryStore } = await import(dist("memory/store.js"));
@@ -42,8 +43,12 @@ const argv = process.argv.slice(2);
 const RESET = argv.includes("--reset");
 const N = Number(argv[argv.indexOf("--claims") + 1]) || 40;
 
-const home = process.env.ORION_HOME || path.join(os.homedir(), ".orion");
-const store = new MemoryStore(path.join(home, "orion.db"));
+// Resolved the same way the gateway resolves it, so seeding cannot write a
+// second database next to the one the application actually reads — see
+// scripts/lib/home.mjs.
+const home = resolveHome();
+const dbFile = resolveDbFile(home);
+const store = new MemoryStore(dbFile);
 
 // ── Deterministic randomness ────────────────────────────────────────────────
 // Seeded so two runs produce the same practice. A seed set that changes every
@@ -385,7 +390,7 @@ try {
 }
 
 const count = (t) => store.db.prepare(`SELECT COUNT(*) c FROM ${t}`).get().c;
-console.log(`Seeded synthetic practice data into ${path.join(home, "orion.db")}`);
+console.log(`Seeded synthetic practice data into ${dbFile}`);
 console.log(`  claims          ${count("claims")}  (${N} written this run, across ${PAYERS.length} payers)`);
 console.log(`  remittances     ${count("remittances")}  (${claimRows} adjudicated claim rows, built as X12 and parsed by parse835All)`);
 console.log(`  worklist_items  ${count("worklist_items")}  (${workCount} denials written this run)`);
