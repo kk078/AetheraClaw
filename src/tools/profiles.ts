@@ -102,6 +102,12 @@ export const PROFILES: Profile[] = [
       ...BASE,
       "ops_", "support_", "mail_", "tenant_current", "phi_access_review", "audit_verify", "audit_log",
       "data_status", "code_update_calendar", "code_set_register", "analytics_query",
+      // "what has this deployment actually filed" is an operational question, not
+      // a billing one. Without this the person who asks it is on the wrong
+      // profile to get an answer, and the answer matters most when something has
+      // gone wrong — a submission with an unknown outcome may be sitting at a
+      // payer. The ledger is read-only; nothing here can send.
+      "claim_live_ledger",
     ],
   },
   {
