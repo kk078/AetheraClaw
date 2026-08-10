@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.1.3 — 2026-08-10
+
+- fix: give the container its token, and move to orion.aetheraonline.com (#7)
+
+
 ## v0.1.2 — 2026-08-10
 
 - fix: make the release reach the deploy, and fail fast on Containers (#6)
