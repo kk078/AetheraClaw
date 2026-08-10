@@ -12,7 +12,7 @@ import { managedReferencePath, type ReferenceDbConfig } from "./reference-db.js"
 // install that answers coding questions from a file somebody is one clean-up
 // away from deleting is not installed.
 //
-// So the file can be taken INTO the installation — ~/.aetheraclaw/reference/ —
+// So the file can be taken INTO the installation — ~/.orion/reference/ —
 // where the app owns it, alongside config.json5 and the CMS datasets.
 //
 // WHAT THIS IS NOT, and the distinction matters:
@@ -23,7 +23,7 @@ import { managedReferencePath, type ReferenceDbConfig } from "./reference-db.js"
 //   licensed content to everyone who clones this, which is not the practice's
 //   licence to give.
 //
-//   Not merged into aetheraclaw.db. That database is per-tenant and holds the
+//   Not merged into orion.db. That database is per-tenant and holds the
 //   practice's claims and remittances. Folding a gigabyte of shared reference
 //   data into it would bloat every tenant's backup with an identical copy, and
 //   updating the code sets would mean rewriting a file that holds live claim
@@ -248,7 +248,7 @@ export function assessReference(manifest: ReferenceManifest, asOf?: string): Ref
         // an unrecorded edition as stale would send somebody chasing an update
         // they may already have.
         stale: false,
-        message: `Edition not recorded. The current release is ${current}; whether the installed table matches it is unknown. Record it with \`aetheraclaw reference edition ${setId}=${current}\` once you have checked.`,
+        message: `Edition not recorded. The current release is ${current}; whether the installed table matches it is unknown. Record it with \`orion reference edition ${setId}=${current}\` once you have checked.`,
       };
     }
     const s = assessStaleness(setId, installed, asOf);
@@ -285,7 +285,7 @@ export function describeManifest(m: ReferenceManifest, asOf?: string): string {
   out.push(
     "",
     // Said plainly, because "update" implies a fetch and there is none.
-    "There is no upstream to pull from: this file was assembled rather than published, so updating it means obtaining a newer copy and re-running `aetheraclaw reference install`. The CMS-derived slices are the exception — ICD-10-CM, NCCI, MUE and MPFS are refreshed independently by `node scripts/fetch-cms-data.mjs`, and those installed files take precedence over anything in here.",
+    "There is no upstream to pull from: this file was assembled rather than published, so updating it means obtaining a newer copy and re-running `orion reference install`. The CMS-derived slices are the exception — ICD-10-CM, NCCI, MUE and MPFS are refreshed independently by `node scripts/fetch-cms-data.mjs`, and those installed files take precedence over anything in here.",
   );
   return out.join("\n");
 }
@@ -293,7 +293,7 @@ export function describeManifest(m: ReferenceManifest, asOf?: string): string {
 /** Confirm the installed file is byte-for-byte what the manifest recorded. */
 export function verifyInstalled(): { ok: boolean; message: string } {
   const m = readManifest();
-  if (!m) return { ok: false, message: "No manifest — nothing has been installed through `aetheraclaw reference install`." };
+  if (!m) return { ok: false, message: "No manifest — nothing has been installed through `orion reference install`." };
   const file = managedDbPath();
   if (!fs.existsSync(file)) return { ok: false, message: `The manifest describes ${file}, which does not exist. Re-run the install.` };
   const size = fs.statSync(file).size;

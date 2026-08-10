@@ -87,8 +87,8 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           # Reaches the container as an environment variable, and is what the
           # gateway compares the edge's header against.
-          AETHERACLAW_GATEWAY_TOKEN: ${{ secrets.GATEWAY_TOKEN }}
-        run: npx wrangler deploy --var AETHERACLAW_VERSION:${{ inputs.tag || github.ref_name }}
+          ORION_GATEWAY_TOKEN: ${{ secrets.GATEWAY_TOKEN }}
+        run: npx wrangler deploy --var ORION_VERSION:${{ inputs.tag || github.ref_name }}
 
       # A deploy that reports success while the origin is down is worse than a
       # failed one, because nobody looks. Containers take a few minutes to

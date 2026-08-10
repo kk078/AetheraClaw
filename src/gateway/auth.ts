@@ -145,7 +145,7 @@ export function authorizeRequest(input: AuthInput): AuthDecision {
       ok: false,
       status: 500,
       why:
-        "This gateway is bound to a non-loopback address but AETHERACLAW_GATEWAY_TOKEN is not set, " +
+        "This gateway is bound to a non-loopback address but ORION_GATEWAY_TOKEN is not set, " +
         "so no request can be authenticated and every request is refused. Set that secret to the same " +
         "value the edge Worker sends, and put Cloudflare Access in front of the hostname.",
     };

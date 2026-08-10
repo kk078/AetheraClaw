@@ -1,12 +1,12 @@
 {
-  // Deployment of AetheraClaw to aetheraonline.com.
+  // Deployment of Orion to aetheraonline.com.
   //
   // Read this next to worker/index.ts and Dockerfile — the three describe one
   // arrangement: a Worker that verifies Cloudflare Access and pins each tenant
   // to one container instance, a container running the Node gateway, and an R2
   // bucket holding the database snapshot that makes an ephemeral disk survivable.
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "aetheraclaw",
+  "name": "orion",
   "main": "worker/index.ts",
   "compatibility_date": "2026-04-13",
   "compatibility_flags": ["nodejs_compat"],
@@ -23,7 +23,7 @@
 
   "containers": [
     {
-      "class_name": "AetheraClawContainer",
+      "class_name": "OrionContainer",
       "image": "./Dockerfile",
       // standard-1: the gateway loads ~31 MB of reference datasets, keeps a
       // SQLite working set, and shells out to pdftoppm for OCR. The lite class
@@ -36,8 +36,8 @@
   "durable_objects": {
     "bindings": [
       {
-        "name": "AETHERACLAW",
-        "class_name": "AetheraClawContainer"
+        "name": "ORION",
+        "class_name": "OrionContainer"
       }
     ]
   },
@@ -45,14 +45,14 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["AetheraClawContainer"]
+      "new_sqlite_classes": ["OrionContainer"]
     }
   ],
 
   "r2_buckets": [
     {
       "binding": "SNAPSHOTS",
-      "bucket_name": "aetheraclaw-snapshots"
+      "bucket_name": "orion-snapshots"
     }
   ],
 
@@ -65,7 +65,7 @@
 
   // GATEWAY_TOKEN is deliberately absent from this file. It is set with
   // `wrangler secret put GATEWAY_TOKEN` and stored encrypted; the same value
-  // goes to the container as AETHERACLAW_GATEWAY_TOKEN. A secret committed to
+  // goes to the container as ORION_GATEWAY_TOKEN. A secret committed to
   // a repository is a secret published to everyone who ever clones it.
   "observability": {
     "enabled": true

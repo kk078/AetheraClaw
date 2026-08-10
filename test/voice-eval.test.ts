@@ -86,7 +86,7 @@ describe("word error rate", () => {
  * Synthetic on purpose, exactly as snap.ts intends: the matching rules are
  * tested against a handful of known codes rather than against whatever datasets
  * happen to be installed on the machine running the suite. test/setup.ts points
- * AETHERACLAW_HOME at an empty directory, so the installed universe here would
+ * ORION_HOME at an empty directory, so the installed universe here would
  * be empty anyway and every case would score as "not installed".
  */
 function syntheticUniverse(cases: SpokenCodeCase[] = SPOKEN_CODE_CASES): CodeUniverse {

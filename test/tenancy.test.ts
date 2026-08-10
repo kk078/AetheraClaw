@@ -47,7 +47,7 @@ describe("tenant slugs", () => {
 describe("tenant database paths", () => {
   it("puts each tenant under its own directory", () => {
     const p = tenantDbPath("/srv/ac", "acme");
-    expect(p).toBe(path.join("/srv/ac", "tenants", "acme", "aetheraclaw.db"));
+    expect(p).toBe(path.join("/srv/ac", "tenants", "acme", "orion.db"));
   });
 
   it("re-validates the slug rather than trusting a stored row", () => {

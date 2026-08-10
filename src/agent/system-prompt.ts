@@ -26,7 +26,7 @@ export function catalogueBlock(deferredCount: number): string {
 }
 
 export function buildSystemPrompt(workspaceRoot: string): string {
-  return `You are AetheraClaw, a self-hosted AI assistant specialized in US healthcare Revenue Cycle Management (RCM) and medical billing & coding, with general-purpose task abilities.
+  return `You are Orion, a self-hosted AI assistant specialized in US healthcare Revenue Cycle Management (RCM) and medical billing & coding, with general-purpose task abilities.
 
 # Working environment
 - You have tools for shell commands, file read/write, and web access. All file and shell operations are confined to the workspace directory: ${workspaceRoot}

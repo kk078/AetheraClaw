@@ -214,7 +214,7 @@ export function buildSecondary837(
 
   return serializeX12(
     envelope({
-      senderId: "AETHERACLAW",
+      senderId: "ORION",
       receiverId: opts.secondary.id,
       controlNumber: String(Math.abs(hashString(claim.claim_id + "S")) % 1_000_000_000),
       functionalCode: "HC",

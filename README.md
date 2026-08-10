@@ -1,10 +1,12 @@
-# 🦞 AetheraClaw
+# ORION
+
+**Operational Reasoning & Intelligence Orchestration Network** — by Aethera Healthcare Solutions.
 
 A self-hosted AI assistant for **US healthcare Revenue Cycle Management (RCM) and medical billing & coding**, inspired by [OpenClaw](https://github.com/openclaw/openclaw). A long-running Gateway service connects a CLI and a local web UI to a Claude-powered agent that can look up codes, check Medicare coverage, scrub and build claims, parse remittances, work denials — and adversarially pre-adjudicate claims against a **payer twin** before you ever submit them.
 
 > ⚠️ **Not for real PHI.** This build is for coding education, code/policy lookup, and de-identified/synthetic examples. The agent is instructed to refuse real patient identifiers. Do not deploy against production patient data without adding the PHI-mode controls on the roadmap.
 >
-> **One deliberate exception, and it is the operator's to make.** Document upload reads a file, flags identifier-shaped text in it, and **stores the extracted text** — it does not refuse or redact. That is a configured posture rather than an oversight: an EOB without a member id is not an EOB, and a reader that rejects every real one is a reader nobody uses. What follows from it is built rather than assumed — every read and delete lands in `phi_access_log` anchored to the audit chain, the console shows retention at the moment of upload rather than afterwards, and `aetheraclaw documents purge` empties the table. If your deployment should not hold document content, do not use the upload path; nothing else in the system writes to that table.
+> **One deliberate exception, and it is the operator's to make.** Document upload reads a file, flags identifier-shaped text in it, and **stores the extracted text** — it does not refuse or redact. That is a configured posture rather than an oversight: an EOB without a member id is not an EOB, and a reader that rejects every real one is a reader nobody uses. What follows from it is built rather than assumed — every read and delete lands in `phi_access_log` anchored to the audit chain, the console shows retention at the moment of upload rather than afterwards, and `orion documents purge` empties the table. If your deployment should not hold document content, do not use the upload path; nothing else in the system writes to that table.
 
 ## Archives and scanned documents
 
@@ -51,7 +53,7 @@ The Gateway is the only long-running process and the single owner of state. The 
 
 ## Multi-provider
 
-The agent loop is provider-agnostic. Choose per deployment (and per session) in `~/.aetheraclaw/config.json5`:
+The agent loop is provider-agnostic. Choose per deployment (and per session) in `~/.orion/config.json5`:
 
 - **Anthropic** (default) — `claude-opus-5`, prompt caching, adaptive thinking, server-side web search.
 - **OpenAI** — `gpt-4.1` and others, function calling.
@@ -69,8 +71,8 @@ falls back to Node's built-in `node:sqlite` automatically, which is why it is an
 *optional* dependency rather than a required one.
 
 ```bash
-git clone -b claude/openclaw-functionalities-xljw65 https://github.com/kk078/AetheraClaw.git
-cd AetheraClaw
+git clone -b claude/openclaw-functionalities-xljw65 https://github.com/kk078/Orion.git
+cd Orion
 npm start
 ```
 
@@ -105,7 +107,7 @@ node dist/cli/index.js serve               # starts the gateway + web UI
 node dist/cli/index.js chat                # interactive REPL
 ```
 
-**`provider` in the config is a preference, not a requirement.** It ships as `"anthropic"`, but if that key is absent AetheraClaw uses whichever provider's key *is* present and announces the substitution at startup. It will not refuse to run and tell you to go and get a key for a provider you never chose. To pin one:
+**`provider` in the config is a preference, not a requirement.** It ships as `"anthropic"`, but if that key is absent Orion uses whichever provider's key *is* present and announces the substitution at startup. It will not refuse to run and tell you to go and get a key for a provider you never chose. To pin one:
 
 ```bash
 node dist/cli/index.js serve --provider ollama    # explicit; never substituted
@@ -119,10 +121,10 @@ SQLite drivers, then a build. The second driver is not ceremony — `node:sqlite
 where every install without a prebuilt binary lands, and running it has caught a
 transaction shim that worked on one and not the other.
 
-The suite points `AETHERACLAW_HOME` at an empty temp directory before any test
+The suite points `ORION_HOME` at an empty temp directory before any test
 loads. Without that it reads the developer's own config and reference data, and
 two tests failed the moment real NCCI edits were installed here. That shape is the
-dangerous one: a CI runner has no `~/.aetheraclaw`, so those tests would have
+dangerous one: a CI runner has no `~/.orion`, so those tests would have
 passed forever on the machine nobody works on and failed on every machine somebody
 does.
 
@@ -136,15 +138,15 @@ checkout is sound before any provider is configured.
 Keys can be entered once and stored, rather than re-exported in every shell:
 
 ```bash
-aetheraclaw auth set openai        # hidden prompt; nothing is echoed
-aetheraclaw auth set --all         # every provider in turn
-aetheraclaw auth import-env        # adopt whatever is already exported, then delete the exports
-aetheraclaw auth list              # masks only — a stored key is never printed back
-aetheraclaw auth test              # actually call each configured provider
-aetheraclaw auth remove gemini
+orion auth set openai        # hidden prompt; nothing is echoed
+orion auth set --all         # every provider in turn
+orion auth import-env        # adopt whatever is already exported, then delete the exports
+orion auth list              # masks only — a stored key is never printed back
+orion auth test              # actually call each configured provider
+orion auth remove gemini
 ```
 
-They live in `~/.aetheraclaw/credentials.json` at mode 600, **not** in `config.json5`.
+They live in `~/.orion/credentials.json` at mode 600, **not** in `config.json5`.
 That split is deliberate: `config.json5` is a file people paste into a chat window
 to ask what a setting does, and a key that lived there would go with it. The mode
 is re-checked on every read, because a permission that drifted is the interesting
@@ -158,7 +160,7 @@ collision.
 
 **Storing keys on disk creates a path that did not exist when they lived only in
 the environment**, and closing it is part of this feature rather than a follow-up.
-`cat` is on the shell tool's auto-approved list, so `cat ~/.aetheraclaw/credentials.json`
+`cat` is on the shell tool's auto-approved list, so `cat ~/.orion/credentials.json`
 used to run with **no approval prompt at all**. Blocking that one command would only
 have moved the problem to `env`, `grep -r sk-ant ~`, or a script that echoes the
 value. So the control is on the VALUE, at the single point every tool result passes
@@ -174,8 +176,8 @@ vLLM and text-generation-webui on their usual ports and reports what each is
 serving; `auth local` points the config at one:
 
 ```bash
-aetheraclaw auth discover
-aetheraclaw auth local --base-url http://127.0.0.1:11434/v1 --model qwen3
+orion auth discover
+orion auth local --base-url http://127.0.0.1:11434/v1 --model qwen3
 ```
 
 All five speak the OpenAI-compatible API, which is why they cost a row in a table
@@ -221,7 +223,7 @@ toolLimits: { ollama: 224, gemini: 224 }
 OpenAI is clamped to 128 whatever the config says, and reports the clamp — a
 larger number there would not buy a bigger tool set, it would error on every turn.
 
-**Raising it is not free**, and `aetheraclaw tools budget` prints the measured
+**Raising it is not free**, and `orion tools budget` prints the measured
 cost rather than leaving it to intuition:
 
 ```
@@ -234,7 +236,7 @@ cost rather than leaving it to intuition:
 That block is re-sent **every turn** on any provider that does not cache it. All
 224 tools on a 128k window is 41% of the context gone before the conversation
 starts. And more is not automatically better: large tool sets measurably degrade
-which tool a model picks, which is what `aetheraclaw eval` measures on your own
+which tool a model picks, which is what `orion eval` measures on your own
 model — it scored 10/14 at 64 tools, and that number is the thing to re-measure
 after changing this, not assume improves.
 
@@ -311,7 +313,7 @@ service at about a third of the correct amount.
 **Licence.** These files contain CPT codes, copyright the AMA; CMS routes the NCCI
 links through an AMA licence page. They are fetched to your machine at runtime and
 are **never committed to this repository** — the same posture as `cptDataPath`. Do
-not redistribute what lands in `~/.aetheraclaw/data`.
+not redistribute what lands in `~/.orion/data`.
 
 `ncci-ptp.json` is written as `{ COL1: { COL2: indicator } }` rather than a list
 of objects, and indexed once per process rather than scanned per claim. The array
@@ -331,7 +333,7 @@ J1885, E0114, A0428 or G0008, so nothing here is built on it. A miss reports as
 ### Attaching a reference database you already own
 
 A practice may already hold a large code or policy database. Point
-`healthcare.referenceDbPath` at the SQLite file and AetheraClaw reads it **in
+`healthcare.referenceDbPath` at the SQLite file and Orion reads it **in
 place** — read-only, never copied, never converted, never committed. Look inside
 it first:
 
@@ -385,16 +387,16 @@ Reading a file in place works, and it is fragile in one specific way: the path
 usually points at Downloads, and Downloads is the folder people empty.
 
 ```bash
-aetheraclaw reference install ~/Downloads/beacon.db \
+orion reference install ~/Downloads/beacon.db \
   --note "assembled reference DB, provenance unconfirmed" \
   --edition icd10cm=20251001,hcpcs=20260101
 
-aetheraclaw reference status    # what is installed, and what is past its release date
-aetheraclaw reference verify    # sha256 against the manifest recorded at import
-aetheraclaw reference edition ncci=20260701
+orion reference status    # what is installed, and what is past its release date
+orion reference verify    # sha256 against the manifest recorded at import
+orion reference edition ncci=20260701
 ```
 
-The copy lands in `~/.aetheraclaw/reference/`, beside `config.json5` and the CMS
+The copy lands in `~/.orion/reference/`, beside `config.json5` and the CMS
 datasets, and the tools find it with no `referenceDbPath` set. An explicit path
 still wins — somebody who names one has said where the data is.
 
@@ -408,7 +410,7 @@ queries, a worse failure than no file at all.
 **It is not committed to the repository, and it never will be.** It is gigabytes,
 and it carries CPT, which is copyright the AMA — shipping it would hand licensed
 content to everyone who clones this, which is not the practice's licence to give.
-**It is not merged into `aetheraclaw.db` either:** that database is per-tenant and
+**It is not merged into `orion.db` either:** that database is per-tenant and
 holds live claims, so folding shared reference data into it would put an identical
 gigabyte in every tenant's backup and make a code-set update rewrite a file
 holding claim data. Reference data and transaction data have different lifetimes.
@@ -435,8 +437,8 @@ tools need `npx playwright install chromium` first, and every other tool works
 without it. Reference datasets are not bundled either — see above; `data_status` lists what is
 missing and what each absence stops you from checking.
 
-State lives in `~/.aetheraclaw` — `config.json5`, `aetheraclaw.db`, `data/` — and
-the workspace defaults to `~/aetheraclaw-workspace`. Set `AETHERACLAW_HOME` to put
+State lives in `~/.orion` — `config.json5`, `orion.db`, `data/` — and
+the workspace defaults to `~/orion-workspace`. Set `ORION_HOME` to put
 it somewhere else; nothing is written outside those two directories.
 
 ## Safety model
@@ -459,9 +461,9 @@ That is a deliberate departure from the usual `tenant_id` + row-level-security d
 Enabling tenancy never moves existing data: single-tenant keeps its original database path and tenants get new ones under `tenants/<slug>/`. There is no automatic migration, because a migration that guesses which practice owns which row is worse than none. A suspended tenant is refused outright rather than served read-only — read-only still discloses.
 
 ```
-aetheraclaw tenants create acme-health --name "Acme Health Partners"
-aetheraclaw tenants list
-aetheraclaw serve --tenant acme-health
+orion tenants create acme-health --name "Acme Health Partners"
+orion tenants list
+orion serve --tenant acme-health
 ```
 
 ### PHI access logging (45 CFR §164.312(b))
@@ -512,7 +514,7 @@ A profile (`--profile ops`) for the people who keep it running rather than the p
 
 **Ticketing.** `ops_generate_rca` emits a **ticket payload** — title, severity, labels, assignee, body, and a stable fingerprint — rather than a Jira / ServiceNow / Zendesk client. Three API integrations that cannot be authenticated or tested from this machine would look finished and would first be exercised during an incident, which is the worst possible moment to discover a field name was wrong. Piping the payload into your own instance is a few lines of glue somebody writes once and can actually run. The fingerprint is the part a hand-written bridge always forgets and the part that matters: it is derived from the **cause** with digits normalised out, so the same fault recurring — including a claim whose cause reads "built 95 day(s) ago" and reads 96 tomorrow — produces the same value and updates the existing ticket instead of forking a new one every morning.
 
-Two tools in the original spec are **not** built, because AetheraClaw does not have the architecture they describe. There are no microservices, no Cloudflare Workers or tunnels, and no message queue — it is a single Node process over SQLite. A `support_trace_claim` reporting "tunnel hops", or a `support_dlq_replay` listing queue messages, would be reporting on infrastructure that does not exist. The equivalents that *are* real are `support_trace_claim` and `support_failed_ops` above, under names that describe what they actually inspect.
+Two tools in the original spec are **not** built, because Orion does not have the architecture they describe. There are no microservices, no Cloudflare Workers or tunnels, and no message queue — it is a single Node process over SQLite. A `support_trace_claim` reporting "tunnel hops", or a `support_dlq_replay` listing queue messages, would be reporting on infrastructure that does not exist. The equivalents that *are* real are `support_trace_claim` and `support_failed_ops` above, under names that describe what they actually inspect.
 
 ### Chasing a quiet claim, and deciding what to appeal
 
@@ -594,7 +596,7 @@ The dangerous failure in a billing assistant is not a crash, it is a fluent wron
 
 **Provider productivity** — `wrvu_report` became computable only once the MPFS relative value file was installed. It sums **work RVU and never total**: compensation formulae are written against work RVU, and total is work + practice expense + malpractice, roughly double, so quoting it inflates every figure in a compensation conversation while looking entirely plausible. Units multiply. A code absent from the fee schedule is **excluded and named**, never counted as zero — unpriced work is still work, and a silent zero looks exactly like a quiet month, so the totals are stated as a floor. A `TC` line contributes nothing, because the technical component is the scanner rather than the physician. Modifiers that change the *share* of work — assistant surgeon, co-surgery, bilateral, surgical-care-only — are **counted and named but not applied**: the correct percentages are payer-specific and are not held here, so those lines are flagged as an upper bound rather than silently overstated. Where claims carry no rendering NPI the report says loudly that a whole group has been credited to one number. Two defects came out of running it rather than reading it: narrowing to one NPI left the header totals unrecomputed (a summary of 27.44 above a single row reading 21.91), and the last column printed the *clinic's* name against a rendering NPI, which reads as an identification the 837 does not contain.
 
-**Tool-selection eval** — `aetheraclaw eval` measures the thing a passing unit suite cannot: whether the model reaches for the right tool. It exists because a user watched this system reply *"I don't have any tools that can inspect Ollama telemetry, evaluate dataset health, or verify the integrity of the underlying tenant database"* when all three existed, deferred behind `tool_search`. The system prompt was patched and **nothing measured whether the patch worked**. Cases run against the configured provider with the same `selectTools` split production uses; only `tool_search` and `tool_describe` execute, every domain tool is stubbed, because what is measured is which tool was reached for. Scoring is tool selection alone — judging prose needs a judge model, which would make the harness as unreliable as the thing it measures.
+**Tool-selection eval** — `orion eval` measures the thing a passing unit suite cannot: whether the model reaches for the right tool. It exists because a user watched this system reply *"I don't have any tools that can inspect Ollama telemetry, evaluate dataset health, or verify the integrity of the underlying tenant database"* when all three existed, deferred behind `tool_search`. The system prompt was patched and **nothing measured whether the patch worked**. Cases run against the configured provider with the same `selectTools` split production uses; only `tool_search` and `tool_describe` execute, every domain tool is stubbed, because what is measured is which tool was reached for. Scoring is tool selection alone — judging prose needs a judge model, which would make the harness as unreliable as the thing it measures.
 
 **Measured on `gpt-oss:120b` (Ollama Cloud, 64 direct / 147 deferred): 10 of 14.** The regression case passes — the model now searches, describes and invokes all three ops tools. The four failures are one pattern, and it is not the one the prompt was patched for: on *"we were denied for timely filing"*, *"does this payer require prior authorization for 27447"* and *"the payer has not acknowledged claim CLM-4417"* it called **nothing at all** and answered from memory. The patch cured false refusal; it did not touch false confidence, which is the same error facing the other way. That is the finding, and the cases are not being tuned until it passes.
 
@@ -621,7 +623,7 @@ It is a drafting aid, and the honest part is what it reports failing at. **Oblig
 
 The statistics are the substance. An internal audit reporting "2 of 30 claims had findings, so our error rate is 6.7%" is worse than no audit: 2/30 is consistent with a true rate from about 2% to about 21%, and the practice has written down a number it will be held to. So every rate carries a Wilson interval, and exposure is **refused** below 30 sampled claims rather than produced with a caveat nobody reads. Where a figure is given it uses the lower bound of a one-sided 90% interval — the same conservative basis CMS extrapolates from, deliberately favouring the provider. The **50% line is reported separately from the measurement**, because a contractor may not extrapolate an overpayment across a whole population unless it finds a sustained or high level of payment error, and "high" is defined as 50% or greater: 3 of 5 measures 60% but proves nothing, and the report says which of those two situations you are in. Samples are seeded and reproducible — a sample nobody can redraw is not a defensible audit — and the population is sorted before drawing so an upstream ordering change cannot silently alter what a recorded seed selects. When errors turn up, the report names the clocks: report and return within **60 days of identifying** an overpayment, where identification is knowing you have one — since the 2024 revision, working out the amount is no longer part of identifying it — with the deadline suspended while a good-faith investigation into related overpayments runs, until it concludes or **180 days** from the first identification, and a **six-year** lookback. It files candidates and deliberately starts nobody's clock on its own.
 
-**Tamper-evident audit log** — every rule change, review decision and sentinel run is appended to a hash chain, each entry carrying the SHA-256 of the one before it, verified by `audit_verify` or `aetheraclaw audit verify` (non-zero exit on failure, so it can gate a cron job). Payloads are hashed rather than stored: the log has to prove what happened without becoming the largest store of claim data in a system that is not approved for PHI.
+**Tamper-evident audit log** — every rule change, review decision and sentinel run is appended to a hash chain, each entry carrying the SHA-256 of the one before it, verified by `audit_verify` or `orion audit verify` (non-zero exit on failure, so it can gate a cron job). Payloads are hashed rather than stored: the log has to prove what happened without becoming the largest store of claim data in a system that is not approved for PHI.
 
 Be exact about what that buys, because the usual claim is wrong. It is tamper-**evident**, not tamper-proof. The chain lives in the same SQLite file the application writes to, and anyone who can edit that file can change an entry and recompute the rest to match. What the chain alone catches is corruption, a row edited with a SQL client, a deleted entry — reported as four distinct failures, because a recomputed-hash mismatch, a broken link, a gap and an anchor mismatch mean different things. **`audit_anchor` is what makes the guarantee real**: it records the head hash and writes a witness file to publish somewhere the application cannot reach back into. Verification checks the chain against every anchor, so a consistent rewrite of history — which the chain by itself verifies happily — is caught. `audit_verify` says how many entries fall after the newest anchor, and says plainly that an unanchored log proves nothing against the person an audit log exists to constrain.
 
@@ -823,7 +825,7 @@ to the start**, so "I asked Aethera about that yesterday" does not open a
 microphone mid-consultation.
 
 **Spoken authorization.** "Approve" is one word and anyone in the room can say
-it, so risky actions ask for a phrase first (`AETHERACLAW_VOICE_AUTH_PHRASE`,
+it, so risky actions ask for a phrase first (`ORION_VOICE_AUTH_PHRASE`,
 with attempt limits and a lockout). Stated plainly, because the distinction
 matters: this checks **knowledge of a phrase, not who is speaking**. There is no
 voiceprint here and nothing claims one — anyone who has overheard the phrase can
@@ -840,7 +842,7 @@ jurisdiction refuses rather than inheriting the one-party default, retention is 
 separate decision from listening, and uncertain diagnoses go to `notCoded`
 because the ICD-10-CM guidelines forbid coding them in the outpatient setting.
 
-**`aetheraclaw eval --voice`** measures what the typed harness structurally
+**`orion eval --voice`** measures what the typed harness structurally
 cannot see: a code heard wrongly, a spoken phrasing that reaches a different tool
 than the typed one, and a reply that is right on screen and wrong out loud. Two
 of the three families need no model and run offline. A low score is the finding,
@@ -861,8 +863,8 @@ the failure that rule exists for.
 It runs on your own machine — there is no hosted instance. `127.0.0.1:4180` only answers on the box where you started the gateway.
 
 ```bash
-git clone https://github.com/kk078/AetheraClaw.git
-cd AetheraClaw
+git clone https://github.com/kk078/Orion.git
+cd Orion
 npm install
 npm run build
 ```
@@ -899,16 +901,16 @@ node dist/cli/index.js audit verify   # check the tamper-evident log
 
 ## Running on a provider other than Anthropic
 
-`aetheraclaw providers` prints what is usable here — which keys are set, which model each provider is configured for, and how many tools each can actually be sent.
+`orion providers` prints what is usable here — which keys are set, which model each provider is configured for, and how many tools each can actually be sent.
 
 ```
-aetheraclaw serve --provider openai --profile claims
-aetheraclaw serve --provider gemini --profile coding
-aetheraclaw serve --provider ollama --profile denials    # local, no key
-OLLAMA_API_KEY=… aetheraclaw serve --provider ollama     # Ollama Cloud
+orion serve --provider openai --profile claims
+orion serve --provider gemini --profile coding
+orion serve --provider ollama --profile denials    # local, no key
+OLLAMA_API_KEY=… orion serve --provider ollama     # Ollama Cloud
 ```
 
-**Ollama is two services behind one name, so it carries two models.** `providers.ollama.model` is the local one (`qwen3`, whatever `ollama pull` gave you); `providers.ollama.cloudModel` is the cloud one, defaulting to **`gpt-oss:120b`**. Which pair is used follows a single decision — a key with no explicit local base URL means the cloud — so the endpoint and the model can never disagree. That mattered: the two catalogues do not overlap, and picking the URL one way and the model the other sends a real request to a real service for a model it has never heard of, whose 404 names the model rather than the mismatch that caused it. `aetheraclaw providers` prints the resolved pair, `gpt-oss:120b (cloud)` or `qwen3 (local)`, so the answer is visible before a turn is spent.
+**Ollama is two services behind one name, so it carries two models.** `providers.ollama.model` is the local one (`qwen3`, whatever `ollama pull` gave you); `providers.ollama.cloudModel` is the cloud one, defaulting to **`gpt-oss:120b`**. Which pair is used follows a single decision — a key with no explicit local base URL means the cloud — so the endpoint and the model can never disagree. That mattered: the two catalogues do not overlap, and picking the URL one way and the model the other sends a real request to a real service for a model it has never heard of, whose 404 names the model rather than the mismatch that caused it. `orion providers` prints the resolved pair, `gpt-oss:120b (cloud)` or `qwen3 (local)`, so the answer is visible before a turn is spent.
 
 **All 222 tools are reachable on every provider**, but not by shipping 222 definitions. Three catalogue tools — `tool_search`, `tool_describe`, `tool_invoke` — go on the wire, and everything else is discovered on demand. Ollama Cloud loads 64 directly and reaches the other 158 through the catalogue; `tool_invoke` routes back through the same choke point as a direct call, so zod validation, risk assessment and the approval gate all still apply. It is a way to reach a tool, not a way around it, and there are tests that hold that line.
 
@@ -926,7 +928,7 @@ Switching providers mid-session keeps the conversation: history is stored in nor
 
 **What the live APIs actually give you.** ICD-10 search and validation prefer the locally installed CMS code set, where billable status is CMS's own assertion and the fiscal year is named; without it they call the NLM Clinical Tables API, which needs network and derives billable status from whether the code has children in the returned hierarchy. Either way it is looked up, never asserted from memory. NPI validation is an offline Luhn check; NPI lookup hits NPPES, and a non-2xx throws rather than being reported as "no record" — a network outage must not read as "this provider does not exist". NCD and LCD search work against the CMS Coverage API. Two things do not, and both were found by calling them rather than by testing them: **the Coverage API publishes no state-to-MAC mapping at all**, so `mac_lookup` lists contractors and says to find your binding policy by searching LCDs instead of pretending to answer by state; and the **SAD exclusion list is licence-gated** — it embeds AMA CPT descriptors, so CMS answers 401 until you accept the licence agreement and present a token, which the tool now explains instead of surfacing a bare HTTP error.
 
-Several tools use free public APIs (NLM, NPPES, CMS Coverage) — no keys required. Optional datasets go in `~/.aetheraclaw/data/`: `ncci-ptp.json` and `mue.json` (bundling and unit edits), `icd10.json` (the full ICD-10-CM code set with billable status and its fiscal year), `hcpcs.json`, `mpfs.json` (RVUs), `global-periods.json` (`{"CODE": 90}`) for global-period lookup, `mpfs-cf.json` (`{"cf": 32.35}`) and `gpci.json` (`{"LOCALITY": {work, pe, mp}}`) for locality-accurate pricing, `em-benchmark.json` (`{"99213": 38.2}` percentages, from the CMS *Medicare Physician & Other Practitioners* public use file) for peer E/M comparison, and `hcc-model.json` (ICD-10→HCC mapping, category definitions with coefficients and hierarchies, demographic terms) from the CMS risk-adjustment model files. `code_update_diff` reads code-set editions from the same directory, either as a bare `{"CODE": "description"}` map or wrapped as `{"label", "effective", "codes"}`. CPT is AMA-licensed and supplied by the user via `healthcare.cptDataPath`. Every dataset is optional — tools that need one say so instead of guessing.
+Several tools use free public APIs (NLM, NPPES, CMS Coverage) — no keys required. Optional datasets go in `~/.orion/data/`: `ncci-ptp.json` and `mue.json` (bundling and unit edits), `icd10.json` (the full ICD-10-CM code set with billable status and its fiscal year), `hcpcs.json`, `mpfs.json` (RVUs), `global-periods.json` (`{"CODE": 90}`) for global-period lookup, `mpfs-cf.json` (`{"cf": 32.35}`) and `gpci.json` (`{"LOCALITY": {work, pe, mp}}`) for locality-accurate pricing, `em-benchmark.json` (`{"99213": 38.2}` percentages, from the CMS *Medicare Physician & Other Practitioners* public use file) for peer E/M comparison, and `hcc-model.json` (ICD-10→HCC mapping, category definitions with coefficients and hierarchies, demographic terms) from the CMS risk-adjustment model files. `code_update_diff` reads code-set editions from the same directory, either as a bare `{"CODE": "description"}` map or wrapped as `{"label", "effective", "codes"}`. CPT is AMA-licensed and supplied by the user via `healthcare.cptDataPath`. Every dataset is optional — tools that need one say so instead of guessing.
 
 ## Example
 

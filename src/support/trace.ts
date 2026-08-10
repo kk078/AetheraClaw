@@ -4,7 +4,7 @@
 // of a claim id. This assembles the timeline.
 //
 // It is deliberately NOT called a distributed trace, because there is nothing
-// distributed to trace: AetheraClaw is one Node process over SQLite. There are
+// distributed to trace: Orion is one Node process over SQLite. There are
 // no microservice hops, no tunnel segments and no queue transitions, and a tool
 // drawing them would be drawing fiction. What it does have is a real, ordered
 // record of everything that touched a claim — build, scrub, submission,
@@ -111,7 +111,7 @@ export function renderTrace(result: TraceResult): string {
 
   lines.push(
     "",
-    "This is the record in THIS database, not a distributed trace — AetheraClaw is one process over SQLite, so there are no service hops or queue transitions to show. Anything that happened in a clearinghouse or a payer's system is visible here only through what came back.",
+    "This is the record in THIS database, not a distributed trace — Orion is one process over SQLite, so there are no service hops or queue transitions to show. Anything that happened in a clearinghouse or a payer's system is visible here only through what came back.",
   );
   return lines.join("\n");
 }

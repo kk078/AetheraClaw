@@ -42,8 +42,8 @@ const argv = process.argv.slice(2);
 const RESET = argv.includes("--reset");
 const N = Number(argv[argv.indexOf("--claims") + 1]) || 40;
 
-const home = process.env.AETHERACLAW_HOME || path.join(os.homedir(), ".aetheraclaw");
-const store = new MemoryStore(path.join(home, "aetheraclaw.db"));
+const home = process.env.ORION_HOME || path.join(os.homedir(), ".orion");
+const store = new MemoryStore(path.join(home, "orion.db"));
 
 // ── Deterministic randomness ────────────────────────────────────────────────
 // Seeded so two runs produce the same practice. A seed set that changes every
@@ -385,7 +385,7 @@ try {
 }
 
 const count = (t) => store.db.prepare(`SELECT COUNT(*) c FROM ${t}`).get().c;
-console.log(`Seeded synthetic practice data into ${path.join(home, "aetheraclaw.db")}`);
+console.log(`Seeded synthetic practice data into ${path.join(home, "orion.db")}`);
 console.log(`  claims          ${count("claims")}  (${N} written this run, across ${PAYERS.length} payers)`);
 console.log(`  remittances     ${count("remittances")}  (${claimRows} adjudicated claim rows, built as X12 and parsed by parse835All)`);
 console.log(`  worklist_items  ${count("worklist_items")}  (${workCount} denials written this run)`);

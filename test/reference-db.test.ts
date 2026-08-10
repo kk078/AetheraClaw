@@ -27,7 +27,7 @@ let dir: string;
 let dbFile: string;
 
 beforeAll(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "aetheraclaw-refdb-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "orion-refdb-"));
   dbFile = path.join(dir, "fixture.db");
   const db = openDatabase(dbFile);
   db.exec(`

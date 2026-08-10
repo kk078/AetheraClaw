@@ -65,7 +65,7 @@ const RULES: Rule[] = [
     pattern: /\b(401|403)\b|unauthorized|invalid[_ ]api[_ ]key|authentication failed|missing bearer/i,
     cause: "The upstream rejected the credentials, not the request.",
     nextSteps: [
-      "Check the relevant *_API_KEY is present in the environment of the RUNNING process, not just your shell — `aetheraclaw providers` prints which keys it can see.",
+      "Check the relevant *_API_KEY is present in the environment of the RUNNING process, not just your shell — `orion providers` prints which keys it can see.",
       "A 403 with a valid key usually means the key is real but not entitled to this endpoint or model.",
       "Retrying will not help. This fails identically every time until the credential changes.",
     ],

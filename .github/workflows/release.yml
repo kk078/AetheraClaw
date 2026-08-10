@@ -59,7 +59,7 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm run typecheck:test
       - run: npm test
-      - run: AETHERACLAW_SQLITE=node npm test
+      - run: ORION_SQLITE=node npm test
       - run: npm run build
 
       - id: version

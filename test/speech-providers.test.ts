@@ -116,16 +116,16 @@ describe("buildWhisperArgs", () => {
   const cfg = config().local;
 
   it("names the model, the input file and the output prefix, field by field", () => {
-    const args = buildWhisperArgs(cfg, "/tmp/aetheraclaw-stt-x/input.wav");
+    const args = buildWhisperArgs(cfg, "/tmp/orion-stt-x/input.wav");
     expect(args).toEqual([
       "-m",
       "/opt/whisper/models/ggml-base.en.bin",
       "-f",
-      "/tmp/aetheraclaw-stt-x/input.wav",
+      "/tmp/orion-stt-x/input.wav",
       "--output-txt",
       "--no-timestamps",
       "--output-file",
-      "/tmp/aetheraclaw-stt-x/input",
+      "/tmp/orion-stt-x/input",
       "--print-progress",
       "false",
     ]);

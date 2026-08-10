@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-# ── The image AetheraClaw runs as on Cloudflare Containers ───────────────────
+# ── The image Orion runs as on Cloudflare Containers ───────────────────
 # Two stages, for one reason: better-sqlite3 is a native module and building it
 # needs a C++ toolchain, but SHIPPING it does not. A single-stage image would
 # carry python3, make and g++ into production — several hundred megabytes of
@@ -54,12 +54,12 @@ COPY package.json ./
 # Bind every interface: inside a container 127.0.0.1 is reachable by nothing at
 # all, so the loopback default would answer no requests. This is precisely the
 # case src/gateway/auth.ts fails closed on — the gateway now REFUSES every
-# request unless AETHERACLAW_GATEWAY_TOKEN is set and the edge presents it.
+# request unless ORION_GATEWAY_TOKEN is set and the edge presents it.
 # Binding 0.0.0.0 here is safe only because of that, and only because a
 # container port is reachable from its Worker rather than from the internet.
-ENV AETHERACLAW_HOST=0.0.0.0 \
-    AETHERACLAW_PORT=8080 \
-    AETHERACLAW_HOME=/data \
+ENV ORION_HOST=0.0.0.0 \
+    ORION_PORT=8080 \
+    ORION_HOME=/data \
     NODE_ENV=production
 
 # Container disk does not survive a restart. /data is where the working copy of

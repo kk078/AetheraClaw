@@ -29,11 +29,11 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-const HOME = process.env.AETHERACLAW_HOME ?? "/data";
-const DB_PATH = path.join(HOME, "aetheraclaw.db");
-const BUCKET_BINDING_URL = process.env.AETHERACLAW_SNAPSHOT_URL ?? "";
-const SNAPSHOT_KEY = process.env.AETHERACLAW_SNAPSHOT_KEY ?? "aetheraclaw.db";
-const CHECKPOINT_MS = Number(process.env.AETHERACLAW_CHECKPOINT_MS ?? 60_000);
+const HOME = process.env.ORION_HOME ?? "/data";
+const DB_PATH = path.join(HOME, "orion.db");
+const BUCKET_BINDING_URL = process.env.ORION_SNAPSHOT_URL ?? "";
+const SNAPSHOT_KEY = process.env.ORION_SNAPSHOT_KEY ?? "orion.db";
+const CHECKPOINT_MS = Number(process.env.ORION_CHECKPOINT_MS ?? 60_000);
 
 const log = (msg) => console.log(`[boot] ${msg}`);
 

@@ -31,6 +31,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveHome } from "./lib/home.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const args = new Set(process.argv.slice(2));
@@ -108,7 +109,7 @@ if (!nodeOk) {
   // root and replaces a runtime the rest of the machine may depend on. So the
   // exact command for THIS machine, and a stop — every later step would fail in
   // a way that pointed at the wrong thing.
-  console.log(`\n  AetheraClaw needs Node ${REQUIRED_NODE_MAJOR}.${REQUIRED_NODE_MINOR} or newer. On ${process.platform}:\n`);
+  console.log(`\n  Orion needs Node ${REQUIRED_NODE_MAJOR}.${REQUIRED_NODE_MINOR} or newer. On ${process.platform}:\n`);
   // Version-manager routes first, and not only because they are convenient:
   // they need no root and leave the system node alone, which is the difference
   // between "run this" and "run this and hope nothing else on the box cared".
@@ -287,9 +288,9 @@ if (skipBrowser) {
 
 heading("CMS reference data");
 
-const home = process.env.AETHERACLAW_HOME
-  ? path.resolve(process.env.AETHERACLAW_HOME.replace(/^~(?=$|\/)/, os.homedir()))
-  : path.join(os.homedir(), ".aetheraclaw");
+// Shared with the gateway's own resolution so the two cannot disagree about
+// which directory the install lives in — see scripts/lib/home.mjs.
+const home = resolveHome();
 const dataDir = path.join(home, "data");
 const present = fs.existsSync(dataDir) ? fs.readdirSync(dataDir).filter((f) => f.endsWith(".json")) : [];
 // The datasets a complete fetch writes (mpfs-cf.json is conditional on the RVU

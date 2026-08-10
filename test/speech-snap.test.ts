@@ -388,7 +388,7 @@ describe("describeSnap", () => {
 
 describe("loadInstalledUniverse", () => {
   it("degrades to empty sets when no data is installed, rather than throwing", () => {
-    // The suite's AETHERACLAW_HOME is an empty temp directory (test/setup.ts),
+    // The suite's ORION_HOME is an empty temp directory (test/setup.ts),
     // so this exercises exactly the case that matters: a voice interface must
     // not crash on a dataset that was never installed.
     const u = loadInstalledUniverse();

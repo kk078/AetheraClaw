@@ -246,7 +246,7 @@ export function describeCatalogue(catalogue: ReferenceCatalogue): string {
   if (cpt.length > 0) {
     lines.push(
       "",
-      `Licence note: ${cpt.map((t) => t.name).join(", ")} contains codes shaped like CPT. CPT descriptors are AMA-licensed. Whether this file may be used is the practice's licence question, not something AetheraClaw can answer — say so rather than assuming it is cleared.`,
+      `Licence note: ${cpt.map((t) => t.name).join(", ")} contains codes shaped like CPT. CPT descriptors are AMA-licensed. Whether this file may be used is the practice's licence question, not something Orion can answer — say so rather than assuming it is cleared.`,
     );
   }
   return lines.join("\n");
@@ -307,7 +307,7 @@ export function catalogueFor(cfg: ReferenceDbConfig): ReferenceCatalogue | { err
   if (!file) {
     return {
       error:
-        "No reference database is attached. Either set healthcare.referenceDbPath to read a SQLite file in place, or take a copy into the installation with `aetheraclaw reference install <file>` — the second survives somebody emptying their Downloads folder.",
+        "No reference database is attached. Either set healthcare.referenceDbPath to read a SQLite file in place, or take a copy into the installation with `orion reference install <file>` — the second survives somebody emptying their Downloads folder.",
     };
   }
   if (!fs.existsSync(file)) {
@@ -349,7 +349,7 @@ export function resetCatalogueCache(): void {
 }
 
 /**
- * Where `aetheraclaw reference install` puts a managed copy.
+ * Where `orion reference install` puts a managed copy.
  *
  * Defined HERE rather than in reference-store.ts, which owns installing it. The
  * first version had the store register a resolver back into this module, which

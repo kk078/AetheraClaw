@@ -59,7 +59,7 @@ Snapshotting keeps the storage engine the 2,600 tests actually run against. It
 is a deliberate trade, not an oversight, and the honest summary is: **this is
 durable against restarts, not against concurrent writers.**
 
-Checkpoint interval is `AETHERACLAW_CHECKPOINT_MS` (default 60s). The exposure
+Checkpoint interval is `ORION_CHECKPOINT_MS` (default 60s). The exposure
 window on a hard crash is that interval — the WAL is flushed on a clean SIGTERM,
 which is the path Cloudflare uses to stop an idle instance.
 
@@ -69,7 +69,7 @@ None of this is done by the pipeline, because none of it should be automatic.
 
 1. **DNS** — `aetheraonline.com` on Cloudflare, and `app.aetheraonline.com`
    as the custom domain in `wrangler.jsonc`.
-2. **R2 bucket** — `npx wrangler r2 bucket create aetheraclaw-snapshots`.
+2. **R2 bucket** — `npx wrangler r2 bucket create orion-snapshots`.
 3. **Access application** over `app.aetheraonline.com` in Zero Trust. Take the
    **AUD tag** and put it in `wrangler.jsonc` under `vars.ACCESS_AUD`, and set
    `ACCESS_TEAM_DOMAIN` to your team domain. The AUD check is what stops a valid

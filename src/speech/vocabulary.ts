@@ -342,7 +342,7 @@ export function renderVocabularyPrompt(hints: string[], style: VocabularyStyle):
     // malformed one, and Chrome throws on it. Nothing is the honest answer.
     if (clean.length === 0) return "";
     const alternatives = clean.map(escapeJsgfToken).join(" | ");
-    return `#JSGF V1.0; grammar aetheraclaw; public <billing> = ${alternatives};`;
+    return `#JSGF V1.0; grammar orion; public <billing> = ${alternatives};`;
   }
 
   // "prompt": one comma-joined string, truncated at an entry boundary.

@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { readEnv } from "../config/legacy.js";
 
 // ── SQLite driver ────────────────────────────────────────────────────────────
 // better-sqlite3 is a native module. When npm has no prebuilt binary for the
@@ -47,7 +48,7 @@ function savepointTransaction(exec: (sql: string) => void) {
   let depth = 0;
   return <A extends unknown[], R>(fn: (...args: A) => R) =>
     (...args: A): R => {
-      const name = `aetheraclaw_sp_${depth++}`;
+      const name = `orion_sp_${depth++}`;
       exec(`SAVEPOINT ${name}`);
       try {
         const result = fn(...args);
@@ -151,11 +152,15 @@ function openBetterSqlite(file: string, opts: OpenOptions): SqliteDb | null {
 /**
  * Open a database with whichever driver is available.
  *
- * `AETHERACLAW_SQLITE=node` forces the built-in, which is how the test suite
+ * `ORION_SQLITE=node` forces the built-in, which is how the test suite
  * exercises the fallback on a machine where the native module installed fine.
  * A fallback nobody runs is a fallback that does not work.
  */
 export function openDatabase(file: string, opts: OpenOptions = {}): SqliteDb {
-  if (process.env.AETHERACLAW_SQLITE === "node") return openNodeSqlite(file, opts);
+  // Read under both names — see src/config/legacy.ts. CI pins the fallback
+  // driver through this variable, and a rename that quietly stopped honouring
+  // it would leave the second CI run silently testing the SAME driver twice
+  // while still reporting two passes.
+  if (readEnv("SQLITE") === "node") return openNodeSqlite(file, opts);
   return openBetterSqlite(file, opts) ?? openNodeSqlite(file, opts);
 }

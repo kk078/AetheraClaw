@@ -272,7 +272,7 @@ export function loadSubmittedClaims(store: MemoryStore): SubmittedClaimRecord[] 
 export const emBenchmarkTool = defineTool({
   name: "em_benchmark",
   description:
-    "Analyze this practice's E/M level distribution (99202-99215) against a peer benchmark — the bell-curve analysis payers and the OIG use to select audit targets. Reports per-level shares, weighted average level, level 4-5 concentration, per-provider variance, and how often payers downcoded what was billed. Works without benchmark data (internal shape only); install ~/.aetheraclaw/data/em-benchmark.json from the CMS 'Medicare Physician & Other Practitioners' public use file, or pass a benchmark inline, for peer comparison.",
+    "Analyze this practice's E/M level distribution (99202-99215) against a peer benchmark — the bell-curve analysis payers and the OIG use to select audit targets. Reports per-level shares, weighted average level, level 4-5 concentration, per-provider variance, and how often payers downcoded what was billed. Works without benchmark data (internal shape only); install ~/.orion/data/em-benchmark.json from the CMS 'Medicare Physician & Other Practitioners' public use file, or pass a benchmark inline, for peer comparison.",
   schema: z.object({
     benchmark: z
       .record(z.number())
@@ -287,7 +287,7 @@ export const emBenchmarkTool = defineTool({
     const source = input.benchmark
       ? "supplied inline"
       : benchmark
-        ? "~/.aetheraclaw/data/em-benchmark.json"
+        ? "~/.orion/data/em-benchmark.json"
         : "none installed — internal analysis only (no peer comparison)";
 
     const submitted = loadSubmittedClaims(store);

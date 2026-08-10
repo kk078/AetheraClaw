@@ -159,7 +159,7 @@ export const codeSetRegisterTool = defineTool({
 // ── Release diff ─────────────────────────────────────────────────────────────
 
 const SnapshotSchema = z.object({
-  file: z.string().optional().describe(`Filename inside ${"~/.aetheraclaw/data"} holding the edition`),
+  file: z.string().optional().describe(`Filename inside ${"~/.orion/data"} holding the edition`),
   codes: z.record(z.string()).optional().describe("Inline code → description map"),
   effective: z.string().regex(/^\d{8}$/).optional(),
   label: z.string().optional(),

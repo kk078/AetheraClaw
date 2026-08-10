@@ -500,7 +500,7 @@ describe("report rendering", () => {
   });
 
   it("states what the numbers do not include", () => {
-    expect(summaryMarkdown(report)).toMatch(/Claims submitted outside AetheraClaw/);
+    expect(summaryMarkdown(report)).toMatch(/Claims submitted outside Orion/);
   });
 
   it("says plainly when no remittances have been parsed", () => {

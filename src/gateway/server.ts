@@ -49,6 +49,7 @@ import {
   isUnauthenticatedPath,
   type Identity,
 } from "./auth.js";
+import { readEnv } from "../config/legacy.js";
 import {
   announceWorklistStart,
   applyCommand,
@@ -145,7 +146,7 @@ export async function buildServer(opts: {
   // On loopback this is a no-op and local use is unchanged. Off loopback it is
   // the only thing standing in front of an admin API over PHI.
   const exposure = classifyBind(config.gateway.host);
-  const gatewayToken = process.env.AETHERACLAW_GATEWAY_TOKEN ?? "";
+  const gatewayToken = readEnv("GATEWAY_TOKEN") ?? "";
   app.addHook("onRequest", async (req, reply) => {
     if (isUnauthenticatedPath(req.url)) return;
     const decision = authorizeRequest({ exposure, headers: req.headers, expectedToken: gatewayToken });
@@ -180,7 +181,7 @@ export async function buildServer(opts: {
   await app.register(fastifyWebsocket);
   await app.register(fastifyStatic, { root: findWebRoot(), prefix: "/" });
 
-  app.get("/healthz", async () => ({ ok: true, name: "aetheraclaw" }));
+  app.get("/healthz", async () => ({ ok: true, name: "orion" }));
 
   app.get("/api/sessions", async () => store.listSessions());
 
@@ -675,7 +676,7 @@ export async function buildServer(opts: {
       status: describeAuthState(state, Date.now()),
       // The secret lives where every other secret in this project lives: an env
       // var named in config, never in the database and never returned here.
-      configured: Boolean(process.env.AETHERACLAW_VOICE_AUTH_PHRASE),
+      configured: Boolean(process.env.ORION_VOICE_AUTH_PHRASE),
     };
   });
 
@@ -693,11 +694,11 @@ export async function buildServer(opts: {
     const key = String(q.session ?? "default");
     const raw = req.body;
     const spoken = Buffer.isBuffer(raw) ? raw.toString("utf8") : typeof raw === "string" ? raw : "";
-    const secret = process.env.AETHERACLAW_VOICE_AUTH_PHRASE ?? "";
+    const secret = process.env.ORION_VOICE_AUTH_PHRASE ?? "";
     if (!secret) {
       return reply
         .code(503)
-        .send({ ok: false, why: "No authorization phrase is configured. Set AETHERACLAW_VOICE_AUTH_PHRASE to use spoken authorization." });
+        .send({ ok: false, why: "No authorization phrase is configured. Set ORION_VOICE_AUTH_PHRASE to use spoken authorization." });
     }
     const result = verifyResponse(authFor(key), spoken, secret, Date.now());
     authStates.set(key, result.state);

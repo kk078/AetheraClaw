@@ -947,7 +947,7 @@ CREATE INDEX IF NOT EXISTS idx_appeal_outcomes_lookup ON appeal_outcomes(payer, 
 --   table of document text with no read trail is the exact thing §164.312(b)
 --   exists to prevent.
 --
--- Retention is a decision, not a default: `aetheraclaw documents purge` exists
+-- Retention is a decision, not a default: `orion documents purge` exists
 -- because a store of document content with no way to empty it is a liability
 -- that only grows.
 CREATE TABLE IF NOT EXISTS documents (

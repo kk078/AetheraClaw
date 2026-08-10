@@ -1,11 +1,11 @@
 {
-  "name": "aetheraclaw",
+  "name": "orion",
   "version": "0.1.0",
-  "description": "Self-hosted AI assistant for US healthcare Revenue Cycle Management and medical billing & coding — inspired by OpenClaw",
+  "description": "ORION (Operational Reasoning & Intelligence Orchestration Network) by Aethera Healthcare Solutions \u2014 self-hosted AI for US healthcare Revenue Cycle Management and medical billing & coding",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "aetheraclaw": "dist/cli/index.js"
+    "orion": "dist/cli/index.js"
   },
   "engines": {
     "node": ">=22.5"

@@ -221,7 +221,7 @@ export class LocalSpeechProvider implements SpeechProvider {
     // kind of residue speech.consent.retainAudio exists to prevent.
     let dir: string | undefined;
     try {
-      dir = await mkdtemp(join(tmpdir(), "aetheraclaw-stt-"));
+      dir = await mkdtemp(join(tmpdir(), "orion-stt-"));
       const audioPath = join(dir, `input.${extensionFor(mimeType)}`);
       await writeFile(audioPath, audio);
 
@@ -263,7 +263,7 @@ export class LocalSpeechProvider implements SpeechProvider {
     const spoken = text.slice(0, this.cfg.maxSpokenChars);
     let dir: string | undefined;
     try {
-      dir = await mkdtemp(join(tmpdir(), "aetheraclaw-tts-"));
+      dir = await mkdtemp(join(tmpdir(), "orion-tts-"));
       const outPath = join(dir, "speech.wav");
       const bin = resolveBinary(local.piperBin, this.env) ?? local.piperBin;
       const result = await run(bin, buildPiperArgs(local, outPath), spoken);

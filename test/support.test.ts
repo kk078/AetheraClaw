@@ -108,7 +108,7 @@ describe("failure classification", () => {
   });
 
   it("recognizes missing reference data as a limit, not a claim failure", () => {
-    const d = classifyFailure("MPFS RVU data not installed — drop mpfs.json into ~/.aetheraclaw/data");
+    const d = classifyFailure("MPFS RVU data not installed — drop mpfs.json into ~/.orion/data");
     expect(d.category).toBe("missing_reference_data");
     expect(d.nextSteps.join(" ")).toMatch(/not a failure of the claim/);
   });

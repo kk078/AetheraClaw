@@ -10,7 +10,7 @@ export async function startChat(opts: { base: string; sessionId?: string; forceN
       headers: { "content-type": "application/json" },
       body: JSON.stringify({}),
     }).catch(() => {
-      throw new Error(`Cannot reach gateway at ${opts.base} — start it with: aetheraclaw serve`);
+      throw new Error(`Cannot reach gateway at ${opts.base} — start it with: orion serve`);
     });
     const session = (await res.json()) as { id: string };
     sessionId = session.id;

@@ -1,6 +1,6 @@
 import { Container, getContainer } from "@cloudflare/containers";
 
-// ── The edge in front of AetheraClaw ─────────────────────────────────────────
+// ── The edge in front of Orion ─────────────────────────────────────────
 // Everything that reaches aetheraonline.com arrives here first. This Worker has
 // three jobs, and the order they run in is the security model:
 //
@@ -21,7 +21,7 @@ import { Container, getContainer } from "@cloudflare/containers";
 // disabled explicitly rather than left to default heuristics.
 
 export interface Env {
-  AETHERACLAW: DurableObjectNamespace<AetheraClawContainer>;
+  ORION: DurableObjectNamespace<OrionContainer>;
   SNAPSHOTS: R2Bucket;
   /** Shared secret the container requires. Held in Secrets Store. */
   GATEWAY_TOKEN: string;
@@ -31,7 +31,7 @@ export interface Env {
   ACCESS_AUD: string;
 }
 
-export class AetheraClawContainer extends Container<Env> {
+export class OrionContainer extends Container<Env> {
   defaultPort = 8080;
   // Long enough that a coder stepping away from a worklist does not come back
   // to a cold start and a snapshot restore, short enough that an idle tenant
@@ -39,9 +39,9 @@ export class AetheraClawContainer extends Container<Env> {
   sleepAfter = "20m";
 
   override envVars = {
-    AETHERACLAW_HOST: "0.0.0.0",
-    AETHERACLAW_PORT: "8080",
-    AETHERACLAW_HOME: "/data",
+    ORION_HOST: "0.0.0.0",
+    ORION_PORT: "8080",
+    ORION_HOME: "/data",
   };
 }
 
@@ -200,7 +200,7 @@ export default {
     const claims = await verifyAccessJwt(token, env);
     if (!claims) return new Response("Access session could not be verified.", { status: 403 });
 
-    const instance = getContainer(env.AETHERACLAW, tenantKey(claims.email));
+    const instance = getContainer(env.ORION, tenantKey(claims.email));
 
     // Re-sign the request for the origin. The container trusts the identity
     // headers ONLY when GATEWAY_TOKEN is correct, so this is where a request

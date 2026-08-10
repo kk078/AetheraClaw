@@ -215,7 +215,7 @@ describe("keeping secrets out of tool output", () => {
     // one path to it, and `env`, `grep`, and a script that echoes it are others.
     for (const reached of [
       "ANTHROPIC_API_KEY=sk-ant-api03-REALKEYVALUE",
-      "/root/.aetheraclaw/credentials.json: sk-ant-api03-REALKEYVALUE",
+      "/root/.orion/credentials.json: sk-ant-api03-REALKEYVALUE",
       "Authorization: Bearer sk-ant-api03-REALKEYVALUE",
     ]) {
       expect(redactSecrets(reached, secrets)).not.toContain("REALKEYVALUE");
@@ -238,9 +238,9 @@ describe("keeping secrets out of tool output", () => {
 describe("commands that name a credentials file", () => {
   it("escalates what was previously auto-approved", () => {
     // `cat` is on the auto-approved list, so before this `cat
-    // ~/.aetheraclaw/credentials.json` ran with no prompt at all.
-    expect(assessCommandRisk("cat ~/.aetheraclaw/credentials.json").level).toBe("confirm");
-    expect(assessCommandRisk("cat /root/.aetheraclaw/credentials.json").level).toBe("confirm");
+    // ~/.orion/credentials.json` ran with no prompt at all.
+    expect(assessCommandRisk("cat ~/.orion/credentials.json").level).toBe("confirm");
+    expect(assessCommandRisk("cat /root/.orion/credentials.json").level).toBe("confirm");
     expect(assessCommandRisk("head -5 .env").level).toBe("confirm");
   });
 
@@ -251,7 +251,7 @@ describe("commands that name a credentials file", () => {
 
   it("matches the file name, not a resolved path", () => {
     // A command may reach it by ~, by $HOME, by a relative path or by a glob.
-    expect(mentionsSecretFile("cat $HOME/.aetheraclaw/credentials.json")).toBe(true);
+    expect(mentionsSecretFile("cat $HOME/.orion/credentials.json")).toBe(true);
     expect(mentionsSecretFile("cat ../../credentials.json")).toBe(true);
     expect(mentionsSecretFile("cat notes.md")).toBe(false);
   });
@@ -284,7 +284,7 @@ describe("secret redaction covers non-provider secrets", () => {
     const { configuredSecretValues } = await import("../src/config/credentials.js");
     const env = {
       PAYER_PORTAL_PW: "hunter2-superlong-portal-password",
-      AETHERACLAW_IMAP_PASSWORD: "imap-password-verylong-1234",
+      ORION_IMAP_PASSWORD: "imap-password-verylong-1234",
       TWILIO_AUTH_TOKEN: "twilio-auth-token-abcdef123456",
     } as unknown as NodeJS.ProcessEnv;
     const cfg = {

@@ -1,5 +1,6 @@
 import path from "node:path";
 import { configDir, type Config } from "../config/config.js";
+import { resolveDbFile } from "../config/legacy.js";
 import { MemoryStore } from "../memory/store.js";
 import { TenantRegistry, SINGLE_TENANT } from "./registry.js";
 import type { Tenant } from "./tenant.js";
@@ -36,7 +37,7 @@ export function resolveStore(config: Config, tenantSlug?: string): Resolved {
         `--tenant was given but tenancy is disabled. Set tenancy.enabled in config.json5 first; until then there is one database and naming a tenant would be misleading about what is isolated.`,
       );
     }
-    return { store: new MemoryStore(path.join(configDir(), "aetheraclaw.db")), tenant: SINGLE_TENANT };
+    return { store: new MemoryStore(resolveDbFile(configDir())), tenant: SINGLE_TENANT };
   }
 
   const slug = (tenantSlug || config.tenancy.defaultTenant).trim();
@@ -54,7 +55,7 @@ export function resolveStore(config: Config, tenantSlug?: string): Resolved {
     const names = known.list().map((t) => t.slug);
     known.close();
     throw new Error(
-      `${opened.ok ? "Tenant opened without a store." : opened.reason} Known tenants: ${names.length > 0 ? names.join(", ") : "(none — create one with `aetheraclaw tenants create`)"}`,
+      `${opened.ok ? "Tenant opened without a store." : opened.reason} Known tenants: ${names.length > 0 ? names.join(", ") : "(none — create one with `orion tenants create`)"}`,
     );
   }
   return { store: opened.store, tenant: opened.scope.tenant, registry };

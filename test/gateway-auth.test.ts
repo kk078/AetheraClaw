@@ -63,7 +63,7 @@ describe("authorizeRequest when exposed", () => {
     const d = authorizeRequest({ exposure: "exposed", headers: {}, expectedToken: "" });
     expect(d.ok).toBe(false);
     expect(d.status).toBe(500);
-    expect(d.why).toMatch(/AETHERACLAW_GATEWAY_TOKEN/);
+    expect(d.why).toMatch(/ORION_GATEWAY_TOKEN/);
   });
 
   it("refuses a request with no edge token", () => {
