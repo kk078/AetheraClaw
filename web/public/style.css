@@ -34,6 +34,19 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* ── Why body is a column ────────────────────────────────────────────────────
+   The PHI posture banner is prepended to <body>, and `.app` is `height: 100vh`.
+   Together that made the document 100vh PLUS the banner: the whole shell was
+   pushed down and the page — not the app — grew a scrollbar. Everything looked
+   normal until you needed the BOTTOM of the rail, which was now under the fold,
+   and "Providers & keys" is the last item in it.
+
+   Laying body out as a column and letting `.app` take the remaining space keeps
+   the shell exactly one viewport tall no matter how many banners appear above
+   it. `overflow: hidden` states the invariant: this document never scrolls,
+   only the panes inside it do. */
+body { display: flex; flex-direction: column; overflow: hidden; }
+
 /* Ambient field — two slow-drifting radial washes. Purely decorative,
    pointer-events none so it never eats a click. */
 body::before {
@@ -59,7 +72,11 @@ a { color: var(--accent); text-decoration: none; }
   grid-template-columns: var(--rail) 1fr;
   grid-template-rows: 52px 1fr;
   grid-template-areas: "brand top" "rail main";
-  height: 100vh;
+  /* `flex: 1` with `min-height: 0` rather than `height: 100vh` — see the note on
+     `body` above. A fixed 100vh here is what pushed the rail under the fold as
+     soon as anything was prepended to the document. */
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .brand {
@@ -115,7 +132,13 @@ a { color: var(--accent); text-decoration: none; }
   border-right: 1px solid var(--line);
   background: var(--panel);
   display: flex; flex-direction: column;
-  overflow: hidden;
+  /* `hidden` here meant that on any viewport too short for eighteen nav items
+     the ones at the bottom were CLIPPED WITH NO WAY TO REACH THEM — not
+     scrolled off, simply gone. "Providers & keys" is the last item, so on a
+     laptop the screen for entering an API key was the first thing to disappear.
+     A navigation rail must always be able to reach its own last entry. */
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 .rail nav { padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; }
 .rail .navitem {
@@ -889,6 +912,9 @@ text.ring-txt { fill: var(--ink); font-size: 15px; font-family: var(--mono); fon
    at the top of the document flow rather than fixed, so it cannot cover the
    console on a small screen and never needs dismissing. */
 .posture-banner {
+  /* Never shrinks and never grows: it is a fixed strip above the shell, and the
+     shell absorbs the remaining height. */
+  flex: 0 0 auto;
   padding: 0.6rem 1rem;
   background: #4a3a12;
   color: #f5e6c8;

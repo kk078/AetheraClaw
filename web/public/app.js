@@ -19,9 +19,24 @@ const state = {
 
 // ── Navigation ─────────────────────────────────────────────────────────
 
+/** The views a URL fragment may name. Anything else is ignored rather than
+    blanking every panel, which is what an unknown id would otherwise do. */
+const VIEWS = ["overview", "console", "modules", "providers", "workbench"];
+
 function show(view) {
+  if (!VIEWS.includes(view)) return;
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${view}`));
   document.querySelectorAll(".navitem").forEach((n) => n.classList.toggle("active", n.dataset.view === view));
+  // A URL for the screen you are on. Until now there was none: every panel
+  // lived at the same address, so a screen could only be reached by finding and
+  // clicking its rail item — and if that item was hard to reach, the screen was
+  // unreachable with no alternative. /#providers now goes straight there, and
+  // is something that can be sent to somebody.
+  //
+  // replaceState, not a hash assignment: writing location.hash would push a
+  // history entry per click and turn Back into an undo of navigation the user
+  // does not think of as navigation.
+  if (location.hash !== `#${view}`) history.replaceState(null, "", `#${view}`);
   if (view === "console") $("#input").focus();
   // Loaded on open rather than at boot: it reads the credentials file, and
   // there is no reason to touch that on every page load of a console nobody
@@ -1093,6 +1108,10 @@ async function loadProviderNotice() {
 }
 
 (async function boot() {
+  // Honour the fragment before anything else paints, so a link to /#providers
+  // opens on that screen rather than flashing the dashboard first.
+  const wanted = location.hash.replace(/^#/, "");
+  if (VIEWS.includes(wanted)) show(wanted);
   await Promise.all([loadPosture(), loadOverview(), loadModules(), loadSessions(), loadProviderNotice()]);
 })();
 
