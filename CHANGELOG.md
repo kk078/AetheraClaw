@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.1 — 2026-08-10
+
+- Phases 1–3: encryption at rest, the clearinghouse seam, and tool routing (#16)
+
+
 ## v0.3.0 — 2026-08-10
 
 - feat(phase-1): PHI mode, a shared detector, and a gateway that refuses to start (#15)
