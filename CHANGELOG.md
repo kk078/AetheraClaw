@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.0 — 2026-08-10
+
+- feat(phase-1): PHI mode, a shared detector, and a gateway that refuses to start (#15)
+
+
 ## v0.2.5 — 2026-08-10
 
 - fix: live provider in the header, plus Phase 0 production roadmap (#14)
