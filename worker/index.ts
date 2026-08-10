@@ -29,7 +29,32 @@ export interface Env {
   ACCESS_TEAM_DOMAIN: string;
   /** The Access application's AUD tag. A JWT for another app must not work here. */
   ACCESS_AUD: string;
+
+  // ── Model provider keys ────────────────────────────────────────────────────
+  // All optional, and whichever are set are forwarded to the container. Listed
+  // individually rather than swept up generically because a Worker's `env` also
+  // carries the gateway token, the bindings and the Access identifiers, and
+  // "forward everything that looks like a key" is how a secret ends up in a
+  // process that had no business holding it.
+  ANTHROPIC_API_KEY?: string;
+  OPENAI_API_KEY?: string;
+  GEMINI_API_KEY?: string;
+  OLLAMA_API_KEY?: string;
 }
+
+/**
+ * The provider keys the gateway reads, by the exact names it reads them under.
+ *
+ * src/config/config.ts derives the variable from the provider name — anthropic
+ * becomes ANTHROPIC_API_KEY, the rest are `${NAME}_API_KEY` — so these strings
+ * have to match that derivation or the key arrives and is never looked at.
+ */
+const PROVIDER_KEY_NAMES = [
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+  "GEMINI_API_KEY",
+  "OLLAMA_API_KEY",
+] as const;
 
 export class OrionContainer extends Container<Env> {
   defaultPort = 8080;
@@ -65,11 +90,22 @@ export class OrionContainer extends Container<Env> {
   constructor(...args: ConstructorParameters<typeof Container<Env>>) {
     super(...args);
     const env = args[1];
+    const providerKeys: Record<string, string> = {};
+    for (const name of PROVIDER_KEY_NAMES) {
+      const value = env[name];
+      // Only the ones actually set. Forwarding "" would be worse than omitting
+      // it: resolveProvider treats a present-but-empty key as a configured
+      // provider and picks it, then every turn fails against the model instead
+      // of the startup saying plainly that no provider is configured.
+      if (value) providerKeys[name] = value;
+    }
+
     this.envVars = {
       ORION_HOST: "0.0.0.0",
       ORION_PORT: "8080",
       ORION_HOME: "/data",
       ORION_GATEWAY_TOKEN: env.GATEWAY_TOKEN,
+      ...providerKeys,
     };
   }
 }

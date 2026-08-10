@@ -100,6 +100,39 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: echo -n "${{ secrets.GATEWAY_TOKEN }}" | npx wrangler secret put GATEWAY_TOKEN
 
+      # ── The model provider key ────────────────────────────────────────────
+      # Whichever of these repository secrets exist are pushed; the rest are
+      # skipped. Optional rather than required because the deployment is
+      # perfectly valid with none — the console, the seeded data, the KPIs and
+      # the worklist all work — it is only the agent's turns that need a model.
+      #
+      # Read from `env` rather than interpolated into the command: a secret in a
+      # shell argument is visible in `ps` to anything else on the runner, and
+      # this loop would put four of them there.
+      - name: Push whichever provider keys are configured
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+        run: |
+          pushed=""
+          for name in ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY OLLAMA_API_KEY; do
+            value="${!name}"
+            if [ -n "$value" ]; then
+              printf '%s' "$value" | npx wrangler secret put "$name"
+              pushed="$pushed $name"
+            fi
+          done
+          if [ -z "$pushed" ]; then
+            echo "No provider key secrets are set. The console will deploy and work;"
+            echo "the agent will have no model to talk to until one is added."
+          else
+            echo "Pushed provider key(s):$pushed"
+          fi
+
       - name: Deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
