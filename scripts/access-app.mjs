@@ -33,7 +33,7 @@ function die(message) {
 
 if (!accountId) die("CLOUDFLARE_ACCOUNT_ID is not set.");
 if (!token) die("CLOUDFLARE_API_TOKEN is not set.");
-if (!hostname) die("ACCESS_HOSTNAME is not set (e.g. app.aetheraonline.com).");
+if (!hostname) die("ACCESS_HOSTNAME is not set (e.g. orion.aetheraonline.com).");
 if (emails.length === 0) {
   die(
     "ACCESS_EMAILS is empty. An Access application with no policy admits NOBODY, " +

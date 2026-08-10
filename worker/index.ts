@@ -38,11 +38,40 @@ export class OrionContainer extends Container<Env> {
   // is not billed for a live instance all night.
   sleepAfter = "20m";
 
-  override envVars = {
-    ORION_HOST: "0.0.0.0",
-    ORION_PORT: "8080",
-    ORION_HOME: "/data",
-  };
+  /**
+   * The container's environment, built in the constructor rather than declared
+   * as a literal — because one of these values is a SECRET and only exists on
+   * `env`.
+   *
+   * ORION_GATEWAY_TOKEN is the entire reason this is not a static object. The
+   * origin compares the edge's header against it, and src/gateway/auth.ts is
+   * deliberately fail-closed: bound to 0.0.0.0 with no token configured, it
+   * refuses EVERY request with a 500.
+   *
+   * So omitting it does not produce a broken-looking deployment. It produces a
+   * deploy that reports success, a /healthz that answers 200 because the probe
+   * is deliberately unauthenticated, and a 500 on every actual page — green
+   * everywhere a machine looks and dead everywhere a person does. That is the
+   * worst failure shape available here, and it is why this is a constructor.
+   *
+   * The token reaches the container as an environment variable and never as a
+   * layer in the image: `wrangler secret put` holds it encrypted, and an image
+   * is copied, cached and shared in ways a secret must not be.
+   */
+  // `ConstructorParameters` rather than spelling the type out: the base takes
+  // `DurableObject['ctx']`, and writing `DurableObjectState` here resolves to a
+  // different generic instantiation that does not match. Deriving it from the
+  // class cannot drift when the library changes it.
+  constructor(...args: ConstructorParameters<typeof Container<Env>>) {
+    super(...args);
+    const env = args[1];
+    this.envVars = {
+      ORION_HOST: "0.0.0.0",
+      ORION_PORT: "8080",
+      ORION_HOME: "/data",
+      ORION_GATEWAY_TOKEN: env.GATEWAY_TOKEN,
+    };
+  }
 }
 
 // ── Access JWT verification ──────────────────────────────────────────────────

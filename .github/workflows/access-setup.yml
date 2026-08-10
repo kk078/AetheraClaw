@@ -17,7 +17,7 @@ on:
       hostname:
         description: "Hostname to protect"
         required: true
-        default: "app.aetheraonline.com"
+        default: "orion.aetheraonline.com"
         type: string
       emails:
         description: "Comma-separated emails allowed in (everyone who needs to see the demo)"
