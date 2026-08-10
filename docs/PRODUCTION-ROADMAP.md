@@ -209,7 +209,20 @@ Updated as each phase lands. Unchecked means not started or not finished — it
 does not mean "mostly done".
 
 - [x] **Phase 0** — this document
-- [ ] **Phase 1** — PHI mode, `src/compliance/phi-detect.ts`, encryption at rest, gateway refuses to *start* when exposed without a token, `docs/DEPLOY-PRODUCTION.md`
+- [ ] **Phase 1** — PHI mode. **Partly landed.** Ticking this box needs all five:
+  - [x] `src/compliance/phi-detect.ts` — patterns moved out of the email
+        classifier; `detectPhi` frozen so the ingress gate is unchanged;
+        `scanText` + `phiVerdict` added for the wider production scan
+  - [x] `healthcare.phiMode` config, chat gate before persistence, production
+        system-prompt variant, `docs/DEPLOY-PRODUCTION.md`
+  - [x] Gateway refuses to **start** when exposed without a token;
+        `orion serve --check-production`; two config combinations refused
+  - [ ] Encryption at rest — `ORION_ENCRYPTION_KEY` is checked for and warned
+        about; nothing encrypts `documents.text` yet. Deferred rather than
+        half-built: a partly-tested encryption layer over PHI is worse than a
+        documented absence
+  - [ ] Per-file upload acknowledgment, retention enforcement, and shell/fs
+        confirmation over credential and document paths in PHI mode
 - [ ] **Phase 2** — `ClearinghouseConnector` + one real implementation, credential storage, submission audit trail, `docs/CLEARINGHOUSE-SETUP.md`
 - [ ] **Phase 3** — intent router, pinned tools, structured context compaction, correctness eval
 - [ ] **Phase 4** — `orion data refresh|status`, startup staleness warning, per-profile required datasets

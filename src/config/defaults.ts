@@ -45,6 +45,11 @@ export const DEFAULT_CONFIG_JSON5 = `{
     // "cpt" reads CPT descriptors, which are copyright the AMA.
     // referenceDbLicensedRoles: [],
     clearinghouse: "mock",
+    // "education" or "production". Production refuses anything that might
+    // identify a patient rather than guessing, requires an acknowledgment per
+    // uploaded file, and tells the model it is working on real records.
+    // Separate from ORION_PHI, which decides whether PHI may be STORED at all.
+    phiMode: "education",
   },
 
   // Email channel. Disabled until a mailbox is configured; passwords come from

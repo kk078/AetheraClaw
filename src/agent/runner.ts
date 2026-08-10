@@ -52,7 +52,7 @@ function loadHistory(store: MemoryStore, sessionId: string): NormalizedMessage[]
 // (through the approval-gated registry), persist results, repeat until done.
 export async function runTurn(deps: RunnerDeps, sessionId: string, userText: string): Promise<void> {
   const { provider, registry, store, config, emit } = deps;
-  const system = buildSystemPrompt(config.workspaceRoot);
+  const system = buildSystemPrompt(config.workspaceRoot, config.healthcare.phiMode);
 
   try {
     // Inside the try: the first persist can throw (SQLITE_BUSY from a second

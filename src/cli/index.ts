@@ -138,6 +138,8 @@ import {
 import { SessionManager } from "../gateway/session-manager.js";
 import { buildServer } from "../gateway/server.js";
 import { classifyBind, isPublicAccess } from "../gateway/auth.js";
+import { checkProduction, renderProductionReport } from "../config/production-check.js";
+import { resolvePosture } from "../config/posture.js";
 import { listDocuments, purgeDocuments } from "../ingest/store.js";
 import { ALL_PROVIDERS, evaluateSet, importFromEnv, promptHidden, renderList } from "./auth.js";
 import { credentialsPath, knownSecretValues, maskKey, removeCredential, setCredential } from "../config/credentials.js";
@@ -165,7 +167,8 @@ program
   .option("--profile <name>", "tool profile — see `orion providers`")
   .option("--tenant <slug>", "tenant to serve (multi-tenant installs only)")
   .option("--workspace <path>", "where files are written this run — overrides workspaceRoot in config.json5")
-  .action(async (opts: { port?: string; host?: string; provider?: string; profile?: string; tenant?: string; workspace?: string }) => {
+  .option("--check-production", "run the production readiness checks and exit without starting")
+  .action(async (opts: { port?: string; host?: string; provider?: string; profile?: string; tenant?: string; workspace?: string; checkProduction?: boolean }) => {
     const config = loadConfig();
     if (opts.port) config.gateway.port = Number(opts.port);
     if (opts.host) config.gateway.host = opts.host;
@@ -186,6 +189,33 @@ program
       // nobody where their appeals actually landed.
       config.workspaceRoot = path.resolve(expandHome(opts.workspace));
       fs.mkdirSync(config.workspaceRoot, { recursive: true });
+    }
+
+    // ── Refuse to start, not to serve ──────────────────────────────────────
+    // Before a provider is resolved, a store is opened or a port is bound —
+    // there is no point doing any of that for a process that must not run.
+    //
+    // The gateway already refused every REQUEST when exposed with no secret,
+    // which is correct and is also an outage that reports itself as a 500 on
+    // every page. An operator reading a boot log finds this in seconds; an
+    // operator reading a 500 spends an afternoon on it.
+    const exposure = classifyBind(config.gateway.host);
+    const report = checkProduction({
+      exposure,
+      gatewayToken: readEnv("GATEWAY_TOKEN") ?? "",
+      phiMode: config.healthcare.phiMode,
+      approvalPolicy: config.approvalPolicy,
+      publicAccess: isPublicAccess(readEnv("PUBLIC")),
+      encryptionKey: readEnv("ENCRYPTION_KEY") ?? "",
+      posture: resolvePosture({ exposure }).posture,
+    });
+    if (opts.checkProduction) {
+      console.log(renderProductionReport(report));
+      process.exit(report.fatal ? 1 : 0);
+    }
+    if (report.fatal) {
+      console.error(renderProductionReport(report));
+      process.exit(1);
     }
 
     const choice = resolveProvider(config, { explicit: opts.provider });

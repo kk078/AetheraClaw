@@ -32,7 +32,25 @@ export type AccessAction = "read" | "write" | "export" | "print" | "delete" | "a
 /** Actions after which the organisation no longer controls the copy. */
 export const DISCLOSING_ACTIONS: ReadonlySet<AccessAction> = new Set(["export", "print"]);
 
-export type ResourceType = "claim" | "remittance" | "patient_account" | "document" | "worklist_item" | "report" | "appeal";
+export type ResourceType =
+  | "claim"
+  | "remittance"
+  | "patient_account"
+  | "document"
+  | "worklist_item"
+  | "report"
+  | "appeal"
+  /**
+   * A chat turn the PHI gate refused.
+   *
+   * The only resource type here that records something which did NOT happen —
+   * the message reached no model and was written to no transcript. It is
+   * logged because "somebody pasted an identifier into the chat box" is exactly
+   * the event an incident review needs to find, and it leaves no other trace
+   * precisely BECAUSE the gate worked. `recordCount` is 0 on these rows, which
+   * is how a reviewer tells a refusal from an access.
+   */
+  | "chat_message";
 
 export interface AccessEvent {
   action: AccessAction;
