@@ -213,61 +213,27 @@ export function extractClaimRefs(text: string): string[] {
 }
 
 // ── PHI detection ────────────────────────────────────────────────────────────
-// This deployment is not approved for real patient data, and an inbox is exactly
-// where PHI arrives unasked. Detection is deliberately eager: a false positive
-// costs a human a glance, a false negative puts real PHI into a session
-// transcript and a SQLite file that were never meant to hold it.
-
-/** MBIs use 20 letters — A–Z without S, L, O, I, B or Z, which read too much alike. */
-const MBI_LETTER = "[ACDEFGHJKMNPQRTUVWXY]";
-const MBI_ALNUM = "[ACDEFGHJKMNPQRTUVWXY0-9]";
-export const MBI_PATTERN = new RegExp(
-  // Hyphens are optional because the card prints them (1EG4-TE5-MK73) and people
-  // read them out that way. Requiring the unbroken form missed the commonest
-  // written spelling of the identifier this pattern exists to catch.
-  `\\b[1-9]${MBI_LETTER}${MBI_ALNUM}\\d-?${MBI_LETTER}${MBI_ALNUM}\\d-?${MBI_LETTER}${MBI_LETTER}\\d\\d\\b`,
-  "g",
-);
-
-export const SSN_PATTERN = /\b\d{3}-\d{2}-\d{4}\b/g;
-export const DOB_PATTERN = /\b(?:DOB|date\s+of\s+birth)\b\s*[:#]?\s*\d{1,2}[/-]\d{1,2}[/-]\d{2,4}/gi;
-/** The legacy Medicare number: an SSN with a beneficiary suffix. */
-export const HICN_PATTERN = /\b\d{9}[A-Z]{1,2}\d?\b/g;
-
-export interface PhiSignal {
-  kind: "mbi" | "ssn" | "dob" | "hicn";
-  count: number;
-  /** Never the value itself — only enough to find it in the source. */
-  hint: string;
-}
-
-export function detectPhi(text: string): PhiSignal[] {
-  const out: PhiSignal[] = [];
-  const check = (kind: PhiSignal["kind"], pattern: RegExp, hint: string) => {
-    const matches = [...text.matchAll(new RegExp(pattern.source, pattern.flags))];
-    if (matches.length > 0) out.push({ kind, count: matches.length, hint });
-  };
-  check("ssn", SSN_PATTERN, "a Social Security number pattern");
-  check("mbi", MBI_PATTERN, "a Medicare Beneficiary Identifier pattern");
-  check("hicn", HICN_PATTERN, "a legacy Medicare (HICN) pattern");
-  check("dob", DOB_PATTERN, "a labelled date of birth");
-  return out;
-}
-
-/**
- * Replace identifier-shaped text with a marker.
- *
- * This makes a message safe to READ without making it safe to keep: redaction is
- * pattern matching, and a name and a diagnosis in prose are still PHI with no
- * pattern to catch them. The channel quarantines rather than relying on this.
- */
-export function redact(text: string): string {
-  return text
-    .replace(new RegExp(SSN_PATTERN.source, "g"), "[REDACTED-SSN]")
-    .replace(new RegExp(MBI_PATTERN.source, "g"), "[REDACTED-MBI]")
-    .replace(new RegExp(HICN_PATTERN.source, "g"), "[REDACTED-HICN]")
-    .replace(new RegExp(DOB_PATTERN.source, "gi"), "[REDACTED-DOB]");
-}
+// The patterns and both detectors now live in src/compliance/phi-detect.ts and
+// are re-exported here.
+//
+// They were defined in this file, and twenty-one modules across ingest, speech,
+// voice, browser policy and the ingress posture gate import them from the EMAIL
+// CLASSIFIER — which is an accident of the order things were built, and a
+// strange place for the rule that decides whether a deployment may keep a
+// document. Moving the definitions and re-exporting means the correction cost
+// no caller a change; the imports can move file by file, or never, and nothing
+// breaks either way.
+export {
+  MBI_PATTERN,
+  SSN_PATTERN,
+  DOB_PATTERN,
+  HICN_PATTERN,
+  detectPhi,
+  redact,
+  type PhiSignal,
+} from "../../compliance/phi-detect.js";
+import { detectPhi, redact } from "../../compliance/phi-detect.js";
+import type { PhiSignal } from "../../compliance/phi-detect.js";
 
 export interface InboundMessage {
   id: string;

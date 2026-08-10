@@ -82,6 +82,30 @@ export const ConfigSchema = z.object({
       // default cannot be a decision about somebody else's licence.
       referenceDbLicensedRoles: z.array(z.string()).default([]),
       clearinghouse: z.string().default("mock"),
+      // ── How this deployment behaves around patient data ────────────────────
+      // Distinct from ORION_PHI / src/config/posture.ts, and the distinction is
+      // load-bearing. The posture answers a LEGAL question — may this
+      // deployment store protected health information at all. This answers an
+      // OPERATIONAL one — how careful is it being while it runs.
+      //
+      // Collapsing them into one setting was considered and rejected: the day a
+      // BAA is signed, somebody flips the posture, and if that same edit also
+      // silently relaxed chat screening, upload acknowledgment and the system
+      // prompt, nobody would have reviewed those three changes.
+      //
+      //   education   today's behaviour. High-confidence identifiers are still
+      //               refused — an education deployment that lets a labelled
+      //               SSN into a transcript is not educating anyone — but a
+      //               phone number or a date near the word "patient" is not
+      //               treated as a reason to stop.
+      //   production  anything that MIGHT identify a patient is refused rather
+      //               than guessed about, uploads need a per-file
+      //               acknowledgment, and the model is told it is working on
+      //               real records.
+      //
+      // Defaults to education, so upgrading and changing nothing changes
+      // nothing.
+      phiMode: z.enum(["education", "production"]).default("education"),
     })
     .default({}),
   email: z

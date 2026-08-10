@@ -6,6 +6,8 @@ import type { AgentEvent } from "../shared/events.js";
 import { createProvider } from "../providers/index.js";
 import { runTurn } from "../agent/runner.js";
 import { ApprovalRegistry } from "./approvals.js";
+import { phiVerdict, scanText } from "../compliance/phi-detect.js";
+import { recordAccess } from "../tenancy/store.js";
 
 interface SessionState {
   subscribers: Set<WebSocket>;
@@ -73,6 +75,50 @@ export class SessionManager {
       this.broadcast(sessionId, { type: "error", sessionId, message: "unknown session" });
       return;
     }
+
+    // ── The PHI gate, before anything ──────────────────────────────────────
+    // Here rather than inside runTurn, because runTurn's first act is to
+    // persist the user message. Screening after that point would mean the
+    // identifier had already been written to the transcript, replicated into
+    // the WAL and carried into the next snapshot — and deleting it afterwards
+    // does not unwrite any of that. The bytes having arrived is precisely what
+    // the agreement is about.
+    //
+    // What the two modes do differs in one place only: whether a MEDIUM
+    // confidence shape — a date beside the word "patient", a phone number — is
+    // enough to stop. A high-confidence identifier is refused in both, because
+    // an education deployment that lets a labelled SSN into a transcript is not
+    // educating anyone about anything.
+    const verdict = phiVerdict(scanText(text), this.config.healthcare.phiMode);
+    if (!verdict.allow) {
+      // Reference only, and recordCount 0 — nothing was read, nothing was
+      // stored. The row exists because "somebody pasted an identifier into the
+      // chat box" is exactly the event an incident review needs to find, and
+      // the gate working is what stops it leaving any other trace.
+      //
+      // The KINDS are logged, never the text. A log that quoted what it refused
+      // would be the second copy of the record that src/tenancy/access-log.ts
+      // exists to prevent.
+      recordAccess(this.store, {
+        action: "write",
+        resourceType: "chat_message",
+        resourceRef: `session:${sessionId}`,
+        actor: "operator",
+        tenantSlug: "",
+        sourceAddress: "",
+        recordCount: 0,
+        at: Date.now(),
+      });
+      this.broadcast(sessionId, {
+        type: "phi_blocked",
+        sessionId,
+        why: verdict.why,
+        kinds: verdict.kinds,
+        mode: this.config.healthcare.phiMode,
+      });
+      return;
+    }
+
     state.running = true;
     try {
       const provider = createProvider(this.config, session.provider as Config["provider"]);
