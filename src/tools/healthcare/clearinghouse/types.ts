@@ -174,7 +174,13 @@ export function summariseEligibility(
           "This is not a statement about coverage — it means the enquiry did not reach a member record."
       : "The payer did not identify this patient, and gave no reason. Nothing here says whether coverage exists.";
   }
-  const active = benefits.filter((b) => /active/i.test(b.code) || /active/i.test(b.name));
+  // NOT /active/i — "Inactive" contains "active", and the naive test read a
+  // TERMINATED plan as confirmed coverage. That is the worst wrong answer this
+  // function can give: a biller told a patient is covered when the payer just
+  // said the plan ended will bill a claim that is guaranteed to be denied, and
+  // will have told the patient something false at the desk. Caught by the mock
+  // connector's inactive scenario, which exists precisely to be this tripwire.
+  const active = benefits.filter((b) => /\bactive\b/i.test(b.name) && !/inactive/i.test(b.name));
   if (active.length === 0) {
     return "The payer identified this patient and returned no active coverage for the service types asked about.";
   }

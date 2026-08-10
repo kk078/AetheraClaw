@@ -231,7 +231,22 @@ does not mean "mostly done".
         asks, even for a command that is read-only by every other test. `grep -r
         1EG4 /data` was a search of every stored document with no prompt and no
         access row
-- [ ] **Phase 2** — `ClearinghouseConnector` + one real implementation, credential storage, submission audit trail, `docs/CLEARINGHOUSE-SETUP.md`
+- [ ] **Phase 2** — clearinghouse. **This phase cannot be fully ticked by
+  testing**, and that is a permanent property rather than a temporary gap:
+  - [x] `ClearinghouseConnector`, `MockConnector`, `getConnector`, config on two
+        axes (which vendor, and whether it reaches real payers)
+  - [x] Stedi eligibility, **verified against the live sandbox** — auth scheme,
+        request shape, response parsing, and all three rejection codes (71 DOB
+        mismatch, 72 unknown member, 79 invalid participant)
+  - [ ] A successful benefits response — Stedi's mock values sit behind
+        interactive accordions; the member IDs were recovered but not the dates
+  - [ ] **Submit / status / ERA against a real network — NOT POSSIBLE.**
+        Stedi's sandbox plan covers eligibility ONLY. Those three unlock on the
+        production plan, which by Stedi's own wording means sending real claims
+        to real payers. **There is no test network for the 837 path.** They are
+        built and tested against the mock connector, and the Stedi connector
+        refuses them with the reason. Ticking this box requires a supervised
+        first live submission — a business decision, not an engineering task.
 - [ ] **Phase 3** — intent router, pinned tools, structured context compaction, correctness eval
 - [ ] **Phase 4** — `orion data refresh|status`, startup staleness warning, per-profile required datasets
 - [ ] **Phase 5** — `/analytics.html`, `/forecast.html`, `/swarm.html`

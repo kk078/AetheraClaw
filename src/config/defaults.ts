@@ -45,6 +45,9 @@ export const DEFAULT_CONFIG_JSON5 = `{
     // "cpt" reads CPT descriptors, which are copyright the AMA.
     // referenceDbLicensedRoles: [],
     clearinghouse: "mock",
+    // "sandbox" or "production" — separate from the connector choice on
+    // purpose. Production means real claims to real payers.
+    clearinghouseEnv: "sandbox",
     // "education" or "production". Production refuses anything that might
     // identify a patient rather than guessing, requires an acknowledgment per
     // uploaded file, and tells the model it is working on real records.
