@@ -47,6 +47,8 @@ export interface Env {
   SPEECH_ENABLED?: string;
   /** "browser" | "local" | "cloud". See the note in the container constructor. */
   SPEECH_ENGINE?: string;
+  /** Origin the container posts its snapshot back to. Defaults to this hostname. */
+  SNAPSHOT_URL?: string;
 
   // ── Model provider keys ────────────────────────────────────────────────────
   // All optional, and whichever are set are forwarded to the container. Listed
@@ -161,6 +163,25 @@ export class OrionContainer extends Container<Env> {
       // move to the "local" engine or come back off.
       ORION_SPEECH: env.SPEECH_ENABLED === "0" ? "0" : "1",
       ORION_SPEECH_ENGINE: env.SPEECH_ENGINE || "browser",
+      // ── Where the container sends its snapshot ─────────────────────────────
+      // Back through this same Worker, which holds the R2 binding a container
+      // cannot hold itself. That indirection is also the access control: the
+      // container never carries an R2 credential it could leak, only the shared
+      // token, which handleSnapshot below checks.
+      //
+      // Left unset until now because Cloudflare Access sat in front of this
+      // hostname and the container had no session, so every callback would have
+      // been redirected to a login page. Access is gone, so the path works —
+      // and until it did, everything the operator typed into the console
+      // (including a provider key) vanished at the next cold start.
+      //
+      // ONE TENANT ONLY. The snapshot keys are fixed names, so two tenants
+      // would share them and overwrite each other. That is safe exactly while
+      // PUBLIC_ACCESS is on, because public mode pins every request to a single
+      // instance (PUBLIC_TENANT above). Restoring Access — which is what brings
+      // back per-domain tenants — means giving each one its own key prefix
+      // first, and this comment is the reminder that it is not optional.
+      ORION_SNAPSHOT_URL: env.SNAPSHOT_URL || "https://orion.aetheraonline.com",
       ...providerKeys,
     };
   }

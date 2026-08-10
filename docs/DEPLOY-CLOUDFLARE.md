@@ -101,6 +101,30 @@ Checkpoint interval is `ORION_CHECKPOINT_MS` (default 60s). The exposure
 window on a hard crash is that interval — the WAL is flushed on a clean SIGTERM,
 which is the path Cloudflare uses to stop an idle instance.
 
+**What travels with the database.** `credentials.json` and `config.json5` are
+snapshotted alongside it. Without that, a provider key typed into the *Providers
+& keys* screen was gone at the next cold start — roughly twenty idle minutes
+later — which from the operator's side is "I added a key and it did not save",
+and they were right.
+
+**Two failures this path used to have**, both fixed and worth knowing because
+each was silent:
+
+- The container never sent the shared token on its snapshot calls, and the
+  Worker's `/snapshot/` handler answers **401** without it. So setting
+  `ORION_SNAPSHOT_URL` did not turn on persistence — it turned on a 401 that
+  `restore()` treated as failure and *exited the process over*, taking the whole
+  deployment down on first boot. Nobody hit it only because the variable was
+  never set.
+- A failed restore called `process.exit(1)`. The instinct was right — an
+  instance that cannot read the snapshot must never write over it — but exiting
+  turned one bad environment variable into a total outage. It now starts with
+  **checkpointing disabled**, which protects the snapshot just as well and keeps
+  the console serving while somebody reads the log.
+
+The callback also needed Access to be gone: the container has no Access session,
+so every snapshot request would have been redirected to a login page.
+
 ## One-time setup
 
 None of this is done by the pipeline, because none of it should be automatic.
@@ -213,6 +237,11 @@ items below become live obligations rather than deferred ones.
   datasets exceed that will fail to start, not degrade.
 - The R2 snapshot scheme is durable against restarts, not against concurrent
   writers.
+- **The snapshot keys are fixed names, so they hold ONE tenant.** Safe exactly
+  while `PUBLIC_ACCESS` is on, because public mode pins every request to a single
+  container instance. Restoring Access brings back per-domain tenants, and each
+  one needs its own key prefix *before* that happens — otherwise two tenants
+  share a snapshot and the last to checkpoint erases the other.
 
 ### Demo data
 

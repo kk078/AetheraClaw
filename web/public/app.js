@@ -19,9 +19,24 @@ const state = {
 
 // ── Navigation ─────────────────────────────────────────────────────────
 
+/** The views a URL fragment may name. Anything else is ignored rather than
+    blanking every panel, which is what an unknown id would otherwise do. */
+const VIEWS = ["overview", "console", "modules", "providers", "workbench"];
+
 function show(view) {
+  if (!VIEWS.includes(view)) return;
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${view}`));
   document.querySelectorAll(".navitem").forEach((n) => n.classList.toggle("active", n.dataset.view === view));
+  // A URL for the screen you are on. Until now there was none: every panel
+  // lived at the same address, so a screen could only be reached by finding and
+  // clicking its rail item — and if that item was hard to reach, the screen was
+  // unreachable with no alternative. /#providers now goes straight there, and
+  // is something that can be sent to somebody.
+  //
+  // replaceState, not a hash assignment: writing location.hash would push a
+  // history entry per click and turn Back into an undo of navigation the user
+  // does not think of as navigation.
+  if (location.hash !== `#${view}`) history.replaceState(null, "", `#${view}`);
   if (view === "console") $("#input").focus();
   // Loaded on open rather than at boot: it reads the credentials file, and
   // there is no reason to touch that on every page load of a console nobody
@@ -1093,6 +1108,10 @@ async function loadProviderNotice() {
 }
 
 (async function boot() {
+  // Honour the fragment before anything else paints, so a link to /#providers
+  // opens on that screen rather than flashing the dashboard first.
+  const wanted = location.hash.replace(/^#/, "");
+  if (VIEWS.includes(wanted)) show(wanted);
   await Promise.all([loadPosture(), loadOverview(), loadModules(), loadSessions(), loadProviderNotice()]);
 })();
 
@@ -1153,22 +1172,72 @@ async function loadProviders() {
     const save = el("button", "btn sm", "Save");
     const msg = el("span", "provmsg");
 
-    save.addEventListener("click", async () => {
+    // Whether anything is actually usable right now. A key saved against a
+    // provider that is not the active one changes NOTHING an operator can see:
+    // the console still runs on the default (ollama, with no server to talk to
+    // on a hosted deployment) and the next turn fails exactly as it did before.
+    // "I added a key and nothing happened" is the correct description of that,
+    // and it is a design fault rather than a misunderstanding.
+    const nothingUsable = !data.providers.some((q) => q.source && q.source !== "none");
+
+    const submitKey = async () => {
       const key = input.value.trim();
-      if (!key) return;
+      if (!key) {
+        msg.textContent = "paste a key first";
+        return;
+      }
       save.disabled = true;
-      const res = await fetch("/api/providers/key", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ provider: p.name, key }),
-      });
-      const out = await res.json();
-      // Cleared immediately whatever happened — a key left in an input is a key
-      // in the DOM for as long as the tab is open.
-      input.value = "";
-      save.disabled = false;
-      msg.textContent = res.ok ? `saved ${out.masked}${out.warning ? ` — ${out.warning}` : ""}` : `failed: ${out.error}`;
-      if (res.ok) setTimeout(loadProviders, 900);
+      msg.textContent = "saving…";
+      try {
+        const res = await fetch("/api/providers/key", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ provider: p.name, key }),
+        });
+        const out = await res.json().catch(() => ({}));
+        // Cleared immediately whatever happened — a key left in an input is a
+        // key in the DOM for as long as the tab is open.
+        input.value = "";
+        if (!res.ok) {
+          msg.textContent = `failed: ${out.error || res.status}`;
+          return;
+        }
+        msg.textContent = `saved ${out.masked}${out.warning ? ` — ${out.warning}` : ""}`;
+
+        // Make it the active provider when nothing else was usable. Only then:
+        // silently switching away from a provider that WAS working would be a
+        // surprise, and a bad one on a machine where somebody chose it on
+        // purpose. With nothing usable there is no working choice to respect.
+        if (nothingUsable && !p.active) {
+          const sw = await fetch("/api/providers/settings", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ provider: p.name }),
+          });
+          if (sw.ok) msg.textContent += ` — and made ${p.name} the active provider`;
+        }
+      } catch (err) {
+        // Without this the throw escapes, `save.disabled` is never cleared and
+        // the button stays dead with no message: a control that looks broken
+        // rather than one that reports a failure.
+        msg.textContent = `failed: ${err instanceof Error ? err.message : String(err)}`;
+      } finally {
+        save.disabled = false;
+      }
+      setTimeout(loadProviders, 1600);
+    };
+
+    save.addEventListener("click", submitKey);
+    // Enter submits. Pasting a key and pressing Enter is what everyone does,
+    // and this field is not inside a <form>, so until now that keystroke did
+    // NOTHING AT ALL — no request, no message, no error. A silent no-op on the
+    // most natural gesture reads as a broken screen, which is exactly how it
+    // was reported.
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        void submitKey();
+      }
     });
     form.append(input, save, msg);
 
