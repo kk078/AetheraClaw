@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.1.2 — 2026-08-10
+
+- fix: make the release reach the deploy, and fail fast on Containers (#6)
+
+
 ## v0.1.1 — 2026-08-10
 
 - ORION: give the gateway a door, then a way to publish it (#5)
