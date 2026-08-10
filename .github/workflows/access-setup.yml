@@ -1,0 +1,91 @@
+name: Access setup
+
+# ── One click, and the deployment has a door ─────────────────────────────────
+# Creates the Cloudflare Access application in front of the hostname, prints its
+# AUD tag, and writes that tag into wrangler.jsonc — which is the one value the
+# Worker cannot be deployed without and which does not exist until the
+# application does.
+#
+# It runs here rather than on a laptop because the API token is a repository
+# secret: readable by a workflow and by nothing else, which is the property that
+# makes it a secret. Manual dispatch only — creating an Access application is
+# not something that should happen because somebody pushed a commit.
+
+on:
+  workflow_dispatch:
+    inputs:
+      hostname:
+        description: "Hostname to protect"
+        required: true
+        default: "app.aetheraonline.com"
+        type: string
+      emails:
+        description: "Comma-separated emails allowed in (everyone who needs to see the demo)"
+        required: true
+        type: string
+      session_duration:
+        description: "How long a session lasts before re-authentication"
+        required: false
+        default: "24h"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  access:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - id: access
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCESS_HOSTNAME: ${{ inputs.hostname }}
+          ACCESS_EMAILS: ${{ inputs.emails }}
+          ACCESS_SESSION_DURATION: ${{ inputs.session_duration }}
+        run: node scripts/access-app.mjs
+
+      # The AUD and the team domain are identifiers, not credentials — the AUD
+      # names which application a token was minted for, and the team domain is
+      # in every login URL. Committing them is what makes the deploy
+      # reproducible instead of depending on somebody pasting a value.
+      - name: Write the AUD into wrangler.jsonc
+        env:
+          AUD: ${{ steps.access.outputs.aud }}
+          TEAM_DOMAIN: ${{ steps.access.outputs.team_domain }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const file = "wrangler.jsonc";
+            let s = fs.readFileSync(file, "utf8");
+            const before = s;
+            s = s.replace(/("ACCESS_AUD"\s*:\s*")[^"]*(")/, `$1${process.env.AUD}$2`);
+            s = s.replace(/("ACCESS_TEAM_DOMAIN"\s*:\s*")[^"]*(")/, `$1${process.env.TEAM_DOMAIN}$2`);
+            if (s === before) { console.log("wrangler.jsonc already carries these values."); process.exit(0); }
+            fs.writeFileSync(file, s);
+            console.log("wrangler.jsonc updated.");
+          '
+
+      - name: Commit it
+        run: |
+          if git diff --quiet -- wrangler.jsonc; then
+            echo "Nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add wrangler.jsonc
+          git commit -m "Point the Worker at the Access application
+
+          The AUD tag is what stops a token minted for a different Access
+          application in this account verifying here. Written by
+          .github/workflows/access-setup.yml, which created the application."
+          git push origin HEAD:${{ github.ref_name }}
