@@ -238,8 +238,20 @@ does not mean "mostly done".
   - [x] Stedi eligibility, **verified against the live sandbox** — auth scheme,
         request shape, response parsing, and all three rejection codes (71 DOB
         mismatch, 72 unknown member, 79 invalid participant)
-  - [ ] A successful benefits response — Stedi's mock values sit behind
-        interactive accordions; the member IDs were recovered but not the dates
+  - [x] A successful benefits response — captured live: UnitedHealthcare,
+        thirty-eight benefit lines, no AAA segment. Until this landed the parser
+        was only ever proved against rejections, and a mapping that handles
+        every failure and mangles the success is a perfectly ordinary bug. The
+        fixture pins the parts a naive mapping loses: the cost-share amounts,
+        and the fact that individual and family deductibles are separate lines
+        that must not be collapsed
+  - [x] A claim across the seams — `test/claim-lifecycle.test.ts` follows one
+        claim from eligibility through scrub, gate, 837, submit, status and 835
+        posting. Every stage already had unit tests; none covered the HANDOFF,
+        which is where an integration breaks quietly. The member id eligibility
+        confirmed must appear on the wire, and the charge submitted must equal
+        the charge adjudicated — when it does not, the claim in the system was
+        not the claim on the wire and every KPI after it is fiction
   - [ ] **Submit / status / ERA against a real network — NOT POSSIBLE.**
         Stedi's sandbox plan covers eligibility ONLY. Those three unlock on the
         production plan, which by Stedi's own wording means sending real claims
@@ -247,7 +259,13 @@ does not mean "mostly done".
         built and tested against the mock connector, and the Stedi connector
         refuses them with the reason. Ticking this box requires a supervised
         first live submission — a business decision, not an engineering task.
-- [ ] **Phase 3** — intent router, pinned tools, structured context compaction, correctness eval
+- [ ] **Phase 3** — agent reliability. Partly landed:
+  - [x] `src/agent/tool-router.ts` — ranks the tool set against the question.
+        It **ranks and never filters**: a tool that scores zero is still
+        reachable, because a router that hides a tool turns a mis-scored
+        question into a capability that has silently vanished
+  - [ ] Pinned tools per session, structured context compaction
+        (`session_summaries`), correctness eval
 - [ ] **Phase 4** — `orion data refresh|status`, startup staleness warning, per-profile required datasets
 - [ ] **Phase 5** — `/analytics.html`, `/forecast.html`, `/swarm.html`
 - [ ] **Phase 6** — `src/jobs/`, WAL, busy retry, job status events.
