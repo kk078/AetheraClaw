@@ -1,7 +1,7 @@
 // ── Keeping secrets out of tool output ───────────────────────────────────────
 // Storing API keys on disk creates a path that did not exist when they lived
 // only in the environment: the agent can read files, and `cat` is on the
-// auto-approved list. Before this, `cat ~/.aetheraclaw/credentials.json` ran
+// auto-approved list. Before this, `cat ~/.orion/credentials.json` ran
 // with NO approval prompt and handed four provider keys straight to the model —
 // which then puts them in the transcript, the tool-call log, and whatever the
 // model says next.

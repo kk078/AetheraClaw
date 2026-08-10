@@ -9,7 +9,7 @@ import type { Icd10Table } from "./icd10-local.js";
 import { managedReferencePath, type ReferenceDbConfig } from "./reference-db.js";
 import { lookupRole } from "./reference-routes.js";
 
-// Local dataset directory: ~/.aetheraclaw/data — populated by the user or the
+// Local dataset directory: ~/.orion/data — populated by the user or the
 // (future) data-updates fetcher. Files are optional; tools degrade gracefully.
 //   ncci-ptp.json   { "COL1": { "COL2": "0" | "1" | "9" } }  — or the older
 //                   [{ column1, column2, modifierIndicator }] array, still read
@@ -238,7 +238,7 @@ export function renderDatasetStatus(statuses: DatasetStatus[], cptConfigured: bo
       "What the missing files mean — these are limits on what can be checked, not findings:",
       ...missing.map((s) => `  ${s.file}: ${s.absentMeans}\n      Source: ${s.source}`),
       "",
-      "None of these are bundled with AetheraClaw. The CMS files are public but versioned quarterly or annually, and CPT cannot be redistributed at all, so installation is a deliberate step the practice takes with the release it is billing under.",
+      "None of these are bundled with Orion. The CMS files are public but versioned quarterly or annually, and CPT cannot be redistributed at all, so installation is a deliberate step the practice takes with the release it is billing under.",
     );
   }
   return lines.join("\n");

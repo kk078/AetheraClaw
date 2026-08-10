@@ -68,7 +68,7 @@ export class OpenAIProvider implements ModelProvider {
     const apiKey = opts.apiKey ?? process.env.OPENAI_API_KEY;
     if (!apiKey) {
       throw new Error(
-        "OPENAI_API_KEY is not set. Export it, or switch provider with `provider: \"anthropic\" | \"gemini\" | \"ollama\"` in ~/.aetheraclaw/config.json5.",
+        "OPENAI_API_KEY is not set. Export it, or switch provider with `provider: \"anthropic\" | \"gemini\" | \"ollama\"` in ~/.orion/config.json5.",
       );
     }
     this.client = new OpenAI({ apiKey, ...(opts.baseURL ? { baseURL: opts.baseURL } : {}) });

@@ -39,7 +39,7 @@ export type CodeKind = "cpt" | "hcpcs" | "icd10";
  *
  * Membership only — no descriptions. This module answers "does this code
  * exist", not "what is it", and keeping descriptions out means the CPT
- * descriptors AetheraClaw is not licensed to redistribute never enter it.
+ * descriptors Orion is not licensed to redistribute never enter it.
  */
 export interface CodeUniverse {
   cpt: Set<string>;
@@ -434,7 +434,7 @@ function fileStamp(name: string): string {
 }
 
 /**
- * Build a universe from the datasets installed under ~/.aetheraclaw/data.
+ * Build a universe from the datasets installed under ~/.orion/data.
  *
  * Two files, three sets:
  *

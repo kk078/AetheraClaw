@@ -93,7 +93,7 @@ export async function fetchTextGuarded(rawUrl: string): Promise<string> {
     method: "GET",
     signal: AbortSignal.timeout(TIMEOUT_MS),
     headers: {
-      "user-agent": "AetheraClaw/0.1 (+self-hosted RCM assistant)",
+      "user-agent": "Orion/0.1 (+self-hosted RCM assistant)",
       // Some origins reject a request with no Accept/Accept-Language outright.
       // Sending them is ordinary HTTP politeness, not disguise: the User-Agent
       // above still says exactly what this is. Rotating it to impersonate a

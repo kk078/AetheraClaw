@@ -1,0 +1,23 @@
+{
+  // The edge Worker runs on workerd, not Node: no fs, no Buffer, a different
+  // global scope. It therefore cannot share the main tsconfig — compiled under
+  // Node's lib it would accept `process.env` and `require`, and the error would
+  // surface as a runtime failure in production rather than a type error here.
+  //
+  // Checked in CI (`npm run typecheck:worker`) because wrangler bundles this
+  // file at deploy time: without a check of its own, a type error in the Worker
+  // is discovered by the deploy that was meant to ship it.
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["es2022"],
+    "types": ["@cloudflare/workers-types"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["worker/**/*.ts"]
+}

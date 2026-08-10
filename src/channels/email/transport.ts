@@ -23,18 +23,18 @@ export interface MailboxCredentials {
  * prompt or tool result.
  */
 export function imapCredentials(config: EmailConfig): MailboxCredentials | string {
-  const pass = process.env.AETHERACLAW_IMAP_PASSWORD;
+  const pass = process.env.ORION_IMAP_PASSWORD;
   if (!config.imap.host) return "email.imap.host is not configured.";
   if (!config.imap.user) return "email.imap.user is not configured.";
-  if (!pass) return "AETHERACLAW_IMAP_PASSWORD is not set in the environment.";
+  if (!pass) return "ORION_IMAP_PASSWORD is not set in the environment.";
   return { host: config.imap.host, port: config.imap.port, secure: config.imap.secure, user: config.imap.user, pass };
 }
 
 export function smtpCredentials(config: EmailConfig): MailboxCredentials | string {
-  const pass = process.env.AETHERACLAW_SMTP_PASSWORD ?? process.env.AETHERACLAW_IMAP_PASSWORD;
+  const pass = process.env.ORION_SMTP_PASSWORD ?? process.env.ORION_IMAP_PASSWORD;
   if (!config.smtp.host) return "email.smtp.host is not configured.";
   if (!config.smtp.user) return "email.smtp.user is not configured.";
-  if (!pass) return "AETHERACLAW_SMTP_PASSWORD is not set in the environment.";
+  if (!pass) return "ORION_SMTP_PASSWORD is not set in the environment.";
   return { host: config.smtp.host, port: config.smtp.port, secure: config.smtp.secure, user: config.smtp.user, pass };
 }
 

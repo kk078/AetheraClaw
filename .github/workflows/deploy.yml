@@ -1,0 +1,112 @@
+name: Deploy
+
+# ── What actually reaches aetheraonline.com ──────────────────────────────────
+# Triggered by a version tag, not by a branch. The consequence is the point: the
+# thing running in production always has a version number, and rolling back is
+# `workflow_dispatch` with an older tag rather than an archaeology exercise.
+#
+# This builds the container image and deploys the Worker in one `wrangler deploy`
+# — wrangler builds the Dockerfile, pushes it to Cloudflare's registry, and
+# points the Worker at it. There is no separate registry step to get out of sync.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to deploy (e.g. v0.2.0). Use this to roll back."
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-production
+  # Two deploys overlapping would race to point the Worker at different images.
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://app.aetheraonline.com
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Deploy the tag, whether it came from the push or from a manual
+          # rollback. Checking out a branch here would mean the tag named one
+          # thing and the deploy shipped another.
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+      # The tag was tested at release time, but a rollback deploys an OLD tag
+      # whose tests last ran against an older toolchain. Cheap enough to repeat,
+      # and this is the last gate before PHI infrastructure changes.
+      - run: npm test
+      - run: npm run build
+
+      # Fails the deploy rather than shipping a container that will refuse every
+      # request. src/gateway/auth.ts is deliberately fail-closed: bound off
+      # loopback with no token, it serves nothing — which is safe, and would be
+      # a silent outage if this were not checked here.
+      - name: Preflight
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GATEWAY_TOKEN: ${{ secrets.GATEWAY_TOKEN }}
+        run: node scripts/preflight.mjs
+
+      - name: Check the required secrets are present
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GATEWAY_TOKEN: ${{ secrets.GATEWAY_TOKEN }}
+        run: |
+          missing=""
+          [ -n "$CLOUDFLARE_API_TOKEN" ]  || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          [ -n "$GATEWAY_TOKEN" ]         || missing="$missing GATEWAY_TOKEN"
+          if [ -n "$missing" ]; then
+            echo "Missing repository secret(s):$missing"
+            exit 1
+          fi
+
+      - name: Push the shared secret to the Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: echo -n "${{ secrets.GATEWAY_TOKEN }}" | npx wrangler secret put GATEWAY_TOKEN
+
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Reaches the container as an environment variable, and is what the
+          # gateway compares the edge's header against.
+          ORION_GATEWAY_TOKEN: ${{ secrets.GATEWAY_TOKEN }}
+        run: npx wrangler deploy --var ORION_VERSION:${{ inputs.tag || github.ref_name }}
+
+      # A deploy that reports success while the origin is down is worse than a
+      # failed one, because nobody looks. Containers take a few minutes to
+      # provision on first deploy, so this retries rather than checking once.
+      - name: Verify the deployment answers
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" https://app.aetheraonline.com/healthz || true)
+            if [ "$code" = "200" ]; then echo "healthy after ${i} attempt(s)"; exit 0; fi
+            echo "attempt $i: HTTP $code"
+            sleep 10
+          done
+          echo "Never became healthy. The Worker deployed; the container may still be provisioning."
+          exit 1

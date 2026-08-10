@@ -90,7 +90,7 @@ export const CODE_SETS: Record<CodeSetId, CodeSetSpec> = {
     months: ANNUAL_JANUARY,
     edition: "calendar",
     hierarchical: false,
-    note: "Annual January 1 release. AMA-licensed — AetheraClaw cannot bundle it; supply your own file via healthcare.cptDataPath.",
+    note: "Annual January 1 release. AMA-licensed — Orion cannot bundle it; supply your own file via healthcare.cptDataPath.",
   },
   mpfs: {
     id: "mpfs",

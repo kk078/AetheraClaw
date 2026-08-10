@@ -293,7 +293,7 @@ describe('renderVocabularyPrompt("keyterm")', () => {
 describe('renderVocabularyPrompt("grammar")', () => {
   it("emits a JSGF grammar the browser will accept", () => {
     const grammar = renderVocabularyPrompt(["Aetna", "J1885"], "grammar");
-    expect(grammar).toBe("#JSGF V1.0; grammar aetheraclaw; public <billing> = Aetna | J1885;");
+    expect(grammar).toBe("#JSGF V1.0; grammar orion; public <billing> = Aetna | J1885;");
   });
 
   it("quotes anything that is not a bare word, so an operator cannot break the parse", () => {

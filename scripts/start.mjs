@@ -28,6 +28,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveHome } from "./lib/home.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -82,7 +83,7 @@ data — run \`npm run setup\` instead. It is safe to run at any time.`);
   process.exit(0);
 }
 
-heading("Starting AetheraClaw");
+heading("Starting Orion");
 
 // ── 1. Node ──────────────────────────────────────────────────────────────────
 // The one hard stop. Everything after this — npm ci, tsc, the gateway's own
@@ -118,7 +119,7 @@ if (!nodeOk) {
   // Not installed automatically, and not for want of trying: every route needs
   // root and replaces a runtime the rest of the machine may depend on. So the
   // exact command for THIS machine, and a stop.
-  console.log(`\n  AetheraClaw needs Node ${need.major}.${need.minor} or newer. On ${process.platform}:\n`);
+  console.log(`\n  Orion needs Node ${need.major}.${need.minor} or newer. On ${process.platform}:\n`);
   // Version-manager routes first, and not only because they are convenient:
   // they need no root and leave the system node alone, which is the difference
   // between "run this" and "run this and hope nothing else on the box cared".
@@ -269,9 +270,9 @@ if (skipBuild) {
 // Naming the missing files matters — "datasets missing" sends people to re-run
 // a fetch that already succeeded for five of six.
 
-const home = process.env.AETHERACLAW_HOME
-  ? path.resolve(process.env.AETHERACLAW_HOME.replace(/^~(?=$|\/)/, os.homedir()))
-  : path.join(os.homedir(), ".aetheraclaw");
+// Shared with the gateway's own resolution so the two cannot disagree about
+// which directory the install lives in — see scripts/lib/home.mjs.
+const home = resolveHome();
 const dataDir = path.join(home, "data");
 const present = fs.existsSync(dataDir) ? fs.readdirSync(dataDir).filter((f) => f.endsWith(".json")) : [];
 // The same list scripts/setup.mjs checks, and checked BY NAME for the same
@@ -288,7 +289,7 @@ if (missingDatasets.length === 0) {
 // ── 5. Provider ──────────────────────────────────────────────────────────────
 // A missing key is NOT an error here. The gateway starts without one — the
 // settings page is served, the key is entered there, and it is written to
-// ~/.aetheraclaw/credentials.json at 0600. That flow is the whole reason this
+// ~/.orion/credentials.json at 0600. That flow is the whole reason this
 // command exists, so it gets a clear signpost instead of a refusal.
 //
 // Names only, never values, and never a prefix of one: this output ends up in
@@ -329,7 +330,7 @@ if (configured.length > 0) {
 } else {
   status("provider", `${amber("none configured")} — starting anyway`);
   console.log("");
-  // The real path, not a hardcoded ~/.aetheraclaw — AETHERACLAW_HOME moves it,
+  // The real path, not a hardcoded ~/.orion — ORION_HOME moves it,
   // and telling somebody to look in a file that is not the one being written is
   // worse than saying nothing.
   const credFile = path.join(home, "credentials.json");

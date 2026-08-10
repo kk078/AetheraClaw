@@ -105,7 +105,7 @@ export function renderDiscovery(servers: LocalServer[]): string {
       "No local model server is listening.",
       `Probed ${LOCAL_CANDIDATES.map((c) => `${c.name} (${c.port})`).join(", ")} on 127.0.0.1.`,
       "",
-      "Start one — `ollama serve` is the usual choice — or configure a hosted provider with `aetheraclaw auth set <provider>`.",
+      "Start one — `ollama serve` is the usual choice — or configure a hosted provider with `orion auth set <provider>`.",
     ].join("\n");
   }
 
@@ -120,7 +120,7 @@ export function renderDiscovery(servers: LocalServer[]): string {
   const first = servers[0];
   const model = first.models[0];
   lines.push("Use one with:");
-  lines.push(`  aetheraclaw auth local --base-url ${first.baseUrl}${model ? ` --model ${model}` : " --model <name>"}`);
+  lines.push(`  orion auth local --base-url ${first.baseUrl}${model ? ` --model ${model}` : " --model <name>"}`);
   lines.push("");
   lines.push("No API key is needed for a local server. Nothing leaves this machine — which is the reason to prefer one for anything touching a real document.");
   return lines.join("\n");

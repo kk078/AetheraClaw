@@ -44,7 +44,7 @@ import type { ClaimInput } from "../src/tools/healthcare/x12/837.js";
 
 const facts = (over: Partial<TenantDbFacts> = {}): TenantDbFacts => ({
   slug: "acme",
-  path: "/srv/ac/tenants/acme/aetheraclaw.db",
+  path: "/srv/ac/tenants/acme/orion.db",
   exists: true,
   mode: 0o600,
   sizeBytes: 1_000_000,

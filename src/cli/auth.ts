@@ -10,7 +10,7 @@ import { credentialsPath, loadCredentials, maskKey, resolveKey, setCredential, s
 // in a screen recording.
 //
 // A key given as a command-line ARGUMENT is accepted but warned about, because
-// `aetheraclaw auth set openai --key sk-...` lands in ~/.bash_history verbatim.
+// `orion auth set openai --key sk-...` lands in ~/.bash_history verbatim.
 // Refusing the flag outright would break scripted setup, which is a real need;
 // saying nothing would let somebody leak a key while following our own docs.
 //

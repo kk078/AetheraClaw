@@ -11,7 +11,7 @@ import {
 } from "../src/tools/healthcare/icd10-local.js";
 
 // A small fixture rather than the real 98,000-code file: the suite must not
-// depend on ~/.aetheraclaw/data, which is exactly the trap test/setup.ts exists
+// depend on ~/.orion/data, which is exactly the trap test/setup.ts exists
 // to close. Shapes here are lifted verbatim from the CMS FY2026 order file.
 const table: Icd10Table = {
   fy: 2026,

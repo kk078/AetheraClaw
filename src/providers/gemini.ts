@@ -65,7 +65,7 @@ export class GeminiProvider implements ModelProvider {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       throw new Error(
-        'GEMINI_API_KEY is not set. Export it, or switch provider with `provider: "anthropic" | "openai" | "ollama"` in ~/.aetheraclaw/config.json5.',
+        'GEMINI_API_KEY is not set. Export it, or switch provider with `provider: "anthropic" | "openai" | "ollama"` in ~/.orion/config.json5.',
       );
     }
     this.ai = new GoogleGenAI({ apiKey });

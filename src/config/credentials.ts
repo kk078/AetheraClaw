@@ -245,7 +245,7 @@ export interface SecretSourceConfig {
  * password does not belong in a file people paste into a chat window. But
  * knownSecretValues() cannot see them, so the single-choke-point scrub in the
  * tool registry passed them to the model verbatim the moment a command read the
- * environment (`env`, `printenv`, `grep AETHERACLAW ~/.bashrc`). This closes
+ * environment (`env`, `printenv`, `grep ORION ~/.bashrc`). This closes
  * that: it reads the values the config points at, so the same value-level
  * redaction that covers provider keys covers these too.
  */
@@ -267,8 +267,8 @@ export function configuredSecretValues(
     add(portal.usernameEnv, "portal-credential");
   }
   // Named directly (not via config) because transport.ts reads exactly these.
-  add("AETHERACLAW_IMAP_PASSWORD", "mail-password");
-  add("AETHERACLAW_SMTP_PASSWORD", "mail-password");
+  add("ORION_IMAP_PASSWORD", "mail-password");
+  add("ORION_SMTP_PASSWORD", "mail-password");
   add(config.voice?.authTokenEnv, "auth-token");
   return out;
 }

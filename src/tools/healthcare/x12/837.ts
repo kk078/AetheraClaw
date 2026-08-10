@@ -87,7 +87,7 @@ export function build837p(claim: ClaimInput): string {
   });
 
   const env = envelope({
-    senderId: "AETHERACLAW",
+    senderId: "ORION",
     receiverId: claim.payer_id,
     controlNumber: String(Math.abs(hash(claim.claim_id)) % 1_000_000_000),
     functionalCode: "HC",

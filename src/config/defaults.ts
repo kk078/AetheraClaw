@@ -1,12 +1,12 @@
 export const DEFAULT_CONFIG_JSON5 = `{
-  // AetheraClaw configuration. Env vars override values here.
+  // Orion configuration. Env vars override values here.
   // API keys are read from the environment: ANTHROPIC_API_KEY, OPENAI_API_KEY,
   // GEMINI_API_KEY, OLLAMA_API_KEY (Ollama Cloud only).
 
   // Which model provider drives the agent: "anthropic" | "openai" | "gemini" | "ollama"
   //
   // This is a PREFERENCE, not a requirement. If the named provider's key is not
-  // in the environment, AetheraClaw uses whichever provider's key IS present and
+  // in the environment, Orion uses whichever provider's key IS present and
   // says so at startup — it will not refuse to run and tell you to go and get a
   // key for a provider you did not choose. Pass --provider to pin one for a
   // single run; an explicit --provider is never substituted.
@@ -21,7 +21,7 @@ export const DEFAULT_CONFIG_JSON5 = `{
   },
 
   // All shell commands and file operations are confined to this directory.
-  workspaceRoot: "~/aetheraclaw-workspace",
+  workspaceRoot: "~/orion-workspace",
 
   // "always" = every tool needs approval; "unsafe-only" = read-only ops auto-approved;
   // "never" = no approvals (NOT recommended).
@@ -48,7 +48,7 @@ export const DEFAULT_CONFIG_JSON5 = `{
   },
 
   // Email channel. Disabled until a mailbox is configured; passwords come from
-  // AETHERACLAW_IMAP_PASSWORD / AETHERACLAW_SMTP_PASSWORD, never from this file.
+  // ORION_IMAP_PASSWORD / ORION_SMTP_PASSWORD, never from this file.
   email: {
     enabled: false,
     imap: { host: '', port: 993, secure: true, user: '', mailbox: 'INBOX' },
@@ -73,8 +73,8 @@ export const DEFAULT_CONFIG_JSON5 = `{
       //   passwordSelector: '#password',
       //   submitSelector: 'button[type=submit]',
       //   signedInSelector: '#dashboard',           // exists only once signed in
-      //   usernameEnv: 'AETHERACLAW_PORTAL_AVAILITY_USER',
-      //   passwordEnv: 'AETHERACLAW_PORTAL_AVAILITY_PASSWORD',
+      //   usernameEnv: 'ORION_PORTAL_AVAILITY_USER',
+      //   passwordEnv: 'ORION_PORTAL_AVAILITY_PASSWORD',
       // },
     ],
     headless: true,
@@ -85,7 +85,7 @@ export const DEFAULT_CONFIG_JSON5 = `{
 
   swarm: { mode: "off" }, // "off" | "assist" | "autopilot-with-checkpoints"
 
-  // Talking to AetheraClaw at your desk. Distinct from 'voice' above, which is
+  // Talking to Orion at your desk. Distinct from 'voice' above, which is
   // the telephony carrier used to call payers.
   speech: {
     enabled: false,

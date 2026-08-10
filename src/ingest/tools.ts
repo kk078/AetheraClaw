@@ -101,7 +101,7 @@ export const documentListTool = defineTool({
         ...lines,
         "",
         withPhi > 0
-          ? `${withPhi} carry identifier-shaped text and their content is stored. \`aetheraclaw documents purge\` empties this table.`
+          ? `${withPhi} carry identifier-shaped text and their content is stored. \`orion documents purge\` empties this table.`
           : "None carry identifier-shaped text.",
       ].join("\n"),
     };

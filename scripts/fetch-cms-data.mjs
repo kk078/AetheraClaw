@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // ── CMS reference data fetcher ───────────────────────────────────────────────
-// Downloads the public CMS files AetheraClaw's offline checks need and converts
+// Downloads the public CMS files Orion's offline checks need and converts
 // them into the JSON shapes `src/tools/healthcare/datasets.ts` reads, in
-// ~/.aetheraclaw/data (or $AETHERACLAW_HOME/data).
+// ~/.orion/data (or $ORION_HOME/data).
 //
 //   ncci-ptp.json   procedure-to-procedure bundling edits
 //   mue.json        medically unlikely edits (units per code, with the MAI)
@@ -17,7 +17,7 @@
 // Running this script on your own machine, for your own use, is the same act as
 // clicking through that page — which is why the files are fetched at runtime and
 // NEVER committed to this repository. Do not redistribute what lands in
-// ~/.aetheraclaw/data. This is the same posture as `cptDataPath`: the project
+// ~/.orion/data. This is the same posture as `cptDataPath`: the project
 // ships the code that reads licensed data, not the data.
 //
 // No dependencies, and no `unzip` on the PATH — the ZIP reader below is ~60
@@ -29,12 +29,12 @@ import os from "node:os";
 import path from "node:path";
 import zlib from "node:zlib";
 
-const UA = "AetheraClaw/0.1 (reference-data fetcher)";
+const UA = "Orion/0.1 (reference-data fetcher)";
 
 function dataDir() {
-  const home = process.env.AETHERACLAW_HOME
-    ? process.env.AETHERACLAW_HOME.replace(/^~(?=$|[/\\])/, os.homedir())
-    : path.join(os.homedir(), ".aetheraclaw");
+  const home = process.env.ORION_HOME
+    ? process.env.ORION_HOME.replace(/^~(?=$|[/\\])/, os.homedir())
+    : path.join(os.homedir(), ".orion");
   return path.join(home, "data");
 }
 
@@ -762,7 +762,7 @@ async function main() {
     process.exit(2);
   }
   fs.mkdirSync(dataDir(), { recursive: true });
-  console.log(`AetheraClaw reference data → ${dataDir()}`);
+  console.log(`Orion reference data → ${dataDir()}`);
   console.log(FROM_DIR ? `Source: local ZIPs in ${FROM_DIR} (no network)` : "Source: cms.gov");
   console.log(`Setting: ${setting} services${setting === "practitioner" ? "  (pass --hospital for outpatient facility edits)" : ""}`);
   console.log(
@@ -790,7 +790,7 @@ async function main() {
 
   console.log(
     failed === 0
-      ? "Done. Run `aetheraclaw` and ask for data_status to confirm what is installed."
+      ? "Done. Run `orion` and ask for data_status to confirm what is installed."
       : `Done with ${failed} failure(s). data_status will report exactly what is missing and what that stops you checking.`,
   );
   // A 403 is not a bug to retry into — it is the site declining, and the useful
@@ -802,7 +802,7 @@ async function main() {
 
 // Guarded, so importing this file for its converters does not launch a download.
 // Without it, `import(...)` of this module fetches ~30 MB from CMS and rewrites
-// ~/.aetheraclaw/data as a side effect of reading a function out of it.
+// ~/.orion/data as a side effect of reading a function out of it.
 if (process.argv[1]?.endsWith("fetch-cms-data.mjs")) {
   main().catch((err) => {
     console.error(err);

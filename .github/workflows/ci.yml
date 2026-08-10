@@ -45,6 +45,10 @@ jobs:
       # types across the project.
       - run: npm run typecheck:test
 
+      # The edge Worker compiles against workerd's globals, not Node's. Without
+      # its own check a type error there is found by the deploy meant to ship it.
+      - run: npm run typecheck:worker
+
       - run: npm test
 
       # The suite runs against better-sqlite3's prebuilt binary. node:sqlite is
@@ -54,6 +58,6 @@ jobs:
       # rather than an untested claim.
       - run: npm test
         env:
-          AETHERACLAW_SQLITE: node
+          ORION_SQLITE: node
 
       - run: npm run build

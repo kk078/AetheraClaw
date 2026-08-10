@@ -1,6 +1,6 @@
 // ── Voice interface ──────────────────────────────────────────────────────────
 //
-// Talking to AetheraClaw at a desk. Deliberately NOT the same thing as
+// Talking to Orion at a desk. Deliberately NOT the same thing as
 // src/voice/ on the server, which dials payers — that module navigates an IVR
 // over text segments and never touches audio. This file is the only place in
 // the product that opens a microphone.
@@ -74,13 +74,13 @@
     }
     if (cfg.engine === "local") {
       return [
-        "Audio is sent to the AetheraClaw gateway on this machine and transcribed locally by Whisper.",
+        "Audio is sent to the Orion gateway on this machine and transcribed locally by Whisper.",
         "Nothing leaves this computer.",
         cfg.retainAudio ? "Captured audio IS retained on disk." : "Captured audio is transcribed and discarded, never written to disk.",
       ];
     }
     return [
-      "Audio is sent to the AetheraClaw gateway, which forwards it to a third-party speech vendor.",
+      "Audio is sent to the Orion gateway, which forwards it to a third-party speech vendor.",
       "That is outside this machine, so do not speak real patient identifiers.",
       cfg.retainAudio ? "Captured audio IS retained on disk." : "Captured audio is discarded after transcription.",
     ];

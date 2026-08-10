@@ -61,7 +61,7 @@ export const auditAnchorTool = defineTool({
       .run(head.seq, head.hash, input.published_to, Date.now());
 
     const witness = [
-      "AetheraClaw audit log anchor",
+      "Orion audit log anchor",
       "",
       `Entries:   ${head.seq}`,
       `Head hash: ${head.hash}`,
@@ -69,10 +69,10 @@ export const auditAnchorTool = defineTool({
       `Published: ${input.published_to}`,
       "",
       "This records the state of the audit log at the moment above. Keep it somewhere",
-      "AetheraClaw cannot write to. If the log is later rewritten — even consistently,",
+      "Orion cannot write to. If the log is later rewritten — even consistently,",
       "so that it verifies against itself — comparing it to this hash will show it.",
       "",
-      "Verify with: aetheraclaw audit verify",
+      "Verify with: orion audit verify",
     ].join("\n");
 
     let written = "";

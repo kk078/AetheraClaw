@@ -111,6 +111,6 @@ export function renderBudget(report: BudgetReport, opts: { provider: string; con
   lines.push(`Largest single definition: ${report.largest.name} at ${report.largest.bytes.toLocaleString()} bytes.`);
   lines.push("");
   lines.push("NOTHING IS LOST AT A LOWER NUMBER. Tools past the limit are reachable through tool_search and tool_invoke — they cost an extra round trip, not the capability.");
-  lines.push("More is also not automatically better: large tool sets measurably degrade which tool a model picks. `aetheraclaw eval` measures that on your own model rather than guessing.");
+  lines.push("More is also not automatically better: large tool sets measurably degrade which tool a model picks. `orion eval` measures that on your own model rather than guessing.");
   return lines.join("\n");
 }

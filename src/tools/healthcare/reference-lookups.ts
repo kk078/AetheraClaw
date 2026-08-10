@@ -218,7 +218,7 @@ export const hccLookupTool = defineTool({
         // Named because the number changes materially between them, and quoting
         // one without saying which is how a gap analysis gets built on the wrong
         // model year.
-        versions.length > 1 ? "\nThe weight differs by model version. Which one applies depends on the plan's payment year — this database does not say, and neither does AetheraClaw." : "",
+        versions.length > 1 ? "\nThe weight differs by model version. Which one applies depends on the plan's payment year — this database does not say, and neither does Orion." : "",
         `\nSource: ${hit.table} in ${catalogue.path}.`,
       ]
         .filter(Boolean)

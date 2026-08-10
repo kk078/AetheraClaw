@@ -136,13 +136,13 @@ describe("dataset cache invalidation", () => {
   let priorHome: string | undefined;
   let privateHome: string;
   beforeAll(() => {
-    priorHome = process.env.AETHERACLAW_HOME;
+    priorHome = process.env.ORION_HOME;
     privateHome = fs.mkdtempSync(path.join(os.tmpdir(), "aclaw-dataset-cache-"));
-    process.env.AETHERACLAW_HOME = privateHome;
+    process.env.ORION_HOME = privateHome;
   });
   afterAll(() => {
-    if (priorHome === undefined) delete process.env.AETHERACLAW_HOME;
-    else process.env.AETHERACLAW_HOME = priorHome;
+    if (priorHome === undefined) delete process.env.ORION_HOME;
+    else process.env.ORION_HOME = priorHome;
     fs.rmSync(privateHome, { recursive: true, force: true });
   });
 
@@ -153,14 +153,14 @@ describe("dataset cache invalidation", () => {
     //
     // Static import on purpose: the module-level cache has to stay live across
     // these calls, because that cache IS what is under test.
-    const file = path.join(process.env.AETHERACLAW_HOME!, "data", "ncci-ptp.json");
+    const file = path.join(process.env.ORION_HOME!, "data", "ncci-ptp.json");
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const lines = [
       { cpt_hcpcs: "99214", units: 1, modifiers: [] },
       { cpt_hcpcs: "0469T", units: 1, modifiers: [] },
     ];
 
-    const mueFile = path.join(process.env.AETHERACLAW_HOME!, "data", "mue.json");
+    const mueFile = path.join(process.env.ORION_HOME!, "data", "mue.json");
     expect(checkNcci([], lines)).toEqual([]);
     expect(ncciDataNotice()).not.toBeNull();
 

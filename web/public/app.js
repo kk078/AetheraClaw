@@ -1,4 +1,4 @@
-// AetheraClaw console. Vanilla JS, no build step.
+// Orion console. Vanilla JS, no build step.
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, cls, text) => {
@@ -166,8 +166,8 @@ async function loadOverview() {
   // injected instruction away from being the way out of the confinement.
   $("#foot").textContent = ov.workspace;
   $("#foot").title =
-    `Everything the agent writes lands here.\n\nMove it with:  aetheraclaw serve --workspace /path/to/folder\n` +
-    `Or permanently, workspaceRoot in ~/.aetheraclaw/config.json5.\n\n` +
+    `Everything the agent writes lands here.\n\nMove it with:  orion serve --workspace /path/to/folder\n` +
+    `Or permanently, workspaceRoot in ~/.orion/config.json5.\n\n` +
     `Writes are confined to this folder wherever it points — ../, absolute paths and symlink escapes are refused.`;
 
   const runtime = [
@@ -976,7 +976,7 @@ function renderAttachments() {
     );
     if (!p.uploading) {
       const x = el("button", "chip-x", "✕");
-      x.title = "Remove from this message. The extracted text stays in the database — purge it with `aetheraclaw documents purge`.";
+      x.title = "Remove from this message. The extracted text stays in the database — purge it with `orion documents purge`.";
       x.addEventListener("click", () => {
         pending.splice(i, 1);
         renderAttachments();
@@ -1039,8 +1039,24 @@ consoleView?.addEventListener("drop", (e) => {
 
 // ── Boot ───────────────────────────────────────────────────────────────
 
+// ── The posture banner ─────────────────────────────────────────────────────
+// Shown BEFORE anyone uploads anything, which is the entire point. A prospect
+// who learns this deployment will not take patient data by having a real EOB
+// refused has already handed the file over; the refusal protected the database,
+// not them. Saying it on load is what makes the rule a warning rather than a
+// verdict.
+async function loadPosture() {
+  const p = await fetch("/api/posture").then((r) => r.json()).catch(() => null);
+  if (!p || p.posture !== "blocked") return;
+  const bar = document.createElement("div");
+  bar.className = "posture-banner";
+  bar.setAttribute("role", "status");
+  bar.textContent = p.why;
+  document.body.prepend(bar);
+}
+
 (async function boot() {
-  await Promise.all([loadOverview(), loadModules(), loadSessions()]);
+  await Promise.all([loadPosture(), loadOverview(), loadModules(), loadSessions()]);
 })();
 
 // ── Canvas controls ────────────────────────────────────────────────────
@@ -1217,7 +1233,7 @@ $("#prov-scan")?.addEventListener("click", async () => {
     head.append(el("b", null, s.name), el("span", "provmodel", s.baseUrl));
     row.append(head);
     row.append(el("div", "provnote", s.models.length ? s.models.join(", ") : (s.note || "no models reported")));
-    const cmd = el("code", "provcmd", `aetheraclaw auth local --base-url ${s.baseUrl}${s.models[0] ? ` --model ${s.models[0]}` : ""}`);
+    const cmd = el("code", "provcmd", `orion auth local --base-url ${s.baseUrl}${s.models[0] ? ` --model ${s.models[0]}` : ""}`);
     row.append(cmd);
     box.append(row);
   }

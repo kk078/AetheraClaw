@@ -25,7 +25,7 @@ function regeneratedHeader(by: string): string {
 `;
 }
 
-const REGENERATED_HEADER = regeneratedHeader("`aetheraclaw auth local`");
+const REGENERATED_HEADER = regeneratedHeader("`orion auth local`");
 
 /**
  * Point the ollama provider block at a local OpenAI-compatible server.

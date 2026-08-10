@@ -93,7 +93,7 @@ export interface BuildOptions {
   hints?: string[];
 }
 
-const DEFAULT_BOUNDARY = "----aetheraclaw-speech-boundary";
+const DEFAULT_BOUNDARY = "----orion-speech-boundary";
 
 /** POST /v1/audio/transcriptions — multipart, file part plus a model field. */
 export function buildOpenAiTranscribeRequest(

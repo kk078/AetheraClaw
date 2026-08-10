@@ -127,7 +127,7 @@ export function summaryMarkdown(report: PracticeReport, title = "Practice report
   lines.push(
     "---",
     "",
-    "Computed from what this instance has stored: claims recorded at build time and remittances that have been parsed. Claims submitted outside AetheraClaw, or remittances never parsed, are not in these numbers.",
+    "Computed from what this instance has stored: claims recorded at build time and remittances that have been parsed. Claims submitted outside Orion, or remittances never parsed, are not in these numbers.",
   );
   return lines.join("\n");
 }

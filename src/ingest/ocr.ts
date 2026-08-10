@@ -190,7 +190,7 @@ export function ocrUnavailableNote(e: Extraction): Extraction {
 /**
  * Where trained language data is cached.
  *
- * Under AETHERACLAW_HOME (default `~/.aetheraclaw`) rather than in node_modules
+ * Under ORION_HOME (default `~/.orion`) rather than in node_modules
  * or the working directory, so a `npm ci` does not throw away a 20 MB download
  * and one install's data serves every checkout. The directory is created when
  * OCR first runs — never at import, because importing a module must not write
@@ -308,7 +308,7 @@ const execFileAsync = promisify(execFile);
  * a second time for a different reason.
  */
 async function rasterizePdf(buf: Buffer): Promise<Buffer[]> {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aetheraclaw-ocr-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "orion-ocr-"));
   const src = path.join(dir, "input.pdf");
   try {
     fs.writeFileSync(src, buf);

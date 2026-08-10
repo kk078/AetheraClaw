@@ -5,6 +5,7 @@ import JSON5 from "json5";
 import { z } from "zod";
 import { DEFAULT_CONFIG_JSON5 } from "./defaults.js";
 import { resolveKey } from "./credentials.js";
+import { readEnv, resolveHome } from "./legacy.js";
 
 const ProviderBlock = z.object({
   model: z.string(),
@@ -43,13 +44,13 @@ export const ConfigSchema = z.object({
    * 8k local window; on a large-context cloud model it leaves most of the
    * catalogue behind tool_search for no reason. Raising it is not free — the
    * whole block is re-sent every turn on any provider that does not cache — so
-   * `aetheraclaw tools budget` prints the measured cost before you choose.
+   * `orion tools budget` prints the measured cost before you choose.
    *
    * A value above a provider's hard API limit is clamped and reported, never
    * silently honoured: OpenAI errors on more than 128 rather than truncating.
    */
   toolLimits: z.record(z.number().int().positive()).default({}),
-  workspaceRoot: z.string().default("~/aetheraclaw-workspace"),
+  workspaceRoot: z.string().default("~/orion-workspace"),
   approvalPolicy: z.enum(["always", "unsafe-only", "never"]).default("unsafe-only"),
   gateway: z
     .object({
@@ -179,7 +180,7 @@ export const ConfigSchema = z.object({
     .default({}),
   // Deliberately a sibling of `voice` rather than a field inside it. `voice`
   // already means "which telephony carrier places an outbound payer call";
-  // this is the operator talking to AetheraClaw at their own desk. They share
+  // this is the operator talking to Orion at their own desk. They share
   // the word "voice" in English and nothing else — same config key would make
   // `voice.provider: "twilio"` and a browser microphone one setting.
   // Document ingest. An archive of EOBs is the realistic batch, and a scanned
@@ -270,10 +271,42 @@ export function expandHome(p: string): string {
   return p;
 }
 
+/**
+ * Where configuration and data live.
+ *
+ * Delegates to resolveHome, which honours the pre-rename ORION_HOME/`~/.orion`
+ * names as well as the old AETHERACLAW ones. See src/config/legacy.ts for why
+ * that matters more than it looks: an install from before the rename has its
+ * claims in the old directory, and silently starting fresh next to them reads
+ * as data loss.
+ */
 export function configDir(): string {
-  return process.env.AETHERACLAW_HOME
-    ? expandHome(process.env.AETHERACLAW_HOME)
-    : path.join(os.homedir(), ".aetheraclaw");
+  return resolveHome(process.env);
+}
+
+/**
+ * Let the environment set the listening address.
+ *
+ * Needed because a container has no config file to edit and no command line to
+ * extend: the image is built once and configured by environment, which is why
+ * ORION_HOME already works this way.
+ *
+ * Applied AFTER the schema parse and BEFORE any CLI override, so precedence
+ * reads the way people expect — flag beats environment beats file. A port that
+ * is not a number in range is IGNORED rather than coerced: `parseInt` turns
+ * "8080abc" into 8080 and "" into NaN, and a gateway that quietly listens
+ * somewhere other than where it was told is worse than one that uses its
+ * default.
+ */
+export function applyGatewayEnv(cfg: Config, env: NodeJS.ProcessEnv): Config {
+  const host = readEnv("HOST", env)?.trim();
+  if (host) cfg.gateway.host = host;
+  const rawPort = readEnv("PORT", env)?.trim();
+  if (rawPort && /^\d+$/.test(rawPort)) {
+    const port = Number(rawPort);
+    if (port > 0 && port <= 65535) cfg.gateway.port = port;
+  }
+  return cfg;
 }
 
 export function loadConfig(overrides: Partial<Config> = {}): Config {
@@ -289,6 +322,7 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
   }
   const merged = { ...(raw as Record<string, unknown>), ...overrides };
   const cfg = ConfigSchema.parse(merged);
+  applyGatewayEnv(cfg, process.env);
   // Absolute, always. This is the confinement root every file tool resolves
   // against, and a relative one moves with the process's working directory —
   // so the same config would confine to two different folders depending on
@@ -347,7 +381,7 @@ export function resolveProvider(
       return { provider: config.provider, error: `Unknown provider "${opts.explicit}". Choose one of: ${SUBSTITUTION_ORDER.join(", ")}.` };
     }
     if (!usable(p)) {
-      return { provider: p, error: `--provider ${p} was given but no key is configured for it. Run \`aetheraclaw auth set ${p}\`, or export ${envVarFor(p)}, or name a provider you have a key for.` };
+      return { provider: p, error: `--provider ${p} was given but no key is configured for it. Run \`orion auth set ${p}\`, or export ${envVarFor(p)}, or name a provider you have a key for.` };
     }
     return { provider: p, error: "" };
   }
@@ -361,7 +395,7 @@ export function resolveProvider(
   if (!substitute) {
     return {
       provider: config.provider,
-      error: `No provider can run. Add a key with \`aetheraclaw auth set <provider>\` (or export one of ${SUBSTITUTION_ORDER.map(envVarFor).join(", ")}), or start a local model server — \`aetheraclaw auth discover\` will find one.`,
+      error: `No provider can run. Add a key with \`orion auth set <provider>\` (or export one of ${SUBSTITUTION_ORDER.map(envVarFor).join(", ")}), or start a local model server — \`orion auth discover\` will find one.`,
     };
   }
   return { provider: substitute, substitutedFrom: config.provider, error: "" };

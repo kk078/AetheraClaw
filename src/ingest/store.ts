@@ -53,6 +53,18 @@ export function saveDocument(
   e: Extraction,
   at = Date.now(),
   archiveId = "",
+  /**
+   * Who caused this write.
+   *
+   * Defaults to the agent, which is the truth for anything the model does on
+   * its own. The gateway passes the VERIFIED identity from Cloudflare Access
+   * instead, because §164.312(b) asks a log to record who — and "agent" answers
+   * that question with the name of the software rather than the name of a
+   * person. On a single-operator laptop those were the same thing; on a hosted
+   * deployment with several coders signed in they are not, and an access review
+   * that cannot separate them is not an access review.
+   */
+  actor: string = AGENT_ACTOR,
 ): StoredDocument {
   const existing = store.db
     .prepare("SELECT id FROM documents WHERE sha256 = ? AND session_id = ?")
@@ -99,7 +111,7 @@ export function saveDocument(
     // "Rivera, J - EOB 01-15-58.pdf", which would put a name and a date of
     // birth into the access log itself.
     resourceRef: id,
-    actor: AGENT_ACTOR,
+    actor: actor || AGENT_ACTOR,
     tenantSlug: "",
     sourceAddress: "",
     recordCount: 1,
@@ -194,7 +206,10 @@ export interface PurgeResult {
  * stop existing, and a log written afterwards from a deleted row's id is a log
  * entry nobody can corroborate.
  */
-export function purgeDocuments(store: MemoryStore, opts: { olderThanMs?: number; sessionId?: string } = {}): PurgeResult {
+export function purgeDocuments(
+  store: MemoryStore,
+  opts: { olderThanMs?: number; sessionId?: string; actor?: string } = {},
+): PurgeResult {
   const cutoff = opts.olderThanMs ?? Number.MAX_SAFE_INTEGER;
   const rows = (
     opts.sessionId
@@ -209,7 +224,7 @@ export function purgeDocuments(store: MemoryStore, opts: { olderThanMs?: number;
       action: "delete",
       resourceType: "document",
       resourceRef: r.id,
-      actor: AGENT_ACTOR,
+      actor: opts.actor || AGENT_ACTOR,
       tenantSlug: "",
       sourceAddress: "",
       recordCount: 1,

@@ -44,6 +44,14 @@ import {
   type AuthState,
 } from "../speech/authorization.js";
 import {
+  authorizeRequest,
+  classifyBind,
+  isUnauthenticatedPath,
+  type Identity,
+} from "./auth.js";
+import { readEnv } from "../config/legacy.js";
+import { resolvePosture, screenIngress } from "../config/posture.js";
+import {
   announceWorklistStart,
   applyCommand,
   parseWorklistCommand,
@@ -130,6 +138,36 @@ export async function buildServer(opts: {
   // about the body being too large, which reads as a bug rather than a limit.
   const app = Fastify({ logger: false, bodyLimit: 32 * 1024 * 1024 });
 
+  // ── The door ───────────────────────────────────────────────────────────────
+  // Registered before every route, including the static file handler and the
+  // WebSocket upgrade, because a control that covers most of the surface covers
+  // none of it: the console's own JavaScript is what calls the admin routes, and
+  // an unauthenticated /app.js is enough to learn what to call.
+  //
+  // On loopback this is a no-op and local use is unchanged. Off loopback it is
+  // the only thing standing in front of an admin API over PHI.
+  const exposure = classifyBind(config.gateway.host);
+  const gatewayToken = readEnv("GATEWAY_TOKEN") ?? "";
+  // Resolved ONCE at startup rather than per request. The posture is a property
+  // of the deployment, and re-reading the environment per request would let a
+  // long-running process change what it accepts halfway through a session with
+  // nothing recording that it had.
+  const posture = resolvePosture({ exposure });
+  app.addHook("onRequest", async (req, reply) => {
+    if (isUnauthenticatedPath(req.url)) return;
+    const decision = authorizeRequest({ exposure, headers: req.headers, expectedToken: gatewayToken });
+    if (decision.ok) {
+      // Carried on the request so PHI rows can name a person rather than a
+      // socket. Anything that logs an access reads this instead of guessing.
+      (req as { identity?: Identity }).identity = decision.identity;
+      return;
+    }
+    // `why` is populated only for the misconfiguration case, and that one is
+    // the operator's own deployment talking to them. An unauthenticated caller
+    // gets a bare status with no hint about what is missing.
+    await reply.code(decision.status).send(decision.why === "" ? { error: "unauthorized" } : { error: decision.why });
+  });
+
   // Uploads arrive as raw bytes, under a CATCH-ALL content type.
   //
   // Listing the Office and PDF types individually was tried and is wrong: a
@@ -149,7 +187,7 @@ export async function buildServer(opts: {
   await app.register(fastifyWebsocket);
   await app.register(fastifyStatic, { root: findWebRoot(), prefix: "/" });
 
-  app.get("/healthz", async () => ({ ok: true, name: "aetheraclaw" }));
+  app.get("/healthz", async () => ({ ok: true, name: "orion" }));
 
   app.get("/api/sessions", async () => store.listSessions());
 
@@ -283,11 +321,21 @@ export async function buildServer(opts: {
    * is already an open `{ type, ... }`, and the gateway already pushes an
    * ad-hoc frame this way for cancel.
    */
-  const processArchive = async (archiveId: string, sessionId: string, expansion: ArchiveExpansion): Promise<void> => {
+  const processArchive = async (
+    archiveId: string,
+    sessionId: string,
+    expansion: ArchiveExpansion,
+    actor: string,
+  ): Promise<void> => {
     const total = expansion.entries.length;
     let processed = 0;
     let failed = 0;
     let ocrCount = 0;
+    // Entries turned away by the PHI posture. Named separately from `failed`
+    // because they are a different fact about the batch: a refusal is the gate
+    // working, an unreadable file is the reader not managing, and a manifest
+    // that conflates them tells an operator to go and fix the wrong thing.
+    const refused: Array<{ name: string; kinds: string[] }> = [];
 
     const push = (current: string, status: string) =>
       sessions.broadcast(sessionId, {
@@ -297,6 +345,7 @@ export async function buildServer(opts: {
         total,
         failed,
         ocr: ocrCount,
+        refused: refused.length,
         current,
         status,
       });
@@ -310,8 +359,19 @@ export async function buildServer(opts: {
         // step, and it cannot drift from what actually happened.
         const after = await readable(before, entry.bytes);
         if (after !== before && after.readable) ocrCount += 1;
-        saveDocument(store, sessionId, after, Date.now(), archiveId);
-        if (!after.readable) failed += 1;
+        // Screened per ENTRY, not per archive. A batch is exactly where a real
+        // record slips in among synthetic ones, and refusing the whole zip
+        // because one file of forty carried an identifier would push people
+        // toward splitting the archive up until it went through — which is the
+        // gate teaching them how to get around it.
+        const entryScreen = screenIngress(after.phi, posture.posture);
+        if (!entryScreen.accept) {
+          refused.push({ name: entry.name, kinds: entryScreen.kinds });
+          failed += 1;
+        } else {
+          saveDocument(store, sessionId, after, Date.now(), archiveId, actor);
+          if (!after.readable) failed += 1;
+        }
       } catch {
         // One bad entry must not abandon the other thirty-nine.
         failed += 1;
@@ -324,6 +384,15 @@ export async function buildServer(opts: {
     updateArchive(store, archiveId, { status: "completed", processed, failed, ocrCount });
     push("", "completed");
   };
+
+  // What this deployment will and will not hold. Read by the console on load so
+  // the banner states it before anyone uploads anything, rather than after —
+  // a prospect learning the rule from a refusal has already handed over the file.
+  app.get("/api/posture", async () => ({
+    posture: posture.posture,
+    source: posture.source,
+    why: posture.why,
+  }));
 
   app.post("/api/upload", async (req, reply) => {
     const q = req.query as { session?: string; filename?: string };
@@ -364,6 +433,9 @@ export async function buildServer(opts: {
           notes: expansion.notes,
         });
       }
+      // Captured from the REQUEST, before the background work starts. Reading
+      // it later would be reading a request that has already been answered.
+      const archiveActor = (req as { identity?: Identity }).identity?.email || "";
       const archive = createArchive(
         store,
         sessionId,
@@ -375,7 +447,7 @@ export async function buildServer(opts: {
       // Deliberately not awaited: the response goes out now and the work
       // continues. Errors are captured onto the archive row rather than
       // surfacing as an unhandled rejection that kills the gateway.
-      void processArchive(archive.id, sessionId, expansion).catch((err) => {
+      void processArchive(archive.id, sessionId, expansion, archiveActor).catch((err) => {
         updateArchive(store, archive.id, {
           status: "failed",
           error: err instanceof Error ? err.message : String(err),
@@ -391,7 +463,29 @@ export async function buildServer(opts: {
     }
 
     const extraction = await readable(extractDocument(filename, body), body);
-    const doc = saveDocument(store, sessionId, extraction);
+
+    // Screened BEFORE saveDocument, which is the only thing that makes this a
+    // refusal rather than a deletion. Storing it and removing it afterwards
+    // would still mean the text was written to disk, replicated into the WAL,
+    // and carried into the next R2 snapshot — the bytes having arrived is
+    // precisely what the agreement is about.
+    const screen = screenIngress(extraction.phi, posture.posture);
+    if (!screen.accept) {
+      return reply.code(422).send({
+        error: screen.reason,
+        refusedKinds: screen.kinds,
+        filename,
+        stored: false,
+        posture: posture.posture,
+      });
+    }
+
+    // The person, not the software. `identity` was put on the request by the
+    // auth hook after Cloudflare Access verified the session; on loopback it is
+    // absent and the store falls back to the agent, which is what a
+    // single-operator laptop actually means.
+    const actor = (req as { identity?: Identity }).identity?.email || "";
+    const doc = saveDocument(store, sessionId, extraction, Date.now(), "", actor);
     return {
       id: doc.id,
       filename: doc.filename,
@@ -644,7 +738,7 @@ export async function buildServer(opts: {
       status: describeAuthState(state, Date.now()),
       // The secret lives where every other secret in this project lives: an env
       // var named in config, never in the database and never returned here.
-      configured: Boolean(process.env.AETHERACLAW_VOICE_AUTH_PHRASE),
+      configured: Boolean(process.env.ORION_VOICE_AUTH_PHRASE),
     };
   });
 
@@ -662,11 +756,11 @@ export async function buildServer(opts: {
     const key = String(q.session ?? "default");
     const raw = req.body;
     const spoken = Buffer.isBuffer(raw) ? raw.toString("utf8") : typeof raw === "string" ? raw : "";
-    const secret = process.env.AETHERACLAW_VOICE_AUTH_PHRASE ?? "";
+    const secret = process.env.ORION_VOICE_AUTH_PHRASE ?? "";
     if (!secret) {
       return reply
         .code(503)
-        .send({ ok: false, why: "No authorization phrase is configured. Set AETHERACLAW_VOICE_AUTH_PHRASE to use spoken authorization." });
+        .send({ ok: false, why: "No authorization phrase is configured. Set ORION_VOICE_AUTH_PHRASE to use spoken authorization." });
     }
     const result = verifyResponse(authFor(key), spoken, secret, Date.now());
     authStates.set(key, result.state);

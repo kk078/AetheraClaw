@@ -45,7 +45,7 @@ export function assessCommandRisk(command: string): { level: "safe" | "confirm";
     if (pattern.test(trimmed)) return { level: "confirm", reason: `potentially destructive command: ${trimmed}` };
   }
 
-  // `cat` is on the auto-approved list below, so `cat ~/.aetheraclaw/credentials.json`
+  // `cat` is on the auto-approved list below, so `cat ~/.orion/credentials.json`
   // used to run with no prompt at all. The VALUES are redacted from the result
   // either way (see config/secrets.ts), which is the control that actually
   // holds — but redaction is silent, and a credential read should be something

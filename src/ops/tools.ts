@@ -3,6 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 import { defineTool } from "../tools/registry.js";
 import type { Config } from "../config/config.js";
+import { resolveDbFile } from "../config/legacy.js";
 import type { MemoryStore } from "../memory/store.js";
 import { dataDir, datasetStatuses } from "../tools/healthcare/datasets.js";
 import { loadEras } from "../tools/healthcare/analytics.js";
@@ -111,7 +112,7 @@ export const tenantIntegrityTool = defineTool({
       if (!store) return { content: "No database in this context.", isError: true };
       // Single-tenant still benefits from the corruption and permission checks;
       // there is simply no boundary to verify.
-      const single = inspectDb("primary", path.join(tenancyRoot(), "aetheraclaw.db"));
+      const single = inspectDb("primary", resolveDbFile(tenancyRoot()));
       findings.push(...analyzeTenant(single));
       return {
         content: [

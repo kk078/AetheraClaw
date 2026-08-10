@@ -3,6 +3,7 @@ import { Command } from "commander";
 import path from "node:path";
 import fs from "node:fs";
 import { loadConfig, configDir, apiKeyFor, envVarFor, expandHome, resolveProvider, type ProviderName } from "../config/config.js";
+import { legacyNotice, resolveDbFile } from "../config/legacy.js";
 import { PROFILES, PROVIDER_TOOL_LIMITS, renderProfiles, resolveToolLimit, selectTools } from "../tools/profiles.js";
 import { buildBudget, renderBudget } from "../tools/budget.js";
 import { resolveOllamaTarget } from "../providers/openai.js";
@@ -151,16 +152,16 @@ import { retentionPlan } from "../support/tool-log.js";
 import { VIEW_RETAIN_DAYS, viewRetentionPlan } from "../views/retention.js";
 
 const program = new Command();
-program.name("aetheraclaw").description("Self-hosted AI assistant for healthcare RCM and medical billing & coding");
+program.name("orion").description("Self-hosted AI assistant for healthcare RCM and medical billing & coding");
 
 
 program
   .command("serve")
-  .description("Start the AetheraClaw gateway (HTTP + WebSocket + web UI)")
+  .description("Start the Orion gateway (HTTP + WebSocket + web UI)")
   .option("--port <port>", "port to listen on")
   .option("--host <host>", "host to bind (default 127.0.0.1)")
   .option("--provider <name>", "anthropic | openai | gemini | ollama")
-  .option("--profile <name>", "tool profile — see `aetheraclaw providers`")
+  .option("--profile <name>", "tool profile — see `orion providers`")
   .option("--tenant <slug>", "tenant to serve (multi-tenant installs only)")
   .option("--workspace <path>", "where files are written this run — overrides workspaceRoot in config.json5")
   .action(async (opts: { port?: string; host?: string; provider?: string; profile?: string; tenant?: string; workspace?: string }) => {
@@ -168,7 +169,7 @@ program
     if (opts.port) config.gateway.port = Number(opts.port);
     if (opts.host) config.gateway.host = opts.host;
     if (opts.profile) config.toolProfile = opts.profile;
-    // The workspace is WHERE THE USER SAYS, not a fixed ~/aetheraclaw-workspace.
+    // The workspace is WHERE THE USER SAYS, not a fixed ~/orion-workspace.
     // Point it at the practice's real folder and generated appeals, superbills
     // and posting files land where somebody will actually look for them.
     //
@@ -189,7 +190,7 @@ program
     const choice = resolveProvider(config, { explicit: opts.provider });
     if (choice.error) {
       console.error(choice.error);
-      console.error("`aetheraclaw providers` shows which keys are present here.");
+      console.error("`orion providers` shows which keys are present here.");
       process.exit(1);
     }
     config.provider = choice.provider;
@@ -199,7 +200,7 @@ program
       console.log(
         `Provider: config says "${choice.substitutedFrom}" but ${envVarFor(choice.substitutedFrom)} is not set — using "${choice.provider}" instead.`,
       );
-      console.log(`  Set provider: "${choice.provider}" in ~/.aetheraclaw/config.json5 to make it permanent, or pass --provider to override.`);
+      console.log(`  Set provider: "${choice.provider}" in ~/.orion/config.json5 to make it permanent, or pass --provider to override.`);
     }
     let resolved;
     try {
@@ -254,9 +255,15 @@ program
     }
 
     await app.listen({ host: config.gateway.host, port: config.gateway.port });
-    console.log(`AetheraClaw gateway: http://${config.gateway.host}:${config.gateway.port}`);
+    console.log(`Orion gateway: http://${config.gateway.host}:${config.gateway.port}`);
     console.log(`Provider: ${config.provider} · Workspace: ${config.workspaceRoot}`);
     console.log(`SQLite: ${store.db.driver}`);
+    // Say which names are actually in use. An install that predates the rename
+    // keeps reading its own directory and its own database file, and the one
+    // thing that must never happen is for that to be invisible — "where did my
+    // claims go" is answered here, before it is asked.
+    const notice = legacyNotice(configDir(), resolveDbFile(configDir()));
+    if (notice !== "") console.log(notice);
     // Amortized retention: once at startup rather than on every tool call, so
     // the log's cost does not scale with the log's size.
     const pruned = store.pruneToolCalls(retentionPlan(Date.now()));
@@ -326,24 +333,24 @@ program
         case "list": {
           const rows = registry.list();
           if (rows.length === 0) {
-            console.log("No tenants. Create one with `aetheraclaw tenants create <slug> --name \"Practice name\"`.");
+            console.log("No tenants. Create one with `orion tenants create <slug> --name \"Practice name\"`.");
             break;
           }
           for (const t of rows) console.log(`${t.slug.padEnd(24)} ${t.status.padEnd(10)} ${t.name}`);
           break;
         }
         case "create": {
-          if (!slug) throw new Error("A slug is required: `aetheraclaw tenants create <slug>`.");
+          if (!slug) throw new Error("A slug is required: `orion tenants create <slug>`.");
           const check = checkSlug(slug);
           if (!check.ok) throw new Error(check.reason);
           const t = registry.create(opts.name ?? slug, check.slug);
           console.log(`Created ${t.slug} (${t.name}). Its database is at ${tenantDbPath(tenancyRoot(), t.slug)}.`);
-          console.log("Serve it with: aetheraclaw serve --tenant " + t.slug);
+          console.log("Serve it with: orion serve --tenant " + t.slug);
           break;
         }
         case "suspend":
         case "activate": {
-          if (!slug) throw new Error(`A slug is required: \`aetheraclaw tenants ${action} <slug>\`.`);
+          if (!slug) throw new Error(`A slug is required: \`orion tenants ${action} <slug>\`.`);
           if (!registry.bySlug(slug)) throw new Error(`No tenant with slug "${slug}".`);
           registry.setStatus(slug, action === "suspend" ? "suspended" : "active");
           console.log(
@@ -395,7 +402,7 @@ program
   .description("Show which model providers are usable here, and how many tools each can take")
   .action(() => {
     const config = loadConfig();
-    const store = new MemoryStore(path.join(configDir(), "aetheraclaw.db"));
+    const store = new MemoryStore(resolveDbFile(configDir()));
     const all = buildRegistry(config, store).specs();
 
     // Stated per provider, because the registry size genuinely differs by one:
@@ -462,7 +469,7 @@ program
     }
     config.provider = choice.provider;
 
-    const store = new MemoryStore(path.join(configDir(), "aetheraclaw.db"));
+    const store = new MemoryStore(resolveDbFile(configDir()));
     const registry = buildRegistry(config, store);
     const provider = createProvider(config, config.provider);
     const cases = opts.case ? CASES.filter((c) => c.id === opts.case) : CASES;
@@ -585,7 +592,7 @@ toolsCmd
     const config = loadConfig();
     const provider = (opts.provider ?? config.provider) as ProviderName;
     const contextWindow = Number(opts.context ?? 128000);
-    const store = new MemoryStore(path.join(configDir(), "aetheraclaw.db"));
+    const store = new MemoryStore(resolveDbFile(configDir()));
     const specs = buildRegistry({ ...config, provider }, store).specs();
     const decision = resolveToolLimit(provider, config.toolLimits[provider]);
     console.log(renderBudget(buildBudget(specs, contextWindow), { provider, contextWindow, current: decision.limit }));
@@ -622,7 +629,7 @@ auth
       let key = opts.key ?? "";
       if (opts.key) {
         console.log("! --key was given on the command line, so this key is now in your shell history.");
-        console.log(`  Clear it, or prefer the prompt: aetheraclaw auth set ${p}`);
+        console.log(`  Clear it, or prefer the prompt: orion auth set ${p}`);
       } else {
         if (p === "ollama") {
           console.log("Ollama needs a key ONLY for Ollama Cloud. For a local server leave this blank and press Enter.");
@@ -640,7 +647,7 @@ auth
       for (const w of setResult.warnings) console.log(`  ⚠ ${w}`);
       console.log(`  stored ${p} (${maskKey(key)}) in ${credentialsPath()}`);
     }
-    console.log("\nNothing above printed your key back. `aetheraclaw auth list` shows the mask.");
+    console.log("\nNothing above printed your key back. `orion auth list` shows the mask.");
   });
 
 auth
@@ -688,7 +695,7 @@ auth
 
 auth
   .command("local")
-  .description("Point AetheraClaw at a local model server and make it the active provider")
+  .description("Point Orion at a local model server and make it the active provider")
   .option("--base-url <url>", "OpenAI-compatible base URL, e.g. http://127.0.0.1:11434/v1")
   .option("--model <name>", "model the server should serve")
   .action(async (opts: { baseUrl?: string; model?: string }) => {
@@ -715,7 +722,7 @@ auth
     writeLocalProvider(baseUrl, model);
     console.log(`Config updated: provider "ollama", model "${model}", baseUrl "${baseUrl}".`);
     console.log("No key is stored — a local server needs none, and nothing leaves this machine.");
-    console.log("\nStart it with: aetheraclaw serve");
+    console.log("\nStart it with: orion serve");
   });
 
 auth
@@ -725,7 +732,7 @@ auth
     const config = loadConfig();
     const targets = provider ? [provider as ProviderName] : ALL_PROVIDERS.filter((p) => Boolean(apiKeyFor(p)) || p === "ollama");
     if (targets.length === 0) {
-      console.log("No provider has a key. Add one with `aetheraclaw auth set <provider>`.");
+      console.log("No provider has a key. Add one with `orion auth set <provider>`.");
       return;
     }
     for (const p of targets) {
@@ -785,7 +792,7 @@ reference
     const m = readManifest();
     if (!m) {
       console.log(`Nothing installed at ${managedDbPath()}.`);
-      console.log("Install one with `aetheraclaw reference install <file>`, or leave a file where it is and set healthcare.referenceDbPath to read it in place.");
+      console.log("Install one with `orion reference install <file>`, or leave a file where it is and set healthcare.referenceDbPath to read it in place.");
       return;
     }
     console.log(describeManifest(m));
@@ -806,7 +813,7 @@ reference
   .action((pairs: string) => {
     const m = readManifest();
     if (!m) {
-      console.error("Nothing installed. Run `aetheraclaw reference install <file>` first.");
+      console.error("Nothing installed. Run `orion reference install <file>` first.");
       process.exit(1);
     }
     for (const pair of pairs.split(",").filter(Boolean)) {

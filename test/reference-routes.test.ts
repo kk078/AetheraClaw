@@ -16,7 +16,7 @@ let dbFile: string;
 let cfg: { referenceDbPath: string; referenceDbLicensedRoles?: string[] };
 
 beforeAll(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "aetheraclaw-routes-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "orion-routes-"));
   dbFile = path.join(dir, "reference.db");
   const db = openDatabase(dbFile);
   db.exec(`
@@ -259,15 +259,15 @@ describe("taking the file into the installation", () => {
   let prevHome: string | undefined;
 
   beforeEach(() => {
-    prevHome = process.env.AETHERACLAW_HOME;
-    home = fs.mkdtempSync(path.join(os.tmpdir(), "aetheraclaw-managed-"));
-    process.env.AETHERACLAW_HOME = home;
+    prevHome = process.env.ORION_HOME;
+    home = fs.mkdtempSync(path.join(os.tmpdir(), "orion-managed-"));
+    process.env.ORION_HOME = home;
     resetCatalogueCache();
   });
 
   afterAll(() => {
-    if (prevHome === undefined) delete process.env.AETHERACLAW_HOME;
-    else process.env.AETHERACLAW_HOME = prevHome;
+    if (prevHome === undefined) delete process.env.ORION_HOME;
+    else process.env.ORION_HOME = prevHome;
   });
 
   it("copies, compacts, and records what it installed", async () => {
@@ -358,15 +358,15 @@ describe("a configured path that no longer exists", () => {
   let prevHome: string | undefined;
 
   beforeEach(() => {
-    prevHome = process.env.AETHERACLAW_HOME;
-    home = fs.mkdtempSync(path.join(os.tmpdir(), "aetheraclaw-gone-"));
-    process.env.AETHERACLAW_HOME = home;
+    prevHome = process.env.ORION_HOME;
+    home = fs.mkdtempSync(path.join(os.tmpdir(), "orion-gone-"));
+    process.env.ORION_HOME = home;
     resetCatalogueCache();
   });
 
   afterAll(() => {
-    if (prevHome === undefined) delete process.env.AETHERACLAW_HOME;
-    else process.env.AETHERACLAW_HOME = prevHome;
+    if (prevHome === undefined) delete process.env.ORION_HOME;
+    else process.env.ORION_HOME = prevHome;
   });
 
   it("does NOT silently answer from the managed copy instead", async () => {

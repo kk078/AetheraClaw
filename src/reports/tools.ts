@@ -51,7 +51,7 @@ export function loadEras(ctx: { services: Record<string, unknown> }): StoredEra[
 export const reportGenerateTool = defineTool({
   name: "report_generate",
   description:
-    "Produce the practice report: production billed, accounts receivable aged from the DATE OF SERVICE with the standard 30/60/90/120 buckets, and denials ranked by dollars rather than by count. Writes a Markdown summary plus CSVs that open in Excel. Computed from claims recorded at build time and remittances that have been parsed — claims submitted outside AetheraClaw are not in the numbers, and the report says so.",
+    "Produce the practice report: production billed, accounts receivable aged from the DATE OF SERVICE with the standard 30/60/90/120 buckets, and denials ranked by dollars rather than by count. Writes a Markdown summary plus CSVs that open in Excel. Computed from claims recorded at build time and remittances that have been parsed — claims submitted outside Orion are not in the numbers, and the report says so.",
   schema: z.object({
     output_dir: z.string().default("reports").describe("Workspace-relative directory"),
     title: z.string().default("Practice report"),

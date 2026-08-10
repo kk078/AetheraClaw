@@ -1,4 +1,5 @@
 import path from "node:path";
+import { resolveDbFile } from "../config/legacy.js";
 
 // ── Multi-tenant isolation ───────────────────────────────────────────────────
 // The requirement is that one health system's data can never be read by
@@ -86,7 +87,7 @@ export function tenantDbPath(root: string, slug: string): string {
   if (resolved !== path.join(base, check.slug)) {
     throw new Error(`tenant path escaped the tenants directory: ${resolved}`);
   }
-  return path.join(dir, "aetheraclaw.db");
+  return resolveDbFile(dir);
 }
 
 /**

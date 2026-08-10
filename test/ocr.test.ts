@@ -207,7 +207,7 @@ describe("ocrUnavailableNote", () => {
 // is in the lockfile, so CI installs it, and a test written as "skip unless the
 // package happens to be absent" would stop running in exactly the place the
 // degradation claim needs checking.
-const ABSENT_ENGINE = "aetheraclaw-no-such-ocr-engine";
+const ABSENT_ENGINE = "orion-no-such-ocr-engine";
 
 describe("ocrStatus", () => {
   it("reports unavailability with a reason instead of throwing", async () => {
@@ -218,13 +218,13 @@ describe("ocrStatus", () => {
     // The cache path is reported even when the engine is missing — "OCR is
     // unavailable" without saying where it looked sends people to delete the
     // wrong directory.
-    expect(status.dataDir).toBe(path.join(process.env.AETHERACLAW_HOME!, "ocr"));
+    expect(status.dataDir).toBe(path.join(process.env.ORION_HOME!, "ocr"));
   });
 
   it("reports availability with no reason when the engine loads", async () => {
     const status = await ocrStatus();
     expect(typeof status.available).toBe("boolean");
-    expect(status.dataDir).toBe(path.join(process.env.AETHERACLAW_HOME!, "ocr"));
+    expect(status.dataDir).toBe(path.join(process.env.ORION_HOME!, "ocr"));
     if (status.available) expect(status.reason).toBe("");
     else expect(status.reason).toContain(OCR_INSTALL_HINT);
   });
@@ -252,7 +252,7 @@ describe("runOcr", () => {
     // "is OCR set up?" answers yes on the evidence of a directory nothing put
     // anything in.
     const { existsSync } = await import("node:fs");
-    const dataDir = path.join(process.env.AETHERACLAW_HOME!, "ocr");
+    const dataDir = path.join(process.env.ORION_HOME!, "ocr");
     await expect(runOcr(Buffer.from([0x89, 0x50]), "image", { specifier: ABSENT_ENGINE })).rejects.toThrow();
     expect(existsSync(dataDir)).toBe(false);
   });

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // ── SQLite schema inspector ──────────────────────────────────────────────────
 // Prints what is inside a SQLite file so you can decide whether to attach it as
-// a reference database (`healthcare.referenceDbPath`) before AetheraClaw reads
+// a reference database (`healthcare.referenceDbPath`) before Orion reads
 // a single row of it.
 //
 //   node scripts/inspect-db.mjs /path/to/reference.db
@@ -27,7 +27,7 @@ import { createRequire } from "node:module";
 const require_ = createRequire(import.meta.url);
 
 function openReadOnly(file) {
-  if (process.env.AETHERACLAW_SQLITE !== "node") {
+  if (process.env.ORION_SQLITE !== "node") {
     try {
       const Database = require_("better-sqlite3");
       const db = new Database(file, { readonly: true });

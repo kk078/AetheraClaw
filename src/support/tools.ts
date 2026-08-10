@@ -437,7 +437,7 @@ export const remediateApplyTool = defineTool({
     return {
       content: [
         `Applied: ${changes} row(s) changed in ${check.table}.`,
-        `Recorded in the audit chain with the statement, the token and the stated reason. Verify with \`aetheraclaw audit verify\`.`,
+        `Recorded in the audit chain with the statement, the token and the stated reason. Verify with \`orion audit verify\`.`,
       ].join("\n"),
     };
   },
