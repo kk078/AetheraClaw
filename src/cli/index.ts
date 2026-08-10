@@ -11,6 +11,7 @@ import { createProvider } from "../providers/index.js";
 import { CASES } from "../eval/cases.js";
 import { renderReport, runEval } from "../eval/run.js";
 import { renderVoiceReport, runVoiceEval } from "../eval/voice-run.js";
+import { renderCorrectness, runCorrectness } from "../eval/correctness.js";
 import { describeManifest, installReference, managedDbPath, readManifest, verifyInstalled, writeManifest } from "../tools/healthcare/reference-store.js";
 import { MemoryStore } from "../memory/store.js";
 import { ToolRegistry } from "../tools/registry.js";
@@ -514,11 +515,21 @@ program
 program
   .command("eval")
   .description("Measure whether the model reaches the right tool — especially the ones deferred behind tool_search")
+  .option("--correctness", "score the SCRUBBER's answers instead of the model's routing — offline, no provider, no key")
   .option("--provider <name>", "anthropic | openai | gemini | ollama")
   .option("--profile <name>", "tool profile")
   .option("--case <id>", "run one case by id")
   .option("--voice", "add the voice families: spoken code recognition, spoken phrasing, and pronunciation")
-  .action(async (opts: { provider?: string; profile?: string; case?: string; voice?: boolean }) => {
+  .action(async (opts: { correctness?: boolean; provider?: string; profile?: string; case?: string; voice?: boolean }) => {
+    // Handled before anything else, because this branch needs no provider, no
+    // key and no database. Routing and correctness are different questions —
+    // the model can reach flawlessly for a scrubber that misses a bundling
+    // violation, and the claim still denies.
+    if (opts.correctness) {
+      const report = runCorrectness();
+      console.log(renderCorrectness(report));
+      process.exit(report.passed === report.total ? 0 : 1);
+    }
     const config = loadConfig();
     if (opts.profile) config.toolProfile = opts.profile;
     const choice = resolveProvider(config, { explicit: opts.provider });

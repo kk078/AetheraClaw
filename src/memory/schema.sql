@@ -1007,3 +1007,25 @@ CREATE INDEX IF NOT EXISTS idx_archives_session ON document_archives(session_id,
 -- not here. On a database that predates the column, this file runs BEFORE the
 -- back-fill, so an index over archive_id fails with "no such column" and the
 -- store will not open at all. Measured, not theorised.
+
+-- ── Compaction records ──────────────────────────────────────────────────────
+-- One row per time a session's history was folded down to fit the context
+-- window. Kept rather than discarded for two reasons that pull in the same
+-- direction: the agent replays them so a twice-compacted session does not
+-- forget its first hour, and an operator asking "why did it not know that"
+-- gets an answer instead of a shrug.
+--
+-- `facts_json` is the structured extraction; `summary` is the rendered text
+-- actually put in front of the model. Both, because the rendering will change
+-- and the facts should not have to be re-derived from prose when it does.
+CREATE TABLE IF NOT EXISTS session_summaries (
+  id            TEXT PRIMARY KEY,
+  session_id    TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  seq           INTEGER NOT NULL,
+  summary       TEXT NOT NULL,
+  facts_json    TEXT NOT NULL DEFAULT '{}',
+  dropped_count INTEGER NOT NULL DEFAULT 0,
+  created_at    INTEGER NOT NULL,
+  UNIQUE (session_id, seq)
+);
+CREATE INDEX IF NOT EXISTS idx_session_summaries ON session_summaries(session_id, seq);

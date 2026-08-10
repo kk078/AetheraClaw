@@ -177,6 +177,62 @@ export class MemoryStore {
   }
 
   /**
+   * Record one compaction of a session's history.
+   *
+   * Append-only. An earlier summary is never rewritten by a later one, because
+   * the later compaction folds down messages the earlier one already replaced —
+   * overwriting would delete the first hour of a long session and leave no trace
+   * that it had ever been recorded.
+   */
+  saveSessionSummary(
+    sessionId: string,
+    summary: string,
+    facts: unknown,
+    droppedCount: number,
+  ): void {
+    const seqRow = this.db
+      .prepare("SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM session_summaries WHERE session_id = ?")
+      .get(sessionId) as { next: number };
+    this.db
+      .prepare(
+        `INSERT INTO session_summaries (id, session_id, seq, summary, facts_json, dropped_count, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(newId("sum"), sessionId, seqRow.next, summary, JSON.stringify(facts ?? {}), droppedCount, Date.now());
+  }
+
+  /** Every summary for a session, oldest first — the order they must be replayed in. */
+  loadSessionSummaries(sessionId: string): Array<{ seq: number; summary: string; droppedCount: number }> {
+    const rows = this.db
+      .prepare("SELECT seq, summary, dropped_count FROM session_summaries WHERE session_id = ? ORDER BY seq ASC")
+      .all(sessionId) as Array<{ seq: number; summary: string; dropped_count: number }>;
+    return rows.map((r) => ({ seq: r.seq, summary: r.summary, droppedCount: r.dropped_count }));
+  }
+
+  /**
+   * Tool names this session has already used successfully.
+   *
+   * Read to PIN them into the next round's tool set. Once a session has run
+   * `era_parse_835`, dropping it from the catalogue three turns later because a
+   * different question scored higher is a capability disappearing mid-
+   * conversation — the model does not report that, it answers from memory.
+   *
+   * Successful calls only: a tool that errored once is not evidence the session
+   * needs it, and pinning failures would fill the limited pin budget with the
+   * things that did not work.
+   */
+  sessionToolsUsed(sessionId: string, limit = 12): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT tool_name, MAX(created_at) AS last_at FROM tool_calls
+         WHERE session_id = ? AND ok = 1
+         GROUP BY tool_name ORDER BY last_at DESC LIMIT ?`,
+      )
+      .all(sessionId, limit) as Array<{ tool_name: string }>;
+    return rows.map((r) => r.tool_name);
+  }
+
+  /**
    * Save a tool's rendered view.
    *
    * Kept out of `messages` on purpose — see the schema comment. Nothing written
