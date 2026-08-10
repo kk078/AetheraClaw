@@ -21,12 +21,16 @@ const state = {
 
 /** The views a URL fragment may name. Anything else is ignored rather than
     blanking every panel, which is what an unknown id would otherwise do. */
-const VIEWS = ["overview", "console", "modules", "providers", "workbench"];
+const VIEWS = ["overview", "console", "modules", "providers", "workbench", "analytics", "forecast", "swarm"];
 
 function show(view) {
   if (!VIEWS.includes(view)) return;
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${view}`));
   document.querySelectorAll(".navitem").forEach((n) => n.classList.toggle("active", n.dataset.view === view));
+  // Loaded on open, not at boot — see the loaders for why.
+  if (view === "analytics") void loadAnalytics();
+  if (view === "forecast") void loadForecast();
+  if (view === "swarm") void loadSwarm();
   // A URL for the screen you are on. Until now there was none: every panel
   // lived at the same address, so a screen could only be reached by finding and
   // clicking its rail item — and if that item was hard to reach, the screen was
@@ -462,6 +466,144 @@ function emptyState() {
 // first, then re-introduce a fixed set of tags. Escaping before formatting is
 // the whole safety argument — model output is untrusted text, and it reaches
 // this function having passed through a payer's API on the way.
+
+// ── Analytics, forecast and swarm ──────────────────────────────────────
+//
+// Each of these renders a verdict the SERVER computed. Nothing here decides
+// what "underpaid" or "behind" means — two places deciding that is two places
+// that can disagree, and the one on screen would be the one people believe.
+//
+// Loaded when the view is opened rather than at boot: all three read every
+// claim and remittance, and paying that on every page load for screens most
+// visits never open is how a dashboard becomes something people stop opening.
+
+// `money` is already a global from views.js — both files are classic scripts
+// sharing one scope, and redeclaring it with `const` is a SyntaxError that kills
+// the whole of app.js, not just the duplicate line. Caught by opening the page:
+// every view stayed inert and the console said "Identifier 'money' has already
+// been declared". Reuse it; name anything new distinctly.
+const asPercent = (n) => (typeof n === "number" ? `${(n * 100).toFixed(1)}%` : "—");
+/** Percentages that already arrive as 0–100 rather than 0–1. */
+const asPercentPoints = (n) => (typeof n === "number" ? `${n.toFixed(1)}%` : "—");
+
+async function loadAnalytics() {
+  const el = document.getElementById("analytics-body");
+  if (!el) return;
+  try {
+    const d = await fetch("/api/analytics").then((r) => r.json());
+    if (d.empty) {
+      el.textContent = d.note || "Nothing to compute yet.";
+      return;
+    }
+    const tile = (label, value, note) =>
+      `<div class="card"><div class="head"><h4>${esc(label)}</h4></div>` +
+      `<div style="font-size:28px;font-weight:600">${esc(value)}</div>` +
+      // The note is why a figure is what it is, or why it is a dash. Rendering
+      // the number without it is how "83 days in A/R" gets quoted in a meeting
+      // when it was computed from eleven claims.
+      `<p>${esc(note || "")}</p></div>`;
+    const k = d.kpis;
+    const rows = d.payers
+      .map(
+        (p) =>
+          `<tr><td>${esc(p.payer || "(unnamed)")}</td><td>${p.claims}</td><td>${money(p.charged)}</td>` +
+          `<td>${money(p.paid)}</td><td>${asPercent(p.rate)}</td></tr>`,
+      )
+      .join("");
+    el.innerHTML =
+      `<div class="grid">` +
+      tile("Days in A/R", k.daysInAr.value === null ? "—" : String(Math.round(k.daysInAr.value)), k.daysInAr.note) +
+      tile("Acceptance rate", asPercentPoints(k.acceptanceRate.value), k.acceptanceRate.note) +
+      tile("Net collection rate", asPercentPoints(k.netCollectionRate.value), k.netCollectionRate.note) +
+      `</div>` +
+      `<h3 class="section">By payer, from what was actually paid</h3>` +
+      `<div style="overflow-x:auto"><table class="grid-table"><thead><tr>` +
+      `<th>Payer</th><th>Claims</th><th>Charged</th><th>Paid</th><th>Paid / charged</th>` +
+      `</tr></thead><tbody>${rows || '<tr><td colspan="5">No remittances posted.</td></tr>'}</tbody></table></div>` +
+      `<p class="sub">${d.counts.claims} claim(s), ${d.counts.remittances} remittance batch(es).</p>`;
+  } catch (err) {
+    el.textContent = `Analytics could not be loaded: ${err}`;
+  }
+}
+
+async function loadForecast() {
+  const el = document.getElementById("forecast-body");
+  if (!el) return;
+  try {
+    const d = await fetch("/api/forecast").then((r) => r.json());
+    if (d.empty) {
+      // Deliberately not a flat line through one point. A chart drawn from one
+      // data point looks exactly as authoritative as a real one.
+      el.textContent = d.note || "Not enough history to project from.";
+      return;
+    }
+    const max = Math.max(...d.series.map((p) => p.paid), 1);
+    const bars = d.series
+      .map(
+        (p) =>
+          `<div style="display:flex;align-items:center;gap:8px;margin:2px 0">` +
+          `<span style="width:90px;color:var(--ink-2)">${esc(p.week)}</span>` +
+          `<span style="height:12px;background:var(--accent,#6aa);width:${Math.round((p.paid / max) * 320)}px"></span>` +
+          `<span>${money(p.paid)}</span></div>`,
+      )
+      .join("");
+    el.innerHTML =
+      `<div>${bars}</div>` +
+      `<h3 class="section">Next week</h3>` +
+      `<div style="font-size:28px;font-weight:600">${money(d.projection.weeklyMean)}</div>` +
+      `<p>${esc(d.projection.note)}</p>`;
+  } catch (err) {
+    el.textContent = `Forecast could not be loaded: ${err}`;
+  }
+}
+
+async function loadSwarm() {
+  const el = document.getElementById("swarm-body");
+  if (!el) return;
+  try {
+    const d = await fetch("/api/swarm").then((r) => r.json());
+    if (d.empty) {
+      el.textContent = d.note || "Nothing on the board.";
+      return;
+    }
+    const stages = d.stages
+      .map(
+        (s) =>
+          `<div class="card"><div class="head"><h4>${esc(s.stage)}</h4></div>` +
+          `<div style="font-size:24px">${s.count}</div>` +
+          // Money per stage, because ten claims stuck in appeal is a different
+          // morning depending on whether it is $400 or $40,000.
+          `<p>${money(s.amount)} held here</p></div>`,
+      )
+      .join("");
+    const failed = d.failed.length
+      ? `<h3 class="section">Failed — these are not moving</h3>` +
+        `<ul>${d.failed
+          .map(
+            (f) =>
+              `<li>${esc(f.claimRef)} (${esc(f.payer || "no payer")}) at ${esc(f.stage)}, ` +
+              `${f.attempts} attempt(s) — ${esc(f.error)}</li>`,
+          )
+          .join("")}</ul>`
+      : "";
+    const items = d.items
+      .map(
+        (i) =>
+          `<tr><td>${esc(i.claimRef)}</td><td>${esc(i.payer || "")}</td><td>${esc(i.stage)}</td>` +
+          `<td>${money(i.amount)}</td><td>${i.attempts}</td><td>${esc(i.note || "")}</td></tr>`,
+      )
+      .join("");
+    el.innerHTML =
+      `<div class="grid">${stages}</div>` +
+      failed +
+      `<h3 class="section">Items</h3>` +
+      `<div style="overflow-x:auto"><table class="grid-table"><thead><tr>` +
+      `<th>Claim</th><th>Payer</th><th>Stage</th><th>Amount</th><th>Attempts</th><th>Note</th>` +
+      `</tr></thead><tbody>${items}</tbody></table></div>`;
+  } catch (err) {
+    el.textContent = `The swarm board could not be loaded: ${err}`;
+  }
+}
 
 function esc(t) {
   return t.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -1152,6 +1294,18 @@ async function loadProviderNotice() {
   // opens on that screen rather than flashing the dashboard first.
   const wanted = location.hash.replace(/^#/, "");
   if (VIEWS.includes(wanted)) show(wanted);
+
+  // The fragment was read ONCE, at boot. Editing it in the address bar of an
+  // open tab did nothing, and neither did the back button after clicking
+  // through the rail — the URL changed and the screen did not, which is the
+  // most confusing possible outcome because it looks like the page froze.
+  //
+  // show() writes the fragment with replaceState, which does NOT fire
+  // hashchange, so this cannot loop back on itself.
+  window.addEventListener("hashchange", () => {
+    const next = location.hash.replace(/^#/, "");
+    if (VIEWS.includes(next)) show(next);
+  });
   await Promise.all([loadPosture(), loadOverview(), loadModules(), loadSessions(), loadProviderNotice()]);
 })();
 

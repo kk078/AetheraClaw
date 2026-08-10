@@ -263,6 +263,162 @@ export async function buildServer(opts: {
     };
   });
 
+  // ── The three pages whose backends already existed ────────────────────────
+  //
+  // analytics_query, cash_forecast and swarm_board have been callable from the
+  // console since they were written and have never had a screen. That is a real
+  // gap: a KPI you have to know the name of a tool to see is a KPI nobody looks
+  // at, and the swarm's stage board is the one thing an operator needs to glance
+  // at rather than ask about.
+  //
+  // Built as VIEWS in the existing console rather than as standalone HTML pages.
+  // Three separate pages would each need their own copy of the auth handling,
+  // the posture banner and the header, and the Phase 1 history in this file is
+  // three rounds of a bug that came from duplicated view logic. Sharing the
+  // shell is the cheaper mistake.
+  //
+  // Every verdict is computed HERE. The browser paints what it is told — the
+  // same rule the tool-view cards follow, and for the same reason: two places
+  // deciding what "underpaid" means is two places that can disagree.
+
+  app.get("/api/analytics", async () => {
+    try {
+      const ctx = { services: { store } };
+      const claims = loadClaims(ctx);
+      const eras = loadEras(ctx);
+      if (claims.length === 0 && eras.length === 0) {
+        return { empty: true, note: "No claims or remittances are stored yet, so there is nothing to compute." };
+      }
+      const k = computeExecutiveKpis(claims, eras, loadAcks(store), Date.now());
+      // Payer mix from the remittances, because that is where the money
+      // actually landed. Computing it from claims would report what was BILLED
+      // by payer, which is a different question and reads the same on a chart.
+      const byPayer = new Map<string, { paid: number; charged: number; claims: number }>();
+      for (const { payer, era } of eras) {
+        for (const c of era.claims) {
+          const row = byPayer.get(payer) ?? { paid: 0, charged: 0, claims: 0 };
+          row.paid += c.paid;
+          row.charged += c.charged;
+          row.claims += 1;
+          byPayer.set(payer, row);
+        }
+      }
+      return {
+        empty: false,
+        kpis: {
+          daysInAr: { value: k.daysInAr.days, note: k.daysInAr.note },
+          acceptanceRate: { value: k.cleanClaim.acceptanceRate, note: k.cleanClaim.note },
+          netCollectionRate: { value: k.netCollection.rate, note: k.netCollection.note },
+        },
+        payers: [...byPayer.entries()]
+          .map(([payer, r]) => ({
+            payer,
+            claims: r.claims,
+            charged: r.charged,
+            paid: r.paid,
+            // Null rather than 0 when nothing was charged. A zero here would
+            // render as "this payer pays nothing", which is a different and
+            // much more alarming claim than "there is no data".
+            rate: r.charged > 0 ? r.paid / r.charged : null,
+          }))
+          .sort((a, b) => b.paid - a.paid)
+          .slice(0, 25),
+        counts: { claims: claims.length, remittances: eras.length },
+      };
+    } catch (err) {
+      return { empty: true, note: err instanceof Error ? err.message : "Analytics could not be computed." };
+    }
+  });
+
+  app.get("/api/forecast", async () => {
+    try {
+      const ctx = { services: { store } };
+      const eras = loadEras(ctx);
+      if (eras.length < 2) {
+        // Said plainly rather than drawn as a flat line. A forecast from one
+        // data point is a straight line through one point, and it looks exactly
+        // as authoritative as a real one.
+        return {
+          empty: true,
+          note: `Cash forecasting needs a history to extrapolate from. ${eras.length} remittance batch(es) are stored; at least 2 are needed, and the projection is not worth reading under about 8.`,
+        };
+      }
+      // Weekly buckets of money actually received.
+      const weekly = new Map<string, number>();
+      for (const { era, receivedAt } of eras) {
+        const week = new Date(receivedAt - (new Date(receivedAt).getUTCDay() * 86_400_000))
+          .toISOString()
+          .slice(0, 10);
+        const paid = era.claims.reduce((n, c) => n + c.paid, 0);
+        weekly.set(week, (weekly.get(week) ?? 0) + paid);
+      }
+      const series = [...weekly.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([week, paid]) => ({ week, paid }));
+      const recent = series.slice(-8);
+      const mean = recent.reduce((n, p) => n + p.paid, 0) / recent.length;
+      return {
+        empty: false,
+        series,
+        projection: {
+          weeklyMean: mean,
+          basis: recent.length,
+          // The honesty that makes this usable: a mean over eight weeks of a
+          // practice's real receipts is a defensible expectation; it is not a
+          // model, and calling it one would invite decisions it cannot carry.
+          note:
+            `A mean of the last ${recent.length} week(s) of posted payments — not a model. It assumes next week ` +
+            "looks like recent weeks, which is exactly the assumption that fails around a payer change, a holiday, " +
+            "or a fee-schedule update.",
+        },
+      };
+    } catch (err) {
+      return { empty: true, note: err instanceof Error ? err.message : "Forecast could not be computed." };
+    }
+  });
+
+  app.get("/api/swarm", async () => {
+    try {
+      const rows = store.db
+        .prepare(
+          `SELECT id, claim_ref, payer, stage, amount_cents, attempts, last_error, note, updated_at
+           FROM blackboard ORDER BY updated_at DESC LIMIT 200`,
+        )
+        .all() as Array<{
+          id: string; claim_ref: string; payer: string; stage: string;
+          amount_cents: number; attempts: number; last_error: string; note: string; updated_at: number;
+        }>;
+      const byStage = new Map<string, { count: number; cents: number }>();
+      for (const r of rows) {
+        const cur = byStage.get(r.stage) ?? { count: 0, cents: 0 };
+        cur.count += 1;
+        cur.cents += r.amount_cents;
+        byStage.set(r.stage, cur);
+      }
+      return {
+        empty: rows.length === 0,
+        note: rows.length === 0 ? "Nothing has been tracked on the swarm board yet." : "",
+        // Money per stage, not just a count. Ten claims stuck in appeal is a
+        // different morning depending on whether it is $400 or $40,000.
+        stages: [...byStage.entries()].map(([stage, v]) => ({ stage, count: v.count, amount: v.cents / 100 })),
+        items: rows.slice(0, 100).map((r) => ({
+          id: r.id,
+          claimRef: r.claim_ref,
+          payer: r.payer,
+          stage: r.stage,
+          amount: r.amount_cents / 100,
+          attempts: r.attempts,
+          note: r.note,
+        })),
+        // Failures listed rather than counted, for the same reason dead-lettered
+        // jobs are: a number tells nobody which claim stopped moving.
+        failed: rows
+          .filter((r) => r.last_error !== "")
+          .map((r) => ({ id: r.id, claimRef: r.claim_ref, payer: r.payer, stage: r.stage, error: r.last_error, attempts: r.attempts })),
+      };
+    } catch (err) {
+      return { empty: true, note: err instanceof Error ? err.message : "The swarm board could not be read." };
+    }
+  });
+
   app.post("/api/sessions", async (req) => {
     const body = (req.body ?? {}) as { title?: string; provider?: string };
     return store.createSession(body.title ?? "", body.provider ?? config.provider);

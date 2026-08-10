@@ -937,3 +937,13 @@ text.ring-txt { fill: var(--ink); font-size: 15px; font-family: var(--mono); fon
   font-size: 0.85rem;
   line-height: 1.4;
 }
+
+/* Tables on the analytics and swarm screens.
+   Scoped to a class of their own rather than styling bare <table>: the console
+   renders model output as markdown, and markdown tables would inherit anything
+   set globally here. */
+.grid-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.grid-table th,
+.grid-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line, #2a2f3a); }
+.grid-table th { color: var(--ink-2, #98a2b3); font-weight: 500; }
+.grid-table td:nth-child(n + 2) { font-variant-numeric: tabular-nums; }
