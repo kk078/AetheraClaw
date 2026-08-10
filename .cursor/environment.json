@@ -1,0 +1,11 @@
+{
+  "name": "ORION",
+  "install": "npm run setup",
+  "terminals": [
+    {
+      "name": "gateway",
+      "command": "npm start"
+    }
+  ],
+  "ports": [4180]
+}
