@@ -60,7 +60,7 @@
     // Not secrets. The AUD is an identifier, not a credential — but it must be
     // right, or a token minted for another Access application would verify.
     "ACCESS_TEAM_DOMAIN": "aetherahealthcare.cloudflareaccess.com",
-    "ACCESS_AUD": "REPLACE_WITH_ACCESS_APPLICATION_AUD"
+    "ACCESS_AUD": "7a589f3f4b5a86659e027264314e93f637b41e07ca7613a9ef50a07fc49a423f"
   },
 
   // GATEWAY_TOKEN is deliberately absent from this file. It is set with
