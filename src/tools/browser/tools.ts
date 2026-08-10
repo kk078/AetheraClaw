@@ -17,6 +17,7 @@ import {
   type PortalConfig,
 } from "./policy.js";
 import { PortalBrowser, describeFields, fieldType, navigateChecked, readVisibleText } from "./session.js";
+import { checkBrowserHealth, renderBrowserHealth } from "./health.js";
 
 function config(ctx: { services: Record<string, unknown> }): Config {
   return ctx.services.config as Config;
@@ -373,5 +374,19 @@ export const portalAuditTool = defineTool({
         })
         .join("\n"),
     };
+  },
+});
+
+export const portalHealthTool = defineTool({
+  name: "portal_health",
+  description:
+    "Check whether this installation can actually drive a browser, before a portal task fails halfway through. " +
+    "Distinguishes 'Playwright is not installed' from 'Playwright is installed and its Chromium is not', because " +
+    "those have different fixes. Call this when a portal tool fails in a way that does not name a page.",
+  schema: z.object({}),
+  execute: async (_input, ctx) => {
+    const cfg = (ctx.services.config as { browser?: { executablePath?: string } } | undefined)?.browser ?? {};
+    const report = await checkBrowserHealth({ executablePath: cfg.executablePath || "" });
+    return { content: renderBrowserHealth(report), isError: report.status !== "ready" };
   },
 });

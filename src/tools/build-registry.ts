@@ -113,6 +113,7 @@ import {
 } from "../swarm/tools.js";
 import {
   portalAuditTool,
+  portalHealthTool,
   portalClickTool,
   portalCloseTool,
   portalFieldsTool,
@@ -126,7 +127,7 @@ import {
 import { TENANCY_TOOLS } from "../tenancy/tools.js";
 import { OPS_TOOLS } from "../ops/tools.js";
 import { SUPPORT_TOOLS } from "../support/tools.js";
-import { MAIL_OPS_TOOLS } from "../channels/email/ops-tools.js";
+import { MAIL_HELD_TOOLS, MAIL_OPS_TOOLS } from "../channels/email/ops-tools.js";
 import { documentExtractTool, documentListTool } from "../ingest/tools.js";
 import { kpiDashboardTool, wrvuReportTool } from "../reports/kpi-tools.js";
 import { contractRateListTool, contractRateSetTool } from "../tools/healthcare/intelligence/contract-tools.js";
@@ -167,6 +168,7 @@ export function buildRegistry(config: Config, store: MemoryStore): ToolRegistry 
     portalScreenshotTool,
     portalCloseTool,
     portalAuditTool,
+    portalHealthTool,
     swarmTrackTool,
     swarmBoardTool,
     swarmPlanTool,
@@ -247,6 +249,10 @@ export function buildRegistry(config: Config, store: MemoryStore): ToolRegistry 
     ...OPS_TOOLS,
     ...SUPPORT_TOOLS,
     ...MAIL_OPS_TOOLS,
+    // Held mail is invisible to every other mail tool by design. Without these
+    // it is also invisible to the operator, and a records request with a clock
+    // on it sits in a table nobody opens.
+    ...MAIL_HELD_TOOLS,
     documentExtractTool,
     documentListTool,
     kpiDashboardTool,
