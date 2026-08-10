@@ -1057,3 +1057,29 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_runnable ON jobs(status, run_after);
 CREATE INDEX IF NOT EXISTS idx_jobs_session ON jobs(session_id, created_at DESC);
+
+-- ── Swarm run log ───────────────────────────────────────────────────────────
+-- Every stage transition, append-only. The board holds the CURRENT stage; this
+-- holds how it got there, which is the only way to answer "why has this claim
+-- been sitting for a week" after the fact.
+--
+-- REPLAY SAFETY lives in the UNIQUE constraint. A transition is identified by
+-- (item, from, to, idempotency_key), so applying the same transition twice —
+-- a retried job, a double-clicked button, a re-delivered webhook — inserts once
+-- and the second attempt is a no-op rather than a second advance. Without it a
+-- replayed advance moves a claim two stages, and a claim that skipped scrubbing
+-- because a request was retried is a defect nobody would think to look for.
+CREATE TABLE IF NOT EXISTS swarm_runs (
+  id              TEXT PRIMARY KEY,
+  item_id         TEXT NOT NULL,
+  claim_ref       TEXT NOT NULL DEFAULT '',
+  from_stage      TEXT NOT NULL,
+  to_stage        TEXT NOT NULL,
+  actor           TEXT NOT NULL DEFAULT '',   -- who or what advanced it
+  automated       INTEGER NOT NULL DEFAULT 0,
+  note            TEXT NOT NULL DEFAULT '',
+  idempotency_key TEXT NOT NULL DEFAULT '',
+  created_at      INTEGER NOT NULL,
+  UNIQUE (item_id, from_stage, to_stage, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_swarm_runs_item ON swarm_runs(item_id, created_at);
