@@ -80,6 +80,32 @@ if (phiValue === "permitted") {
   notes.push(`PHI posture: BLOCKED (${phiValue}) — identifier-bearing documents are refused with 422 and not stored.`);
 }
 
+// ── 3b. Public access, and the one combination that must never ship ──────────
+// PUBLIC_ACCESS="1" serves this hostname to anyone, with no sign-in. That was
+// asked for deliberately for a trial, and it is reported on every deploy so it
+// cannot become the thing nobody remembers turning on.
+//
+// The INTERLOCK is the part that matters. Public and PHI-permitted together is
+// an unauthenticated console over real patient data, and the day the BAA is
+// signed the natural change is one word in the Dockerfile — a change nobody
+// would connect to a flag in a different file. So the two are checked together
+// here, and that combination FAILS the deploy rather than warning about it.
+const publicAccess = /"PUBLIC_ACCESS"\s*:\s*"1"/.test(wrangler);
+if (publicAccess && phiValue === "permitted") {
+  problems.push(
+    "PUBLIC_ACCESS is \"1\" AND ORION_PHI is permitted. That is an unauthenticated console over " +
+      "protected health information, reachable by anyone who learns the hostname. Set PUBLIC_ACCESS " +
+      'to "0" and re-create the Access application (workflow: Access setup) before permitting PHI.',
+  );
+} else if (publicAccess) {
+  notes.push(
+    "Sign-in: NONE. PUBLIC_ACCESS=\"1\" — anyone who reaches this hostname gets the console, the " +
+      "claims database and the tools. Safe only while the data is synthetic and the PHI posture is blocked.",
+  );
+} else {
+  notes.push("Sign-in: Cloudflare Access. Every request must present a verified session.");
+}
+
 // ── 4. The build is real ─────────────────────────────────────────────────────
 // The container runs dist/, and a Dockerfile that copies an empty dist/ starts
 // a process that exits immediately — which Cloudflare reports as an unhealthy

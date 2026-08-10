@@ -3,9 +3,11 @@ import {
   ACCESS_EMAIL_HEADER,
   ACCESS_JWT_HEADER,
   GATEWAY_TOKEN_HEADER,
+  actorFor,
   authorizeRequest,
   classifyBind,
   isLoopbackHost,
+  isPublicAccess,
   isUnauthenticatedPath,
 } from "../src/gateway/auth.js";
 
@@ -176,6 +178,112 @@ describe("authorizeRequest when exposed", () => {
       expect(d.ok).toBe(false);
       expect(d.why).toBe("");
     }
+  });
+});
+
+// ── Public access ────────────────────────────────────────────────────────────
+// The owner asked for a console with no sign-in, for a trial and a
+// presentation, over a stated objection. These tests exist to pin down exactly
+// what that does and — more importantly — what it does NOT relax, so a later
+// reader can tell the deliberate hole from an accidental one.
+
+describe("isPublicAccess", () => {
+  it("accepts only the exact string 1", () => {
+    expect(isPublicAccess("1")).toBe(true);
+    expect(isPublicAccess(" 1 ")).toBe(true);
+  });
+
+  it("rejects everything that merely looks truthy", () => {
+    // The values a hurried edit produces. Every one of these is truthy under a
+    // loose reading, and every one of them would silently unauthenticate the
+    // deployment.
+    for (const v of ["0", "", "true", "yes", "on", "false", "no", "01", "1 1", undefined]) {
+      expect(isPublicAccess(v), String(v)).toBe(false);
+    }
+  });
+});
+
+describe("authorizeRequest with public access on", () => {
+  it("serves an anonymous caller and says the identity is public", () => {
+    const d = authorizeRequest({
+      exposure: "exposed",
+      headers: { [GATEWAY_TOKEN_HEADER]: TOKEN },
+      expectedToken: TOKEN,
+      publicAccess: true,
+    });
+    expect(d.ok).toBe(true);
+    // Not an empty "access" identity — the log has to be able to say nobody was
+    // identified, rather than implying somebody was.
+    expect(d.identity).toEqual({ email: "", subject: "", via: "public" });
+  });
+
+  it("STILL REQUIRES THE EDGE TOKEN", () => {
+    // Public means "no sign-in for a person", not "the container answers the
+    // internet". The edge presents this secret; a browser never does, so this
+    // costs a visitor nothing and keeps the origin addressable only by our own
+    // Worker.
+    for (const headers of [{}, { [GATEWAY_TOKEN_HEADER]: "wrong" }]) {
+      const d = authorizeRequest({ exposure: "exposed", headers, expectedToken: TOKEN, publicAccess: true });
+      expect(d.ok).toBe(false);
+      expect(d.status).toBe(401);
+    }
+  });
+
+  it("still refuses everything when no token is configured", () => {
+    // Public access must not become an accidental escape hatch out of the
+    // fail-closed case. A deployment that is exposed with no secret at all is
+    // misconfigured whichever posture it meant to be in.
+    const d = authorizeRequest({ exposure: "exposed", headers: {}, expectedToken: "", publicAccess: true });
+    expect(d.ok).toBe(false);
+    expect(d.status).toBe(500);
+  });
+
+  it("prefers a real identity when the edge does forward one", () => {
+    // So that putting Access back does not require touching this file. The
+    // Worker only sets this header after verifying the JWT — see
+    // worker/index.ts, which deletes any client-supplied copy first.
+    const d = authorizeRequest({
+      exposure: "exposed",
+      headers: {
+        [GATEWAY_TOKEN_HEADER]: TOKEN,
+        [ACCESS_EMAIL_HEADER]: "coder@clinic.example",
+        [ACCESS_JWT_HEADER]: "eyJhbGciOiJSUzI1NiJ9.x.y",
+      },
+      expectedToken: TOKEN,
+      publicAccess: true,
+    });
+    expect(d.identity?.via).toBe("access");
+    expect(d.identity?.email).toBe("coder@clinic.example");
+  });
+
+  it("changes nothing when it is off", () => {
+    // The same request, one flag apart. Absent the flag the 403 stands.
+    const d = authorizeRequest({
+      exposure: "exposed",
+      headers: { [GATEWAY_TOKEN_HEADER]: TOKEN },
+      expectedToken: TOKEN,
+    });
+    expect(d.ok).toBe(false);
+    expect(d.status).toBe(403);
+  });
+});
+
+describe("actorFor", () => {
+  it("names the person when there is one", () => {
+    expect(actorFor({ email: "coder@clinic.example", subject: "s", via: "access" })).toBe("coder@clinic.example");
+  });
+
+  it("writes 'anonymous' for a public visitor rather than an empty string", () => {
+    // An empty actor lets the store fall back to the agent, and "the software
+    // read this chart" is the one answer that is actively false when a human
+    // did. An access review can act on "anonymous"; it cannot act on a wrong
+    // name.
+    expect(actorFor({ email: "", subject: "", via: "public" })).toBe("anonymous");
+  });
+
+  it("leaves loopback alone so local behaviour is unchanged", () => {
+    expect(actorFor({ email: "", subject: "", via: "loopback" })).toBe("");
+    expect(actorFor(undefined)).toBe("");
   });
 });
 

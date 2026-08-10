@@ -11,9 +11,11 @@
   "compatibility_date": "2026-04-13",
   "compatibility_flags": ["nodejs_compat"],
 
-  // The hostname itself. Access must be configured over this same host in Zero
-  // Trust — the Worker refuses any request arriving without an Access session,
-  // so a missing Access application fails closed rather than publishing the app.
+  // The hostname itself. With PUBLIC_ACCESS off, Access must be configured over
+  // this same host in Zero Trust — the Worker refuses any request arriving
+  // without an Access session, so a missing Access application fails closed
+  // rather than publishing the app. With PUBLIC_ACCESS on (see vars, below),
+  // that refusal is deliberately lifted and this hostname is open to anyone.
   "routes": [
     {
       "pattern": "orion.aetheraonline.com",
@@ -59,8 +61,32 @@
   "vars": {
     // Not secrets. The AUD is an identifier, not a credential — but it must be
     // right, or a token minted for another Access application would verify.
+    //
+    // Kept even while PUBLIC_ACCESS is "1": if a token IS presented it is still
+    // verified against these, and putting Access back is then a one-character
+    // edit below rather than a re-derivation of values nobody remembers.
     "ACCESS_TEAM_DOMAIN": "aetherahealthcare.cloudflareaccess.com",
-    "ACCESS_AUD": "7a589f3f4b5a86659e027264314e93f637b41e07ca7613a9ef50a07fc49a423f"
+    "ACCESS_AUD": "7a589f3f4b5a86659e027264314e93f637b41e07ca7613a9ef50a07fc49a423f",
+
+    // ── THIS HOSTNAME IS PUBLIC ──────────────────────────────────────────────
+    // "1" means no sign-in: the Worker serves an anonymous request and the
+    // origin serves it too (ORION_PUBLIC, forwarded by worker/index.ts). Anyone
+    // who learns the hostname gets the console, the claims database, the shell
+    // and filesystem tools, and the payer-portal browser.
+    //
+    // Set at the owner's explicit instruction for a trial and a presentation,
+    // over a raised objection, and it is written here rather than achieved by
+    // deleting the check so that what the deployment does is legible in a diff.
+    //
+    // The demo data is synthetic (ORION_SEED_DEMO in the Dockerfile) and the
+    // PHI posture is `blocked` pending the BAA, so a real chart cannot be
+    // ingested while this stands. Those two facts are what make this survivable;
+    // change either and this line must be reconsidered on the same day.
+    //
+    // TO CLOSE IT: set this to "0", deploy, and re-create the Access
+    // application (workflow: access-setup.yml). Both halves, or the state on
+    // Cloudflare will not match this file.
+    "PUBLIC_ACCESS": "1"
   },
 
   // GATEWAY_TOKEN is deliberately absent from this file. It is set with

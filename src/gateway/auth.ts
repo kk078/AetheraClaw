@@ -54,7 +54,14 @@ export interface Identity {
   /** Stable subject id from the identity proxy, or "" for a local operator. */
   subject: string;
   /** How the claim was established. Recorded so an audit row can say. */
-  via: "loopback" | "access";
+  /**
+   * How the claim was established.
+   *
+   * "public" is not a weaker "access" — it means no identity was established
+   * at all, and anything that records an actor must say so rather than leave a
+   * blank that reads like a missing field.
+   */
+  via: "loopback" | "access" | "public";
 }
 
 export interface AuthDecision {
@@ -99,6 +106,26 @@ export interface AuthInput {
    * Empty means none is configured — which is fine on loopback and fatal off it.
    */
   expectedToken: string;
+  /**
+   * Serve anyone who reaches the edge, with no identity at all.
+   *
+   * OFF unless explicitly turned on, and it is a decision rather than a
+   * convenience: with this set there is no authentication in front of the
+   * console, its admin API, the claims database, the shell tool, the
+   * filesystem tool, or the browser holding payer portal credentials. Anyone
+   * who learns the hostname has all of it.
+   *
+   * It exists because a fully public demo is a legitimate thing to want, and
+   * because the alternative — people commenting out the identity check when
+   * they want one — produces the same exposure with nothing naming it. Here it
+   * has a name, it is off by default, it is reported at startup, and the tests
+   * below state exactly what it gives away.
+   *
+   * The shared secret is still required even in this mode. It costs a public
+   * visitor nothing (the edge presents it, not the browser) and it keeps the
+   * container from being addressable by anything other than our own Worker.
+   */
+  publicAccess?: boolean;
 }
 
 function header(headers: AuthInput["headers"], name: string): string {
@@ -159,6 +186,24 @@ export function authorizeRequest(input: AuthInput): AuthDecision {
 
   const email = header(headers, ACCESS_EMAIL_HEADER);
   const jwt = header(headers, ACCESS_JWT_HEADER);
+
+  if (input.publicAccess) {
+    // No identity is demanded and none is invented. `via: "public"` is carried
+    // through to the PHI access log so those rows say plainly that nobody was
+    // identified, rather than attributing the read to a name that was never
+    // established. An access review that cannot tell "anonymous" from "a
+    // person" is worse than one that reports the truth.
+    //
+    // A verified email is still preferred if one somehow arrives, so turning
+    // Access back on does not require touching this file again.
+    return {
+      ok: true,
+      identity: email === "" ? { email: "", subject: "", via: "public" } : { email, subject: email, via: "access" },
+      status: 200,
+      why: "",
+    };
+  }
+
   if (email === "" || jwt === "") {
     // The edge proved itself but forwarded no identity. That is a misconfigured
     // Access application, not an anonymous user, and it must not be served as
@@ -177,6 +222,38 @@ export function authorizeRequest(input: AuthInput): AuthDecision {
     status: 200,
     why: "",
   };
+}
+
+/**
+ * Whether the deployment asked to be served to anyone.
+ *
+ * Pure and exactly one accepted value: the string "1". Not "true", not "yes",
+ * not "any non-empty string" — a switch that turns off authentication should
+ * not be flippable by a typo like `ORION_PUBLIC=0"` or an accidental `false`,
+ * both of which are truthy under the usual loose reading.
+ */
+export function isPublicAccess(raw: string | undefined): boolean {
+  return (raw ?? "").trim() === "1";
+}
+
+/**
+ * The name to record against a PHI access, given the proven identity.
+ *
+ * Three outcomes, and the middle one is the point:
+ *
+ *   a verified email  → the person
+ *   public, no email  → "anonymous", said out loud
+ *   loopback          → "", so the store keeps its existing fallback
+ *
+ * Writing "" for a public visitor would let the store attribute the access to
+ * the agent, which is the one answer that is actively false: a real human read
+ * a real chart and the log would name a program. An access review can act on
+ * "anonymous"; it cannot act on a wrong name.
+ */
+export function actorFor(identity: Identity | undefined): string {
+  if (!identity) return "";
+  if (identity.email !== "") return identity.email;
+  return identity.via === "public" ? "anonymous" : "";
 }
 
 /**

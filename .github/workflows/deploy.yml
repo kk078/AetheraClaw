@@ -164,17 +164,27 @@ jobs:
       # Claiming more than that would be worse than claiming less: a green tick
       # on "healthy" that only ever meant "Access answered" is the kind of
       # check people trust once and then stop reading.
+      #
+      # With Access removed (PUBLIC_ACCESS in wrangler.jsonc) a 200 is now the
+      # expected answer and a 3xx means the OPPOSITE of healthy — it means an
+      # Access application is still matching the hostname while the Worker and
+      # the origin have both stopped expecting one, which is the configuration
+      # that 403s every page. It is still accepted rather than failed on,
+      # because it is a real deployment state during the transition; but it says
+      # so loudly instead of calling it expected.
       - name: Verify the hostname is being served
         run: |
           for i in $(seq 1 30); do
             code=$(curl -s -o /dev/null -w "%{http_code}" https://orion.aetheraonline.com/healthz || true)
             case "$code" in
               200)
-                echo "Serving, and reachable without an Access session (attempt $i)."
+                echo "Serving, and reachable with no sign-in (attempt $i)."
                 exit 0 ;;
               301|302|303|307|308)
-                echo "Serving — Access redirected the probe to its login page (HTTP $code, attempt $i)."
-                echo "That is the expected answer for a hostname protected by Access."
+                echo "Serving, but redirected (HTTP $code, attempt $i) — an Access application"
+                echo "still matches this hostname. This deployment is configured public, so the"
+                echo "sign-in page will not go away until that application is deleted:"
+                echo "run the 'Access removal' workflow."
                 exit 0 ;;
               *)
                 echo "attempt $i: HTTP $code" ;;

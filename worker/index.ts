@@ -29,6 +29,20 @@ export interface Env {
   ACCESS_TEAM_DOMAIN: string;
   /** The Access application's AUD tag. A JWT for another app must not work here. */
   ACCESS_AUD: string;
+  /**
+   * "1" serves this hostname to anyone, with no sign-in.
+   *
+   * Set in wrangler.jsonc, so the switch is one line in one file that is
+   * reviewed in a diff — rather than the state of an Access application in a
+   * dashboard, which changes with no commit and no record.
+   *
+   * Turning it on is not only this variable: the Access application in front of
+   * the hostname must ALSO be deleted, or Cloudflare keeps redirecting to its
+   * login page and this Worker is never reached. scripts/access-remove.mjs does
+   * that half. Either half alone leaves the deployment in a state that does not
+   * match what this file says.
+   */
+  PUBLIC_ACCESS?: string;
 
   // ── Model provider keys ────────────────────────────────────────────────────
   // All optional, and whichever are set are forwarded to the container. Listed
@@ -55,6 +69,27 @@ const PROVIDER_KEY_NAMES = [
   "GEMINI_API_KEY",
   "OLLAMA_API_KEY",
 ] as const;
+
+/**
+ * Whether this deployment serves anyone.
+ *
+ * Exactly the string "1", for the same reason src/gateway/auth.ts insists on
+ * it: a switch that removes authentication must not be flippable by a value
+ * that merely looks truthy.
+ */
+export function isPublic(env: Env): boolean {
+  return (env.PUBLIC_ACCESS ?? "").trim() === "1";
+}
+
+/**
+ * The instance a public request is served by.
+ *
+ * There is no verified email in public mode, so there is nothing to derive a
+ * tenant from — and inventing one from a header would let a caller choose which
+ * database to open, which is exactly what tenantKey exists to prevent. One
+ * fixed instance is the honest answer: public means one shared console.
+ */
+const PUBLIC_TENANT = "public";
 
 export class OrionContainer extends Container<Env> {
   defaultPort = 8080;
@@ -105,6 +140,12 @@ export class OrionContainer extends Container<Env> {
       ORION_PORT: "8080",
       ORION_HOME: "/data",
       ORION_GATEWAY_TOKEN: env.GATEWAY_TOKEN,
+      // Forwarded from the Worker rather than baked into the Dockerfile, so the
+      // posture is decided in ONE place. A copy in the image would be a second
+      // switch that can disagree with this one, and the failure mode of that
+      // disagreement is the origin demanding an identity the edge stopped
+      // sending — every page 403, with both files looking correct in isolation.
+      ORION_PUBLIC: isPublic(env) ? "1" : "0",
       ...providerKeys,
     };
   }
@@ -253,26 +294,52 @@ export default {
     }
 
     const token = request.headers.get("Cf-Access-Jwt-Assertion") ?? "";
-    if (token === "") {
-      // No Access session. This means the hostname is not actually protected by
-      // an Access application — a misconfiguration that would otherwise publish
-      // the whole console. Refuse rather than pass it through.
+    const publicMode = isPublic(env);
+
+    let tenant: string;
+    let email = "";
+
+    if (publicMode && token === "") {
+      // Serve the anonymous caller. This is the deployment saying, on purpose,
+      // that this hostname is a public console.
+      tenant = PUBLIC_TENANT;
+    } else if (token === "") {
+      // No Access session and not public. This means the hostname is not
+      // actually protected by an Access application — a misconfiguration that
+      // would otherwise publish the whole console. Refuse rather than pass it
+      // through.
       return new Response("This application requires Cloudflare Access. No access session was presented.", {
         status: 401,
       });
+    } else {
+      // A token WAS presented, so it is verified — in public mode too.
+      //
+      // Public mode lowers the bar for entry; it does not make a forged
+      // identity acceptable. If it skipped verification here, anyone could set
+      // Cf-Access-Jwt-Assertion to unsigned JSON and have the origin write
+      // their chosen name into the PHI access log. An unverifiable token is a
+      // failed claim, not an anonymous visitor, so it is refused rather than
+      // quietly downgraded to public.
+      const claims = await verifyAccessJwt(token, env);
+      if (!claims) return new Response("Access session could not be verified.", { status: 403 });
+      email = claims.email;
+      tenant = tenantKey(claims.email);
     }
 
-    const claims = await verifyAccessJwt(token, env);
-    if (!claims) return new Response("Access session could not be verified.", { status: 403 });
-
-    const instance = getContainer(env.ORION, tenantKey(claims.email));
+    const instance = getContainer(env.ORION, tenant);
 
     // Re-sign the request for the origin. The container trusts the identity
     // headers ONLY when GATEWAY_TOKEN is correct, so this is where a request
     // earns that trust — after the JWT was verified, never before.
     const headers = new Headers(request.headers);
     headers.set("x-aethera-gateway-token", env.GATEWAY_TOKEN);
-    headers.set("cf-access-authenticated-user-email", claims.email);
+    // Deleted first, then set only when proven. Without the delete, a client
+    // could send its own cf-access-authenticated-user-email and — in public
+    // mode, where nothing overwrites it — have the origin trust it, because the
+    // origin trusts that header once the shared token is right. The token is
+    // set right here, by us, so the header has to be scrubbed here too.
+    headers.delete("cf-access-authenticated-user-email");
+    if (email !== "") headers.set("cf-access-authenticated-user-email", email);
 
     const response = await instance.fetch(new Request(request, { headers }));
 

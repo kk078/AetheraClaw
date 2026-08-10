@@ -3,7 +3,7 @@ import { Command } from "commander";
 import path from "node:path";
 import fs from "node:fs";
 import { loadConfig, configDir, apiKeyFor, envVarFor, expandHome, resolveProvider, type ProviderName } from "../config/config.js";
-import { legacyNotice, resolveDbFile } from "../config/legacy.js";
+import { legacyNotice, readEnv, resolveDbFile } from "../config/legacy.js";
 import { PROFILES, PROVIDER_TOOL_LIMITS, renderProfiles, resolveToolLimit, selectTools } from "../tools/profiles.js";
 import { buildBudget, renderBudget } from "../tools/budget.js";
 import { resolveOllamaTarget } from "../providers/openai.js";
@@ -137,6 +137,7 @@ import {
 } from "../tools/browser/tools.js";
 import { SessionManager } from "../gateway/session-manager.js";
 import { buildServer } from "../gateway/server.js";
+import { classifyBind, isPublicAccess } from "../gateway/auth.js";
 import { listDocuments, purgeDocuments } from "../ingest/store.js";
 import { ALL_PROVIDERS, evaluateSet, importFromEnv, promptHidden, renderList } from "./auth.js";
 import { credentialsPath, knownSecretValues, maskKey, removeCredential, setCredential } from "../config/credentials.js";
@@ -256,6 +257,16 @@ program
 
     await app.listen({ host: config.gateway.host, port: config.gateway.port });
     console.log(`Orion gateway: http://${config.gateway.host}:${config.gateway.port}`);
+    // Said at every start, in the log an operator actually reads, because the
+    // one thing worse than an unauthenticated console is an unauthenticated
+    // console nobody remembers turning on.
+    if (isPublicAccess(readEnv("PUBLIC")) && classifyBind(config.gateway.host) === "exposed") {
+      console.log(
+        "PUBLIC ACCESS IS ON (ORION_PUBLIC=1) — every request is served without an identity.\n" +
+          "  Anyone who reaches this hostname has the console, the claims database and the tools.\n" +
+          "  Unset ORION_PUBLIC to require Cloudflare Access again.",
+      );
+    }
     console.log(`Provider: ${config.provider} · Workspace: ${config.workspaceRoot}`);
     console.log(`SQLite: ${store.db.driver}`);
     // Say which names are actually in use. An install that predates the rename
