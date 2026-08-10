@@ -82,6 +82,18 @@ automatically, including after a crash.
 
 ---
 
+## The first live claim
+
+Not a fault — a procedure, and one to read before the day rather than on it:
+**`docs/FIRST-LIVE-SUBMISSION.md`**.
+
+The short version: pick a small clean claim with a long filing window, run
+`claim_dry_run`, run `claim_first_submission_check`, and read what comes back.
+`healthcare.liveSubmissionCap` is 1 and should stay there until the first claim
+has been acknowledged *and* adjudicated. Accepted is not paid.
+
+---
+
 ## A claim is stuck
 
 ```

@@ -83,6 +83,7 @@ import {
   codeUpdateDiffTool,
   policyWatchTool,
 } from "./updates/tools.js";
+import { FIRST_SUBMISSION_TOOLS } from "./clearinghouse/first-submission-tools.js";
 import {
   creditBalanceAddTool,
   creditBalanceDetectTool,
@@ -138,6 +139,7 @@ export function registerHealthcareTools(
     worklistPrioritizeTool,
     // Denial prediction & filing deadlines
     denialRiskTool,
+    ...FIRST_SUBMISSION_TOOLS,
     timelyFilingTool,
     timelyFilingSetTool,
     timelyFilingExceptionTool,

@@ -1083,3 +1083,31 @@ CREATE TABLE IF NOT EXISTS swarm_runs (
   UNIQUE (item_id, from_stage, to_stage, idempotency_key)
 );
 CREATE INDEX IF NOT EXISTS idx_swarm_runs_item ON swarm_runs(item_id, created_at);
+
+-- ── Live submission ledger ──────────────────────────────────────────────────
+-- Every attempt to send an 837 to a REAL payer, recorded before the send rather
+-- than after. Before, because the whole value of the cap is that it holds when
+-- something goes wrong mid-send — a row written only on success would let a
+-- crashed submission be retried past the ceiling, which is exactly the case the
+-- ceiling exists for.
+--
+-- Append-only and never pruned. This is the record of what a practice actually
+-- filed, and it is the first thing anyone asks for when a payer disputes a
+-- filing date.
+CREATE TABLE IF NOT EXISTS live_submissions (
+  id            TEXT PRIMARY KEY,
+  claim_ref     TEXT NOT NULL,
+  payer         TEXT NOT NULL DEFAULT '',
+  connector     TEXT NOT NULL DEFAULT '',
+  environment   TEXT NOT NULL DEFAULT '',
+  supervisor    TEXT NOT NULL DEFAULT '',
+  charge_amount REAL NOT NULL DEFAULT 0,
+  -- The digest of the exact 837 sent. Two rows with the same digest are the
+  -- same claim filed twice, which is the thing to be able to prove or disprove.
+  x12_sha256    TEXT NOT NULL DEFAULT '',
+  outcome       TEXT NOT NULL DEFAULT 'attempted',  -- attempted | accepted | rejected | unknown
+  receipt_id    TEXT NOT NULL DEFAULT '',
+  note          TEXT NOT NULL DEFAULT '',
+  created_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_live_submissions ON live_submissions(created_at DESC);
