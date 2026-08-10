@@ -53,14 +53,20 @@ async function cf(pathname, init = {}) {
   const body = await res.json().catch(() => ({}));
   if (!res.ok || body.success === false) {
     const errs = (body.errors ?? []).map((e) => `${e.code}: ${e.message}`).join("; ");
-    // 403 here almost always means the token is scoped to Workers only, which
-    // is the default when somebody creates a token for deployments. Say so,
-    // because "Authentication error" sends people to regenerate a token that
-    // was never the problem.
+    // 403 almost always means the token is scoped to Workers only, which is
+    // what somebody creates when they set out to do deployments. Cloudflare
+    // reports it as "Authentication error", which sends people to regenerate a
+    // token that was never the problem — so name the permission, and name the
+    // one THIS endpoint needs rather than a general guess, because the two
+    // calls here want different ones and being told the wrong permission is
+    // barely better than being told none.
+    const needed = pathname.includes("/access/organizations")
+      ? "`Access: Organizations, Identity Providers, and Groups` → Read"
+      : "`Access: Apps and Policies` → Edit";
     const hint =
       res.status === 403
-        ? " — the API token is missing the `Access: Apps and Policies Write` permission. " +
-          "A token scoped only for Workers deploys cannot create an Access application."
+        ? ` — the API token is missing ${needed}. Both are needed here, and a token scoped only for ` +
+          "Workers deploys has neither. Edit the token at dash.cloudflare.com → My Profile → API Tokens."
         : "";
     die(`Cloudflare API ${res.status} on ${pathname}: ${errs || res.statusText}${hint}`);
   }
