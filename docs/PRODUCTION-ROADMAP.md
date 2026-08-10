@@ -227,7 +227,16 @@ does not mean "mostly done".
 - [ ] **Phase 3** — intent router, pinned tools, structured context compaction, correctness eval
 - [ ] **Phase 4** — `orion data refresh|status`, startup staleness warning, per-profile required datasets
 - [ ] **Phase 5** — `/analytics.html`, `/forecast.html`, `/swarm.html`
-- [ ] **Phase 6** — `src/jobs/`, WAL, busy retry, job status events
+- [ ] **Phase 6** — `src/jobs/`, WAL, busy retry, job status events.
+  **Observed symptom, recorded before it is forgotten:** on the live deployment,
+  repeated WebSocket connections opened in quick succession while an agent turn
+  is in flight intermittently fail the UPGRADE with HTTP 500. Spaced-out
+  connections succeed every time, and plain HTTP stays 200 throughout, so this
+  is saturation of the single container rather than a broken route. Seen while
+  verifying the Phase 1 gate against production; not caused by it — nothing in
+  Phase 1 touches the upgrade path. This is the concrete thing Phase 6 has to
+  fix, and it is the first evidence that the one-process-one-writer model has a
+  ceiling a demo can reach.
 - [ ] **Phase 7** — `swarm_runs`, SLA fields, dead-letter escalation
 - [ ] **Phase 8** — email quarantine queue, browser health check, voice flag
 - [ ] **Phase 9** — `EhrConnector` + SMART reference connector
