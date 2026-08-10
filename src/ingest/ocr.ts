@@ -220,8 +220,9 @@ interface TesseractModule {
  * adapter: an optional dependency that breaks the build when missing is not
  * optional.
  */
-async function loadTesseract(): Promise<TesseractModule> {
-  const specifier = "tesseract.js";
+const TESSERACT_SPECIFIER = "tesseract.js";
+
+async function loadTesseract(specifier: string = TESSERACT_SPECIFIER): Promise<TesseractModule> {
   try {
     return (await import(specifier)) as TesseractModule;
   } catch (err) {
@@ -242,15 +243,19 @@ async function loadTesseract(): Promise<TesseractModule> {
  */
 let workerPromise: Promise<TesseractWorker> | null = null;
 let workerLang = "";
+let workerSpecifier = "";
 
-async function getWorker(lang: string, langPath: string): Promise<TesseractWorker> {
+async function getWorker(lang: string, langPath: string, specifier: string): Promise<TesseractWorker> {
   // A different language needs different trained data, so the cached worker is
-  // replaced rather than reused with the wrong model loaded.
-  if (workerPromise && workerLang !== lang) await shutdownOcr();
+  // replaced rather than reused with the wrong model loaded. The specifier is
+  // part of the key for the same reason: a worker from one engine module must
+  // never be handed back to a caller that asked for another.
+  if (workerPromise && (workerLang !== lang || workerSpecifier !== specifier)) await shutdownOcr();
   if (!workerPromise) {
     workerLang = lang;
+    workerSpecifier = specifier;
     workerPromise = (async () => {
-      const tesseract = await loadTesseract();
+      const tesseract = await loadTesseract(specifier);
       fs.mkdirSync(langPath, { recursive: true });
       return tesseract.createWorker(lang, undefined, { langPath, cachePath: langPath });
     })();
@@ -260,6 +265,7 @@ async function getWorker(lang: string, langPath: string): Promise<TesseractWorke
     workerPromise.catch(() => {
       workerPromise = null;
       workerLang = "";
+      workerSpecifier = "";
     });
   }
   return workerPromise;
@@ -278,6 +284,7 @@ export async function shutdownOcr(): Promise<void> {
   const pending = workerPromise;
   workerPromise = null;
   workerLang = "";
+  workerSpecifier = "";
   if (!pending) return;
   try {
     const worker = await pending;
@@ -342,11 +349,17 @@ async function rasterizePdf(buf: Buffer): Promise<Buffer[]> {
  * Answers rather than throws, because the callers are status surfaces — the
  * startup banner, a health route, a tool description. A status check that
  * throws when the thing it is checking is absent reports nothing at all.
+ *
+ * `specifier` exists so the ENGINE-MISSING path stays under test. tesseract.js
+ * is in the lockfile, so CI installs it and a test that only exercises the
+ * absent case when the package happens to be absent never runs anywhere it
+ * matters — which is how a degradation path rots into a claim nobody checks.
+ * Pointing this at a module that is not there reproduces the failure exactly.
  */
-export async function ocrStatus(): Promise<OcrStatus> {
+export async function ocrStatus(opts: { specifier?: string } = {}): Promise<OcrStatus> {
   const dataDir = ocrDataDir();
   try {
-    await loadTesseract();
+    await loadTesseract(opts.specifier);
     return { available: true, reason: "", dataDir };
   } catch (err) {
     return { available: false, reason: err instanceof Error ? err.message : String(err), dataDir };
@@ -361,7 +374,11 @@ export async function ocrStatus(): Promise<OcrStatus> {
  * to do with that (`ocrUnavailableNote` is the honest default); what it must
  * never be handed is a successful-looking result holding "".
  */
-export async function runOcr(buf: Buffer, kind: DocumentKind, opts: { langPath?: string } = {}): Promise<OcrResult> {
+export async function runOcr(
+  buf: Buffer,
+  kind: DocumentKind,
+  opts: { langPath?: string; specifier?: string } = {},
+): Promise<OcrResult> {
   if (kind !== "pdf" && kind !== "image") {
     throw new Error(`OCR reads scanned PDFs and images. A ${kind} has no page image to read; nothing here would help it.`);
   }
@@ -370,7 +387,7 @@ export async function runOcr(buf: Buffer, kind: DocumentKind, opts: { langPath?:
   // neither reports the one worth fixing first rather than complaining about
   // poppler when tesseract is the thing that is missing.
   const langPath = opts.langPath ?? ocrDataDir();
-  const worker = await getWorker(DEFAULT_LANG, langPath);
+  const worker = await getWorker(DEFAULT_LANG, langPath, opts.specifier ?? TESSERACT_SPECIFIER);
 
   const images = kind === "pdf" ? await rasterizePdf(buf) : [buf];
   const texts: string[] = [];

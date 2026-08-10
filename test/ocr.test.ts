@@ -202,25 +202,37 @@ describe("ocrUnavailableNote", () => {
   });
 });
 
+// A specifier that resolves to nothing, so the engine-missing path is reachable
+// on a machine where tesseract.js IS installed. It has to be, now: the package
+// is in the lockfile, so CI installs it, and a test written as "skip unless the
+// package happens to be absent" would stop running in exactly the place the
+// degradation claim needs checking.
+const ABSENT_ENGINE = "aetheraclaw-no-such-ocr-engine";
+
 describe("ocrStatus", () => {
   it("reports unavailability with a reason instead of throwing", async () => {
+    const status = await ocrStatus({ specifier: ABSENT_ENGINE });
+    expect(status.available).toBe(false);
+    expect(status.reason.length).toBeGreaterThan(0);
+    expect(status.reason).toContain(OCR_INSTALL_HINT);
+    // The cache path is reported even when the engine is missing — "OCR is
+    // unavailable" without saying where it looked sends people to delete the
+    // wrong directory.
+    expect(status.dataDir).toBe(path.join(process.env.AETHERACLAW_HOME!, "ocr"));
+  });
+
+  it("reports availability with no reason when the engine loads", async () => {
     const status = await ocrStatus();
     expect(typeof status.available).toBe("boolean");
-    // The cache path is reported either way — "OCR is unavailable" without
-    // saying where it looked sends people to delete the wrong directory.
     expect(status.dataDir).toBe(path.join(process.env.AETHERACLAW_HOME!, "ocr"));
-    if (status.available) {
-      expect(status.reason).toBe("");
-    } else {
-      expect(status.reason.length).toBeGreaterThan(0);
-      expect(status.reason).toContain(OCR_INSTALL_HINT);
-    }
+    if (status.available) expect(status.reason).toBe("");
+    else expect(status.reason).toContain(OCR_INSTALL_HINT);
   });
 
   it("does not create or download anything just by being asked", async () => {
     const { existsSync } = await import("node:fs");
-    const status = await ocrStatus();
-    if (!status.available) expect(existsSync(status.dataDir)).toBe(false);
+    const status = await ocrStatus({ specifier: ABSENT_ENGINE });
+    expect(existsSync(status.dataDir)).toBe(false);
   });
 });
 
@@ -230,10 +242,30 @@ describe("runOcr", () => {
   });
 
   it("names the install command when tesseract is not installed", async () => {
-    const status = await ocrStatus();
-    if (status.available) return; // installed here; the missing-engine path cannot be exercised
-    await expect(runOcr(Buffer.from([0x89, 0x50, 0x4e, 0x47]), "image")).rejects.toThrow(
-      new RegExp(OCR_INSTALL_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    await expect(
+      runOcr(Buffer.from([0x89, 0x50, 0x4e, 0x47]), "image", { specifier: ABSENT_ENGINE }),
+    ).rejects.toThrow(new RegExp(OCR_INSTALL_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  });
+
+  it("checks the engine BEFORE it writes a language directory", async () => {
+    // Order matters: a missing engine must not leave an empty ocr/ behind, or
+    // "is OCR set up?" answers yes on the evidence of a directory nothing put
+    // anything in.
+    const { existsSync } = await import("node:fs");
+    const dataDir = path.join(process.env.AETHERACLAW_HOME!, "ocr");
+    await expect(runOcr(Buffer.from([0x89, 0x50]), "image", { specifier: ABSENT_ENGINE })).rejects.toThrow();
+    expect(existsSync(dataDir)).toBe(false);
+  });
+
+  it("does not cache a failed startup, so a later call retries instead of inheriting it", async () => {
+    // The poisoned-cache bug: one failure sticking to `workerPromise` would make
+    // every subsequent OCR in the process fail with a stale rejection, long
+    // after whatever caused it was fixed.
+    await expect(runOcr(Buffer.from([0x89]), "image", { specifier: ABSENT_ENGINE })).rejects.toThrow(
+      /not installed/i,
+    );
+    await expect(runOcr(Buffer.from([0x89]), "image", { specifier: ABSENT_ENGINE })).rejects.toThrow(
+      /not installed/i,
     );
   });
 });
