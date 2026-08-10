@@ -44,6 +44,12 @@ import {
   type AuthState,
 } from "../speech/authorization.js";
 import {
+  authorizeRequest,
+  classifyBind,
+  isUnauthenticatedPath,
+  type Identity,
+} from "./auth.js";
+import {
   announceWorklistStart,
   applyCommand,
   parseWorklistCommand,
@@ -129,6 +135,31 @@ export async function buildServer(opts: {
   // spreadsheet more. Fastify's 1 MB default would refuse both with a message
   // about the body being too large, which reads as a bug rather than a limit.
   const app = Fastify({ logger: false, bodyLimit: 32 * 1024 * 1024 });
+
+  // ── The door ───────────────────────────────────────────────────────────────
+  // Registered before every route, including the static file handler and the
+  // WebSocket upgrade, because a control that covers most of the surface covers
+  // none of it: the console's own JavaScript is what calls the admin routes, and
+  // an unauthenticated /app.js is enough to learn what to call.
+  //
+  // On loopback this is a no-op and local use is unchanged. Off loopback it is
+  // the only thing standing in front of an admin API over PHI.
+  const exposure = classifyBind(config.gateway.host);
+  const gatewayToken = process.env.AETHERACLAW_GATEWAY_TOKEN ?? "";
+  app.addHook("onRequest", async (req, reply) => {
+    if (isUnauthenticatedPath(req.url)) return;
+    const decision = authorizeRequest({ exposure, headers: req.headers, expectedToken: gatewayToken });
+    if (decision.ok) {
+      // Carried on the request so PHI rows can name a person rather than a
+      // socket. Anything that logs an access reads this instead of guessing.
+      (req as { identity?: Identity }).identity = decision.identity;
+      return;
+    }
+    // `why` is populated only for the misconfiguration case, and that one is
+    // the operator's own deployment talking to them. An unauthenticated caller
+    // gets a bare status with no hint about what is missing.
+    await reply.code(decision.status).send(decision.why === "" ? { error: "unauthorized" } : { error: decision.why });
+  });
 
   // Uploads arrive as raw bytes, under a CATCH-ALL content type.
   //

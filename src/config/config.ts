@@ -276,6 +276,31 @@ export function configDir(): string {
     : path.join(os.homedir(), ".aetheraclaw");
 }
 
+/**
+ * Let the environment set the listening address.
+ *
+ * Needed because a container has no config file to edit and no command line to
+ * extend: the image is built once and configured by environment, which is why
+ * AETHERACLAW_HOME already works this way.
+ *
+ * Applied AFTER the schema parse and BEFORE any CLI override, so precedence
+ * reads the way people expect — flag beats environment beats file. A port that
+ * is not a number in range is IGNORED rather than coerced: `parseInt` turns
+ * "8080abc" into 8080 and "" into NaN, and a gateway that quietly listens
+ * somewhere other than where it was told is worse than one that uses its
+ * default.
+ */
+export function applyGatewayEnv(cfg: Config, env: NodeJS.ProcessEnv): Config {
+  const host = env.AETHERACLAW_HOST?.trim();
+  if (host) cfg.gateway.host = host;
+  const rawPort = env.AETHERACLAW_PORT?.trim();
+  if (rawPort && /^\d+$/.test(rawPort)) {
+    const port = Number(rawPort);
+    if (port > 0 && port <= 65535) cfg.gateway.port = port;
+  }
+  return cfg;
+}
+
 export function loadConfig(overrides: Partial<Config> = {}): Config {
   const dir = configDir();
   const file = path.join(dir, "config.json5");
@@ -289,6 +314,7 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
   }
   const merged = { ...(raw as Record<string, unknown>), ...overrides };
   const cfg = ConfigSchema.parse(merged);
+  applyGatewayEnv(cfg, process.env);
   // Absolute, always. This is the confinement root every file tool resolves
   // against, and a relative one moves with the process's working directory —
   // so the same config would confine to two different folders depending on

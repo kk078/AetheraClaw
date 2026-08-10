@@ -1,0 +1,73 @@
+{
+  // Deployment of AetheraClaw to aetheraonline.com.
+  //
+  // Read this next to worker/index.ts and Dockerfile — the three describe one
+  // arrangement: a Worker that verifies Cloudflare Access and pins each tenant
+  // to one container instance, a container running the Node gateway, and an R2
+  // bucket holding the database snapshot that makes an ephemeral disk survivable.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "aetheraclaw",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-04-13",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // The hostname itself. Access must be configured over this same host in Zero
+  // Trust — the Worker refuses any request arriving without an Access session,
+  // so a missing Access application fails closed rather than publishing the app.
+  "routes": [
+    {
+      "pattern": "app.aetheraonline.com",
+      "custom_domain": true
+    }
+  ],
+
+  "containers": [
+    {
+      "class_name": "AetheraClawContainer",
+      "image": "./Dockerfile",
+      // standard-1: the gateway loads ~31 MB of reference datasets, keeps a
+      // SQLite working set, and shells out to pdftoppm for OCR. The lite class
+      // runs out of memory on a batch of scanned EOBs.
+      "instance_type": "standard-1",
+      "max_instances": 20
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "AETHERACLAW",
+        "class_name": "AetheraClawContainer"
+      }
+    ]
+  },
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["AetheraClawContainer"]
+    }
+  ],
+
+  "r2_buckets": [
+    {
+      "binding": "SNAPSHOTS",
+      "bucket_name": "aetheraclaw-snapshots"
+    }
+  ],
+
+  "vars": {
+    // Not secrets. The AUD is an identifier, not a credential — but it must be
+    // right, or a token minted for another Access application would verify.
+    "ACCESS_TEAM_DOMAIN": "aethera.cloudflareaccess.com",
+    "ACCESS_AUD": "REPLACE_WITH_ACCESS_APPLICATION_AUD"
+  },
+
+  // GATEWAY_TOKEN is deliberately absent from this file. It is set with
+  // `wrangler secret put GATEWAY_TOKEN` and stored encrypted; the same value
+  // goes to the container as AETHERACLAW_GATEWAY_TOKEN. A secret committed to
+  // a repository is a secret published to everyone who ever clones it.
+  "observability": {
+    "enabled": true
+  }
+}

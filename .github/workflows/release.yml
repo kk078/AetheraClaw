@@ -1,0 +1,88 @@
+name: Release
+
+# ── Version, tag, publish ────────────────────────────────────────────────────
+# One job, run when rcm-base moves: work out the next version from the commits
+# since the last tag, write it into package.json and a changelog, tag it, and
+# cut a GitHub release. Deployment is NOT here — deploy.yml watches for the tag,
+# so what reaches aetheraonline.com is always a released version with a number
+# somebody can name, rather than "whatever was on the branch at the time".
+#
+# The split matters when something goes wrong at 2am: rolling back is checking
+# out a tag and redeploying it, not reconstructing what the branch looked like.
+
+on:
+  push:
+    branches: [rcm-base]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Force a specific bump instead of reading the commits"
+        required: false
+        type: choice
+        options: ["", patch, minor, major]
+
+concurrency:
+  group: release
+  # NOT cancel-in-progress. A cancelled release can leave a tag pushed and no
+  # release created, and the next run then computes its version from a tag whose
+  # commits were never published.
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # Don't loop: this job pushes a commit, and that push would start it again.
+    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      released: ${{ steps.version.outputs.released }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tags, and every commit since the last one
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+      # The gate. A release is a promise that this code works; running the suite
+      # here rather than trusting the branch's last CI run closes the window
+      # where a merge queue lands two green PRs that are red together.
+      - run: npx tsc --noEmit
+      - run: npm run typecheck:test
+      - run: npm test
+      - run: AETHERACLAW_SQLITE=node npm test
+      - run: npm run build
+
+      - id: version
+        run: node scripts/release-version.mjs
+        env:
+          FORCED_BUMP: ${{ inputs.bump }}
+
+      - name: Commit, tag and push
+        if: steps.version.outputs.released == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json CHANGELOG.md
+          git commit -m "chore(release): v${{ steps.version.outputs.version }}"
+          git tag -a "v${{ steps.version.outputs.version }}" -m "v${{ steps.version.outputs.version }}"
+          git push origin HEAD:rcm-base
+          git push origin "v${{ steps.version.outputs.version }}"
+
+      - name: Create the GitHub release
+        if: steps.version.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${{ steps.version.outputs.version }}" \
+            --title "v${{ steps.version.outputs.version }}" \
+            --notes-file .release-notes.md
