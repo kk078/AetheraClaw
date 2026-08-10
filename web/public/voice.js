@@ -107,6 +107,39 @@
 
   // ── Chrome ─────────────────────────────────────────────────────────────────
 
+  /**
+   * The mic button when speech is turned OFF.
+   *
+   * Previously this file simply returned from boot() when the server said
+   * disabled, so nothing was mounted at all: no button, no menu item, no
+   * message. From the outside that is indistinguishable from a product with no
+   * voice interface — the feature exists, is tested, and is invisible.
+   *
+   * So the affordance is always present and says which it is. A control that is
+   * visibly off teaches the reader that the capability exists and how to turn
+   * it on; a control that is absent teaches them nothing.
+   */
+  function mountDisabled() {
+    const box = document.querySelector(".composer .box");
+    if (!box) return;
+    const mic = document.createElement("button");
+    mic.className = "attach mic off";
+    mic.id = "mic";
+    mic.type = "button";
+    mic.textContent = "🎙";
+    mic.title = "Voice is turned off in this deployment — click for why.";
+    mic.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      window.alert(
+        "Voice is turned off in this deployment.\n\n" +
+          (V.cfg?.status || "") +
+          "\n\nTo turn it on, set ORION_SPEECH=1 (and optionally ORION_SPEECH_ENGINE) " +
+          "in the environment, or speech.enabled in config.json5.",
+      );
+    });
+    box.insertBefore(mic, $("#send"));
+  }
+
   function mount() {
     const box = document.querySelector(".composer .box");
     if (!box) return;
@@ -1075,7 +1108,10 @@
     } catch {
       return;
     }
-    if (!V.cfg?.enabled) return;
+    if (!V.cfg?.enabled) {
+      mountDisabled();
+      return;
+    }
     V.brief = V.cfg.verbosity === "brief";
     mount();
     await loadHints();

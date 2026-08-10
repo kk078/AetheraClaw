@@ -11,6 +11,7 @@ import {
   resolveDbFile,
   resolveHome,
 } from "../src/config/legacy.js";
+import { applyGatewayEnv } from "../src/config/config.js";
 
 // The rename from AetheraClaw to Orion is cheap in source and expensive on
 // disk. What these tests protect against is not a compile error — it is an
@@ -145,5 +146,59 @@ describe("legacyNotice", () => {
     const notice = legacyNotice(`/home/x/.${LEGACY_DIR_NAME}`, `/home/x/.${LEGACY_DIR_NAME}/x.db`, {});
     expect(notice).toMatch(/still work|nothing needs doing/i);
     expect(notice).not.toMatch(/error|fail|deprecated|must/i);
+  });
+});
+
+// ── Environment overrides for a container ────────────────────────────────────
+// A container has no config file to edit and no command line to extend, so
+// anything a hosted deployment must be able to turn on has to be reachable from
+// the environment. The microphone is the case that proved it: speech.enabled
+// defaults to false, voice.js mounted nothing when it was, and the entire voice
+// interface was invisible in production with no way to change it short of
+// rebuilding the image.
+
+describe("applyGatewayEnv", () => {
+  const base = () =>
+    ({
+      gateway: { host: "127.0.0.1", port: 4180 },
+      speech: { enabled: false, engine: "browser" },
+    }) as unknown as Parameters<typeof applyGatewayEnv>[0];
+
+  it("turns the microphone on for exactly \"1\"", () => {
+    expect(applyGatewayEnv(base(), { ORION_SPEECH: "1" }).speech.enabled).toBe(true);
+  });
+
+  it("turns it back off for \"0\", so a config file can be overridden from the environment", () => {
+    const cfg = base();
+    cfg.speech.enabled = true;
+    expect(applyGatewayEnv(cfg, { ORION_SPEECH: "0" }).speech.enabled).toBe(false);
+  });
+
+  it("leaves the file's value alone for anything else", () => {
+    // "true"/"yes"/"on" all read as unset rather than as enable. A switch that
+    // opens a microphone should not be flippable by a value that merely looks
+    // truthy — the same rule the PHI posture and public access both follow.
+    for (const v of ["true", "yes", "on", "", "01"]) {
+      expect(applyGatewayEnv(base(), { ORION_SPEECH: v }).speech.enabled, v).toBe(false);
+    }
+  });
+
+  it("accepts the legacy AETHERACLAW_ prefix, like every other setting", () => {
+    expect(applyGatewayEnv(base(), { AETHERACLAW_SPEECH: "1" }).speech.enabled).toBe(true);
+  });
+
+  it("takes the engine only from the three that exist", () => {
+    expect(applyGatewayEnv(base(), { ORION_SPEECH_ENGINE: "local" }).speech.engine).toBe("local");
+    // A typo must not silently select a transport that ships audio somewhere.
+    expect(applyGatewayEnv(base(), { ORION_SPEECH_ENGINE: "cloudd" }).speech.engine).toBe("browser");
+  });
+
+  it("still does the host and port it always did", () => {
+    const cfg = applyGatewayEnv(base(), { ORION_HOST: "0.0.0.0", ORION_PORT: "8080" });
+    expect(cfg.gateway.host).toBe("0.0.0.0");
+    expect(cfg.gateway.port).toBe(8080);
+    // Not coerced: "8080abc" would become 8080 under parseInt, and a gateway
+    // listening somewhere other than where it was told is worse than a default.
+    expect(applyGatewayEnv(base(), { ORION_PORT: "8080abc" }).gateway.port).toBe(4180);
   });
 });

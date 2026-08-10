@@ -43,6 +43,10 @@ export interface Env {
    * match what this file says.
    */
   PUBLIC_ACCESS?: string;
+  /** "0" turns the microphone back off. Anything else leaves it on. */
+  SPEECH_ENABLED?: string;
+  /** "browser" | "local" | "cloud". See the note in the container constructor. */
+  SPEECH_ENGINE?: string;
 
   // ── Model provider keys ────────────────────────────────────────────────────
   // All optional, and whichever are set are forwarded to the container. Listed
@@ -146,6 +150,17 @@ export class OrionContainer extends Container<Env> {
       // disagreement is the origin demanding an identity the edge stopped
       // sending — every page 403, with both files looking correct in isolation.
       ORION_PUBLIC: isPublic(env) ? "1" : "0",
+      // The microphone. Off by default in config, which on a hosted deployment
+      // meant the voice interface existed and was invisible — no button, no
+      // menu entry, nothing saying why.
+      //
+      // The browser engine is what "on" means here: Chrome sends the captured
+      // audio to Google for recognition, and no BAA covers that. It is
+      // acceptable ONLY because this deployment refuses PHI (ORION_PHI=blocked)
+      // and the seeded data is synthetic. If PHI is ever permitted, this must
+      // move to the "local" engine or come back off.
+      ORION_SPEECH: env.SPEECH_ENABLED === "0" ? "0" : "1",
+      ORION_SPEECH_ENGINE: env.SPEECH_ENGINE || "browser",
       ...providerKeys,
     };
   }

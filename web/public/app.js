@@ -1055,8 +1055,45 @@ async function loadPosture() {
   document.body.prepend(bar);
 }
 
+// ── "There is nowhere to put a key" ────────────────────────────────────────
+// There is: the Providers & keys screen, last item in the rail. But it is the
+// LAST item in a rail of eighteen, and on a deployment with no key configured
+// the first thing anyone does is send a message and watch the turn fail with
+// no idea where to go. A screen nobody can find is a screen that does not
+// exist, so the dashboard now says so and links straight to it.
+//
+// Shown only when NO provider has a key. Once one is configured this is silent
+// — a permanent banner is furniture, and furniture is not read.
+async function loadProviderNotice() {
+  const data = await fetch("/api/providers").then((r) => r.json()).catch(() => null);
+  if (!data?.providers) return;
+  // "ollama" counts as configured only when it has a key; a local Ollama with
+  // no key is the default and is exactly the state that produces a failing
+  // turn on a hosted deployment, where there is no localhost to talk to.
+  if (data.providers.some((p) => p.source && p.source !== "none")) return;
+
+  const wrap = document.querySelector("#view-overview .pad");
+  if (!wrap) return;
+  const bar = el("div", "banner warn");
+  bar.append(
+    el("b", "", "No model provider key is configured. "),
+    document.createTextNode(
+      "The console, the seeded claims, the KPIs and every deterministic tool work without one — " +
+        "but the agent has no model to talk to, so a chat turn will fail. Add a key in ",
+    ),
+  );
+  const link = el("span", "click link", "Providers & keys");
+  link.addEventListener("click", () => show("providers"));
+  bar.append(link, document.createTextNode(" (last item in the left rail)."));
+  // After the title and the wordmark, before the rest of the dashboard: the
+  // first thing read, which is the point.
+  const anchor = wrap.querySelector(".banner");
+  if (anchor) anchor.before(bar);
+  else wrap.prepend(bar);
+}
+
 (async function boot() {
-  await Promise.all([loadPosture(), loadOverview(), loadModules(), loadSessions()]);
+  await Promise.all([loadPosture(), loadOverview(), loadModules(), loadSessions(), loadProviderNotice()]);
 })();
 
 // ── Canvas controls ────────────────────────────────────────────────────
