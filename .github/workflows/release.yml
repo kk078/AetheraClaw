@@ -86,3 +86,22 @@ jobs:
           gh release create "v${{ steps.version.outputs.version }}" \
             --title "v${{ steps.version.outputs.version }}" \
             --notes-file .release-notes.md
+
+  # ── Hand off to the deploy, explicitly ─────────────────────────────────────
+  # deploy.yml also listens on `push: tags`, and that trigger DOES NOT FIRE for
+  # the tag pushed above. GitHub refuses to start workflows from pushes made
+  # with GITHUB_TOKEN — loop prevention — so the first release tagged v0.1.1 and
+  # then nothing happened at all. Nothing failed; there was simply no deploy
+  # run, which is the shape of outage nobody notices until they ask why a fix
+  # is not live.
+  #
+  # Calling deploy as a dependent job removes the dependence on that event. The
+  # tag trigger stays in deploy.yml for a tag pushed by a person, and the
+  # concurrency group there stops the two paths racing if both ever fire.
+  deploy:
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    uses: ./.github/workflows/deploy.yml
+    with:
+      tag: v${{ needs.release.outputs.version }}
+    secrets: inherit

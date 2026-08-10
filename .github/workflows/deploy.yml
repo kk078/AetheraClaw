@@ -10,8 +10,20 @@ name: Deploy
 # points the Worker at it. There is no separate registry step to get out of sync.
 
 on:
+  # Kept for a tag pushed by a PERSON, which does start workflows.
   push:
     tags: ["v*"]
+  # How release.yml hands off. It has to call this explicitly, because the tag
+  # it pushes is pushed with GITHUB_TOKEN and GitHub will not start a workflow
+  # from that — the first release tagged v0.1.1 and no deploy run was created
+  # at all. Nothing failed; there was simply nothing, which is the shape of
+  # outage nobody notices.
+  workflow_call:
+    inputs:
+      tag:
+        description: "Tag to deploy."
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       tag:

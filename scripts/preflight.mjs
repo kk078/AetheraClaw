@@ -94,6 +94,45 @@ if (!fs.existsSync(path.join("dist", "memory", "schema.sql"))) {
   );
 }
 
+// ── 5. The Containers API actually answers this token ────────────────────────
+// The only check here that makes a network call, and it earns it. The v0.1.1
+// deploy passed every other gate, spent ninety seconds building and exporting
+// the container image, and was refused at the push with a 403 on
+// /accounts/{id}/containers/me — Containers is a separate authorisation from
+// Workers, and the token had the second without the first.
+//
+// Everything before the push is wasted work when this is wrong, and the error
+// arrives at the end of the log where it reads as a build failure rather than
+// as a token that was never going to be allowed. Ask the question first.
+//
+// Failure here is a WARNING rather than a blocker, deliberately: a network
+// check that can fail for its own reasons — a blip, an outage, a proxy — must
+// not become a new way for a correct deploy to be refused.
+if (process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ACCOUNT_ID) {
+  try {
+    const res = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/containers/me`,
+      { headers: { authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}` } },
+    );
+    if (res.status === 403 || res.status === 401) {
+      problems.push(
+        `The Containers API refused this token (HTTP ${res.status} on /containers/me). Two causes, and the ` +
+          "first is the one that cannot be fixed with configuration: CONTAINERS REQUIRES THE WORKERS PAID " +
+          "PLAN, so on a free account this is an entitlement, not a permission, and no token scope will " +
+          "open it. If the account is already paid, then it is the account-level Containers permission " +
+          "missing from the token — Containers authorises separately from Workers, so a token that deploys " +
+          "a Worker fine is still refused here, at the image PUSH, after the whole image has been built.",
+      );
+    } else if (!res.ok) {
+      notes.push(`Containers API returned HTTP ${res.status}; continuing, since that may be transient.`);
+    } else {
+      notes.push("Containers API: reachable with this token.");
+    }
+  } catch (err) {
+    notes.push(`Could not reach the Containers API (${err instanceof Error ? err.message : String(err)}); continuing.`);
+  }
+}
+
 // ── Report ───────────────────────────────────────────────────────────────────
 for (const n of notes) console.log(`  ${n}`);
 if (problems.length === 0) {
