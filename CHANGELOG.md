@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.3 — 2026-08-10
+
+- fix: make the provider-key screen reachable, usable and persistent (#11)
+
+
 ## v0.2.2 — 2026-08-10
 
 - fix: make the voice interface and the provider-key screen reachable (#10)
