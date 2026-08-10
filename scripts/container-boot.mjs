@@ -35,7 +35,32 @@ const BUCKET_BINDING_URL = process.env.ORION_SNAPSHOT_URL ?? "";
 const SNAPSHOT_KEY = process.env.ORION_SNAPSHOT_KEY ?? "orion.db";
 const CHECKPOINT_MS = Number(process.env.ORION_CHECKPOINT_MS ?? 60_000);
 
+// ── The shared secret ────────────────────────────────────────────────────────
+// The Worker's /snapshot/ handler compares this and answers 401 without it —
+// and it was never being sent. So configuring ORION_SNAPSHOT_URL did not "turn
+// on persistence": it turned on a 401 that restore() treated as a failure and
+// exited the process over, taking the whole deployment down on first boot.
+// Nobody hit it only because the URL was never set.
+const SNAPSHOT_TOKEN = process.env.ORION_GATEWAY_TOKEN ?? "";
+
+// ── What else has to survive a restart ───────────────────────────────────────
+// The database was the only thing snapshotted, so an API key typed into the
+// Providers & keys screen — which lands in credentials.json — was gone at the
+// next cold start, roughly twenty idle minutes later. From the operator's side
+// that is "I added a key and it did not save", and they are right.
+//
+// config.json5 travels with it because the same screen writes the active
+// provider and the model there; restoring the key without the choice of
+// provider would bring back half of the setting.
+const SIDECARS = [
+  { file: path.join(HOME, "credentials.json"), key: "credentials.json", mode: 0o600 },
+  { file: path.join(HOME, "config.json5"), key: "config.json5", mode: 0o600 },
+];
+
 const log = (msg) => console.log(`[boot] ${msg}`);
+
+const snapshotHeaders = (extra = {}) =>
+  SNAPSHOT_TOKEN ? { "x-aethera-gateway-token": SNAPSHOT_TOKEN, ...extra } : { ...extra };
 
 /**
  * Ask the Worker for the last snapshot.
@@ -45,9 +70,42 @@ const log = (msg) => console.log(`[boot] ${msg}`);
  * indirection is also the access control — the container never holds an R2
  * credential it could leak.
  */
+/**
+ * Set when a restore was configured and did not succeed.
+ *
+ * Checkpointing is then DISABLED for the life of the process. That is the whole
+ * safety property the old `process.exit(1)` was reaching for — an instance that
+ * could not read the snapshot must never write over it — but exiting also took
+ * the site down, turning one bad environment variable into a total outage.
+ * Refusing to write achieves the same protection and keeps the console serving.
+ */
+let snapshotsDisabled = false;
+
+async function restoreOne(key, dest, mode) {
+  const res = await fetch(`${BUCKET_BINDING_URL}/snapshot/${encodeURIComponent(key)}`, {
+    headers: snapshotHeaders(),
+  });
+  if (res.status === 404) return 0;
+  if (!res.ok) throw new Error(`snapshot fetch for ${key} returned ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.writeFileSync(dest, buf);
+  fs.chmodSync(dest, mode);
+  return buf.length;
+}
+
 async function restore() {
   if (BUCKET_BINDING_URL === "") {
     log("no snapshot URL configured — starting with whatever is on disk (ephemeral).");
+    log("anything entered in the console, including provider keys, is lost when this instance stops.");
+    snapshotsDisabled = true;
+    return;
+  }
+  if (SNAPSHOT_TOKEN === "") {
+    // Every call would 401. Say so here rather than letting it look like an R2
+    // problem thirty seconds later.
+    log("SNAPSHOT DISABLED: a snapshot URL is set but ORION_GATEWAY_TOKEN is not, so the Worker would refuse every call.");
+    snapshotsDisabled = true;
     return;
   }
   if (fs.existsSync(DB_PATH)) {
@@ -58,31 +116,35 @@ async function restore() {
     return;
   }
   try {
-    const res = await fetch(`${BUCKET_BINDING_URL}/snapshot/${encodeURIComponent(SNAPSHOT_KEY)}`);
-    if (res.status === 404) {
-      log("no snapshot yet — first boot for this tenant.");
-      return;
+    const bytes = await restoreOne(SNAPSHOT_KEY, DB_PATH, 0o600);
+    if (bytes === 0) log("no snapshot yet — first boot for this tenant.");
+    else log(`restored ${bytes} bytes from snapshot.`);
+
+    // Sidecars are best-effort INDIVIDUALLY: a missing credentials.json is the
+    // ordinary state of a deployment nobody has typed a key into, and it must
+    // not read as a failed restore.
+    for (const s of SIDECARS) {
+      try {
+        const n = await restoreOne(s.key, s.file, s.mode);
+        if (n > 0) log(`restored ${s.key} (${n} bytes).`);
+      } catch (err) {
+        log(`could not restore ${s.key}: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
-    if (!res.ok) throw new Error(`snapshot fetch returned ${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-    fs.writeFileSync(DB_PATH, buf);
-    fs.chmodSync(DB_PATH, 0o600);
-    log(`restored ${buf.length} bytes from snapshot.`);
   } catch (err) {
-    // Refuse to start rather than start empty. An empty database is not a
-    // degraded service, it is a service that will accept new claims into a
-    // world where the old ones do not exist and then checkpoint that over the
-    // snapshot that had them.
+    // Do not start writing over a snapshot this instance could not read. Serve
+    // anyway — an unreachable snapshot is a configuration problem, and a dark
+    // site helps nobody diagnose it.
     log(`RESTORE FAILED: ${err instanceof Error ? err.message : String(err)}`);
-    log("refusing to start on an empty database — a checkpoint would overwrite the real one.");
-    process.exit(1);
+    log("starting anyway with checkpointing DISABLED, so the existing snapshot cannot be overwritten.");
+    log("fix ORION_SNAPSHOT_URL / ORION_GATEWAY_TOKEN and restart to resume persistence.");
+    snapshotsDisabled = true;
   }
 }
 
 let checkpointing = false;
 async function checkpoint(reason) {
-  if (BUCKET_BINDING_URL === "" || !fs.existsSync(DB_PATH)) return;
+  if (snapshotsDisabled || BUCKET_BINDING_URL === "" || !fs.existsSync(DB_PATH)) return;
   // Overlapping checkpoints would race to PUT the same key with different
   // half-copied bytes. Skipping is correct: the next tick sends newer data than
   // the one being skipped would have.
@@ -96,11 +158,29 @@ async function checkpoint(reason) {
     const body = fs.readFileSync(DB_PATH);
     const res = await fetch(`${BUCKET_BINDING_URL}/snapshot/${encodeURIComponent(SNAPSHOT_KEY)}`, {
       method: "PUT",
-      headers: { "content-type": "application/octet-stream" },
+      headers: snapshotHeaders({ "content-type": "application/octet-stream" }),
       body,
     });
     if (!res.ok) throw new Error(`snapshot PUT returned ${res.status}`);
     log(`checkpointed ${body.length} bytes (${reason}).`);
+
+    // The key and the provider choice, alongside the claims. Sent every time
+    // rather than only on change: they are a few hundred bytes, and tracking
+    // "has this changed" is a cache that can be wrong in the direction that
+    // loses the very thing the operator typed.
+    for (const s of SIDECARS) {
+      if (!fs.existsSync(s.file)) continue;
+      try {
+        const put = await fetch(`${BUCKET_BINDING_URL}/snapshot/${encodeURIComponent(s.key)}`, {
+          method: "PUT",
+          headers: snapshotHeaders({ "content-type": "application/octet-stream" }),
+          body: fs.readFileSync(s.file),
+        });
+        if (!put.ok) log(`checkpoint of ${s.key} returned ${put.status}`);
+      } catch (err) {
+        log(`checkpoint of ${s.key} failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
   } catch (err) {
     log(`checkpoint failed (${reason}): ${err instanceof Error ? err.message : String(err)}`);
   } finally {
