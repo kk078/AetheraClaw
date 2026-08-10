@@ -15,8 +15,10 @@ import type { ToolRegistry } from "../tools/registry.js";
 import { computeExecutiveKpis } from "../reports/kpi.js";
 import { loadAcks } from "../reports/kpi-tools.js";
 import { loadClaims, loadEras } from "../reports/tools.js";
-import { extractDocument } from "../ingest/extract.js";
-import { saveDocument } from "../ingest/store.js";
+import { detectKind, extractDocument, type Extraction } from "../ingest/extract.js";
+import { expandArchive, type ArchiveExpansion } from "../ingest/archive.js";
+import { needsOcr, ocrUnavailableNote, runOcr, withOcrText } from "../ingest/ocr.js";
+import { createArchive, saveDocument, updateArchive } from "../ingest/store.js";
 import { credentialsPath, loadCredentials, maskKey, removeCredential, resolveKey, setCredential, shapeWarning } from "../config/credentials.js";
 import { discoverLocal } from "../providers/discover.js";
 import { configPath as providerConfigPath, writeProviderSettings } from "../config/write.js";
@@ -251,6 +253,78 @@ export async function buildServer(opts: {
   // and the response carries the extraction, not the bytes. Nothing is written
   // to the workspace: an upload is not a file drop, and a filename arriving from
   // a browser is attacker-controlled input that should never reach a path.
+  // ── OCR, applied at the door ───────────────────────────────────────────────
+  // Type is detected first; only a document that came back unreadable BECAUSE
+  // it has no text layer — a scan, or a photo of a remittance — is sent to OCR.
+  // A short-but-real document is left alone: replacing a correct answer with a
+  // machine's guess at the same words is a loss, not a gain.
+  //
+  // The provenance rides into the stored document, because a coder reading an
+  // OCR'd allowed amount needs to know the digits were recognised rather than
+  // read.
+  const readable = async (extraction: Extraction, bytes: Buffer): Promise<Extraction> => {
+    if (config.ingest.ocr === "off" || !needsOcr(extraction)) return extraction;
+    try {
+      const ocr = await runOcr(bytes, extraction.kind);
+      return withOcrText(extraction, ocr);
+    } catch {
+      // Not installed, or it failed on this file. Keep the original refusal and
+      // add the install hint — never return empty text as though the document
+      // were blank, which is how a scanned EOB silently becomes nothing.
+      return ocrUnavailableNote(extraction);
+    }
+  };
+
+  /**
+   * Work an archive's entries, pushing progress as it goes.
+   *
+   * `sessions.broadcast` rather than a new AgentEvent member: this happens with
+   * no turn running, and AgentEvent is the vocabulary of a turn. ServerMessage
+   * is already an open `{ type, ... }`, and the gateway already pushes an
+   * ad-hoc frame this way for cancel.
+   */
+  const processArchive = async (archiveId: string, sessionId: string, expansion: ArchiveExpansion): Promise<void> => {
+    const total = expansion.entries.length;
+    let processed = 0;
+    let failed = 0;
+    let ocrCount = 0;
+
+    const push = (current: string, status: string) =>
+      sessions.broadcast(sessionId, {
+        type: "archive_progress",
+        archiveId,
+        done: processed,
+        total,
+        failed,
+        ocr: ocrCount,
+        current,
+        status,
+      });
+
+    push("", "processing");
+    for (const entry of expansion.entries) {
+      try {
+        const before = entry.extraction;
+        // `readable` returns the SAME object when it did nothing, so identity is
+        // the cheapest honest test for "was this one OCR'd" — no flag to keep in
+        // step, and it cannot drift from what actually happened.
+        const after = await readable(before, entry.bytes);
+        if (after !== before && after.readable) ocrCount += 1;
+        saveDocument(store, sessionId, after, Date.now(), archiveId);
+        if (!after.readable) failed += 1;
+      } catch {
+        // One bad entry must not abandon the other thirty-nine.
+        failed += 1;
+      }
+      processed += 1;
+      updateArchive(store, archiveId, { processed, failed, ocrCount });
+      push(entry.name, "processing");
+    }
+
+    updateArchive(store, archiveId, { status: "completed", processed, failed, ocrCount });
+    push("", "completed");
+  };
+
   app.post("/api/upload", async (req, reply) => {
     const q = req.query as { session?: string; filename?: string };
     const sessionId = String(q.session ?? "");
@@ -276,7 +350,47 @@ export async function buildServer(opts: {
     // resolved — this string is displayed and stored, never opened.
     const filename = String(q.filename ?? "upload").split(/[\\/]/).pop()!.slice(0, 200) || "upload";
 
-    const extraction = extractDocument(filename, body);
+    // ── An archive expands to many documents ─────────────────────────────────
+    // Returned 202 rather than processed inline: with OCR a scanned page costs
+    // seconds, so forty of them is minutes and the browser's fetch would time
+    // out long before the work finished. The console follows the run over the
+    // socket it already has open.
+    if (detectKind(filename, body) === "archive") {
+      const expansion = expandArchive(body, { maxEntries: config.ingest.maxArchiveEntries });
+      if (expansion.entries.length === 0) {
+        return reply.code(400).send({
+          error: "No readable documents in that archive.",
+          skipped: expansion.skipped,
+          notes: expansion.notes,
+        });
+      }
+      const archive = createArchive(
+        store,
+        sessionId,
+        filename,
+        expansion.entries.length,
+        expansion.skipped,
+        expansion.notes,
+      );
+      // Deliberately not awaited: the response goes out now and the work
+      // continues. Errors are captured onto the archive row rather than
+      // surfacing as an unhandled rejection that kills the gateway.
+      void processArchive(archive.id, sessionId, expansion).catch((err) => {
+        updateArchive(store, archive.id, {
+          status: "failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+      return reply.code(202).send({
+        archiveId: archive.id,
+        filename,
+        total: expansion.entries.length,
+        skipped: expansion.skipped.length,
+        status: "processing",
+      });
+    }
+
+    const extraction = await readable(extractDocument(filename, body), body);
     const doc = saveDocument(store, sessionId, extraction);
     return {
       id: doc.id,

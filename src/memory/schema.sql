@@ -965,7 +965,45 @@ CREATE TABLE IF NOT EXISTS documents (
   confidence  REAL NOT NULL DEFAULT 0,
   phi_json    TEXT NOT NULL DEFAULT '[]',
   notes_json  TEXT NOT NULL DEFAULT '[]',
+  -- Which uploaded archive this document came out of, '' for a direct upload.
+  -- Added after the table shipped, so MemoryStore also back-fills it on open —
+  -- see addColumnIfMissing(); a column added to a CREATE TABLE IF NOT EXISTS
+  -- never reaches a database that already has the table.
+  archive_id  TEXT NOT NULL DEFAULT '',
   created_at  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_documents_session ON documents(session_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_documents_sha ON documents(sha256);
+
+-- ── Uploaded archives ────────────────────────────────────────────────────────
+-- The first job/progress table in this system. A .zip of EOBs expands to many
+-- documents, and OCR makes that slow enough that the upload cannot answer in
+-- one request — so the work runs in the background and this row is what the
+-- console polls and what `document_archive_list` reports.
+--
+-- The documents themselves still live in `documents` and nowhere else: the
+-- README states that nothing but the upload path writes document text, and an
+-- archive is the upload path.
+CREATE TABLE IF NOT EXISTS document_archives (
+  id           TEXT PRIMARY KEY,
+  session_id   TEXT NOT NULL DEFAULT '',
+  filename     TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'processing',  -- processing | completed | failed
+  total        INTEGER NOT NULL DEFAULT 0,
+  processed    INTEGER NOT NULL DEFAULT 0,
+  failed       INTEGER NOT NULL DEFAULT 0,
+  ocr_count    INTEGER NOT NULL DEFAULT 0,
+  -- Entries the ZIP reader could not decode at all, with the reason. Kept
+  -- because a file silently missing from a 40-file batch is one the operator
+  -- believes was processed.
+  skipped_json TEXT NOT NULL DEFAULT '[]',
+  notes_json   TEXT NOT NULL DEFAULT '[]',
+  error        TEXT NOT NULL DEFAULT '',
+  created_at   INTEGER NOT NULL,
+  updated_at   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_archives_session ON document_archives(session_id, created_at DESC);
+-- NOTE: the index on documents(archive_id) is created in MemoryStore.migrate(),
+-- not here. On a database that predates the column, this file runs BEFORE the
+-- back-fill, so an index over archive_id fails with "no such column" and the
+-- store will not open at all. Measured, not theorised.

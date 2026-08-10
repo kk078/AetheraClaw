@@ -75,6 +75,47 @@ export class MemoryStore {
       ? fs.readFileSync(schemaFile, "utf8")
       : fs.readFileSync(path.join(here, "../../src/memory/schema.sql"), "utf8");
     this.db.exec(sql);
+    this.migrate();
+  }
+
+  /**
+   * Columns added to a table that already existed.
+   *
+   * schema.sql is replayed in full on every open, and `CREATE TABLE IF NOT
+   * EXISTS` leaves an existing table exactly as it was — so a column added to
+   * that statement reaches new databases only, and every install that predates
+   * it silently lacks the column until something throws "no such column" at
+   * runtime.
+   *
+   * A bare `ALTER TABLE` in schema.sql is not the fix either: it succeeds once
+   * and then throws "duplicate column name" on the next open, which would break
+   * every install that had already run it. So the check happens here, against
+   * pragma_table_info, and adding a column is a no-op the second time.
+   */
+  private migrate(): void {
+    this.addColumnIfMissing("documents", "archive_id", "TEXT NOT NULL DEFAULT ''");
+    // Indexed here rather than in schema.sql because the column may have only
+    // just been added above — schema.sql runs first, and an index over a column
+    // an older database does not have yet fails the whole open.
+    try {
+      this.db.exec("CREATE INDEX IF NOT EXISTS idx_documents_archive ON documents(archive_id)");
+    } catch {
+      /* the query works without the index; a missing index is slow, not wrong */
+    }
+  }
+
+  private addColumnIfMissing(table: string, column: string, declaration: string): void {
+    try {
+      const cols = this.db.prepare(`SELECT name FROM pragma_table_info('${table}')`).all() as Array<{ name: string }>;
+      // A table that does not exist yet needs nothing — schema.sql just created
+      // it with the column already in place.
+      if (cols.length === 0 || cols.some((c) => c.name === column)) return;
+      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`);
+    } catch {
+      // A migration that cannot run must not stop the store opening: the caller
+      // gets "no such column" from the specific query that needs it, which is a
+      // far more locatable failure than a database that will not open at all.
+    }
   }
 
   createSession(title = "", provider = "anthropic"): SessionRow {

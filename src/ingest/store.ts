@@ -42,8 +42,18 @@ export const AGENT_ACTOR = "agent";
  * document, and a second row would make an exposure count read as two
  * disclosures of two files. Across sessions they stay separate, because a
  * different session is a different context in which somebody chose to upload it.
+ *
+ * `archiveId` groups the documents that came out of one uploaded archive. It is
+ * optional and defaulted, so every existing caller is unchanged — a direct
+ * upload stores '' and reads exactly as it did before.
  */
-export function saveDocument(store: MemoryStore, sessionId: string, e: Extraction, at = Date.now()): StoredDocument {
+export function saveDocument(
+  store: MemoryStore,
+  sessionId: string,
+  e: Extraction,
+  at = Date.now(),
+  archiveId = "",
+): StoredDocument {
   const existing = store.db
     .prepare("SELECT id FROM documents WHERE sha256 = ? AND session_id = ?")
     .get(e.sha256, sessionId) as { id: string } | undefined;
@@ -58,8 +68,8 @@ export function saveDocument(store: MemoryStore, sessionId: string, e: Extractio
   store.db
     .prepare(
       `INSERT INTO documents
-         (id, session_id, filename, kind, size_bytes, sha256, text, sections_json, readable, refusal, confidence, phi_json, notes_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, session_id, filename, kind, size_bytes, sha256, text, sections_json, readable, refusal, confidence, phi_json, notes_json, archive_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -75,6 +85,7 @@ export function saveDocument(store: MemoryStore, sessionId: string, e: Extractio
       e.confidence,
       JSON.stringify(e.phi),
       JSON.stringify(e.notes),
+      archiveId,
       at,
     );
 
@@ -206,5 +217,178 @@ export function purgeDocuments(store: MemoryStore, opts: { olderThanMs?: number;
     });
     store.db.prepare("DELETE FROM documents WHERE id = ?").run(r.id);
   }
+
+  // An archive row carries the uploaded FILENAME, and a filename is routinely
+  // "Rivera, J - EOB 01-15-58.pdf" — a name and a date of birth. Purging the
+  // documents while leaving the archive that named them behind would empty the
+  // content and keep the index to it, which is not the retention promise
+  // `documents purge` makes.
+  //
+  // Only archives with no surviving documents are removed: a purge scoped by
+  // date or session can leave part of a batch in place, and deleting the parent
+  // then would orphan what remains.
+  try {
+    const orphaned = store.db
+      .prepare(
+        `DELETE FROM document_archives
+          WHERE (? = '' OR session_id = ?)
+            AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.archive_id = document_archives.id)`,
+      )
+      .run(opts.sessionId ?? "", opts.sessionId ?? "");
+    void orphaned;
+  } catch {
+    // A database that predates the archive table has nothing to clean up.
+  }
+
   return { deleted: rows.length, charactersRemoved };
+}
+
+// ── Uploaded archives ────────────────────────────────────────────────────────
+// A .zip of EOBs expands to many documents and, once OCR is involved, takes
+// long enough that the upload cannot answer in one request. This row is the
+// progress record the console polls and `document_archive_list` reports.
+//
+// The documents themselves still go through saveDocument into `documents` and
+// nowhere else — the README states that nothing but the upload path writes
+// document text, and an archive IS the upload path.
+
+export interface ArchiveSkipRecord {
+  name: string;
+  reason: string;
+}
+
+export interface StoredArchive {
+  id: string;
+  sessionId: string;
+  filename: string;
+  status: "processing" | "completed" | "failed";
+  total: number;
+  processed: number;
+  failed: number;
+  ocrCount: number;
+  skipped: ArchiveSkipRecord[];
+  notes: string[];
+  error: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+function rowToArchive(r: Record<string, unknown>): StoredArchive {
+  const parse = <T>(raw: unknown, fallback: T): T => {
+    try {
+      return JSON.parse(String(raw ?? "")) as T;
+    } catch {
+      return fallback;
+    }
+  };
+  return {
+    id: String(r.id),
+    sessionId: String(r.session_id ?? ""),
+    filename: String(r.filename ?? ""),
+    status: String(r.status ?? "processing") as StoredArchive["status"],
+    total: Number(r.total ?? 0),
+    processed: Number(r.processed ?? 0),
+    failed: Number(r.failed ?? 0),
+    ocrCount: Number(r.ocr_count ?? 0),
+    skipped: parse<ArchiveSkipRecord[]>(r.skipped_json, []),
+    notes: parse<string[]>(r.notes_json, []),
+    error: String(r.error ?? ""),
+    createdAt: Number(r.created_at ?? 0),
+    updatedAt: Number(r.updated_at ?? 0),
+  };
+}
+
+export function createArchive(
+  store: MemoryStore,
+  sessionId: string,
+  filename: string,
+  total: number,
+  skipped: ArchiveSkipRecord[] = [],
+  notes: string[] = [],
+  at = Date.now(),
+): StoredArchive {
+  const id = newId("arc");
+  store.db
+    .prepare(
+      `INSERT INTO document_archives
+         (id, session_id, filename, status, total, processed, failed, ocr_count, skipped_json, notes_json, error, created_at, updated_at)
+       VALUES (?, ?, ?, 'processing', ?, 0, 0, 0, ?, ?, '', ?, ?)`,
+    )
+    .run(id, sessionId, filename, total, JSON.stringify(skipped), JSON.stringify(notes), at, at);
+  return getArchive(store, id)!;
+}
+
+export function updateArchive(
+  store: MemoryStore,
+  id: string,
+  patch: Partial<Pick<StoredArchive, "status" | "processed" | "failed" | "ocrCount" | "error">>,
+  at = Date.now(),
+): void {
+  const sets: string[] = [];
+  const args: unknown[] = [];
+  // Only the fields actually supplied are written. A whole-row update would
+  // race the progress loop against itself and reset counters mid-run.
+  if (patch.status !== undefined) (sets.push("status = ?"), args.push(patch.status));
+  if (patch.processed !== undefined) (sets.push("processed = ?"), args.push(patch.processed));
+  if (patch.failed !== undefined) (sets.push("failed = ?"), args.push(patch.failed));
+  if (patch.ocrCount !== undefined) (sets.push("ocr_count = ?"), args.push(patch.ocrCount));
+  if (patch.error !== undefined) (sets.push("error = ?"), args.push(patch.error));
+  if (sets.length === 0) return;
+  sets.push("updated_at = ?");
+  args.push(at, id);
+  store.db.prepare(`UPDATE document_archives SET ${sets.join(", ")} WHERE id = ?`).run(...args);
+}
+
+export function getArchive(store: MemoryStore, id: string): StoredArchive | null {
+  const row = store.db.prepare("SELECT * FROM document_archives WHERE id = ?").get(id) as
+    | Record<string, unknown>
+    | undefined;
+  return row ? rowToArchive(row) : null;
+}
+
+export function listArchives(store: MemoryStore, sessionId?: string, limit = 50): StoredArchive[] {
+  const rows = (
+    sessionId
+      ? store.db
+          .prepare("SELECT * FROM document_archives WHERE session_id = ? ORDER BY created_at DESC LIMIT ?")
+          .all(sessionId, limit)
+      : store.db.prepare("SELECT * FROM document_archives ORDER BY created_at DESC LIMIT ?").all(limit)
+  ) as Array<Record<string, unknown>>;
+  return rows.map(rowToArchive);
+}
+
+/** The documents an archive produced. Text is excluded — this is an index, not a read. */
+export function documentsInArchive(store: MemoryStore, archiveId: string): Array<Omit<StoredDocument, "text" | "sections">> {
+  const rows = store.db
+    .prepare(
+      `SELECT id, session_id, filename, kind, size_bytes, sha256, readable, refusal, confidence, phi_json, notes_json, archive_id, created_at
+         FROM documents WHERE archive_id = ? ORDER BY created_at ASC`,
+    )
+    .all(archiveId) as Array<Record<string, unknown>>;
+  return rows.map((r) => ({
+    id: String(r.id),
+    sessionId: String(r.session_id ?? ""),
+    filename: String(r.filename ?? ""),
+    kind: String(r.kind ?? "") as StoredDocument["kind"],
+    sizeBytes: Number(r.size_bytes ?? 0),
+    sha256: String(r.sha256 ?? ""),
+    readable: Number(r.readable ?? 0) === 1,
+    refusal: String(r.refusal ?? ""),
+    confidence: Number(r.confidence ?? 0),
+    phi: (() => {
+      try {
+        return JSON.parse(String(r.phi_json ?? "[]"));
+      } catch {
+        return [];
+      }
+    })(),
+    notes: (() => {
+      try {
+        return JSON.parse(String(r.notes_json ?? "[]"));
+      } catch {
+        return [];
+      }
+    })(),
+    createdAt: Number(r.created_at ?? 0),
+  })) as Array<Omit<StoredDocument, "text" | "sections">>;
 }

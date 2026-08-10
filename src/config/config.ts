@@ -182,6 +182,20 @@ export const ConfigSchema = z.object({
   // this is the operator talking to AetheraClaw at their own desk. They share
   // the word "voice" in English and nothing else — same config key would make
   // `voice.provider: "twilio"` and a browser microphone one setting.
+  // Document ingest. An archive of EOBs is the realistic batch, and a scanned
+  // one is the realistic document.
+  ingest: z
+    .object({
+      // "auto" runs OCR only on a file that came back unreadable BECAUSE it has
+      // no text layer. "off" leaves those refused, which is the right setting
+      // where the OCR dependency cannot be installed and a silent guess would
+      // be worse than an honest refusal.
+      ocr: z.enum(["auto", "off"]).default("auto"),
+      /** Bounds the work one upload can start; the remainder is reported, never dropped. */
+      maxArchiveEntries: z.number().int().positive().max(2000).default(200),
+    })
+    .default({ ocr: "auto", maxArchiveEntries: 200 }),
+
   speech: z
     .object({
       // Off until asked for. A microphone that turns itself on because a

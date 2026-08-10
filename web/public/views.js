@@ -618,6 +618,112 @@ V.document = (d) => {
   return root;
 };
 
+// ── archive_manifest: what happened to each file in a dropped .zip ───────────
+// One row per entry, worst first, because the operator opened this panel to
+// find the files that did not make it — not to admire the ones that did.
+//
+// Nothing here decides anything. The status on each row, the ordering, the
+// counts and the number of entries the cap left out were all settled in
+// src/views/archive.ts; this paints them. And every cell is built with
+// textContent: the filenames come from an archive a stranger assembled, and
+// `.zip` entry names are the one string in this system most obviously chosen
+// by somebody else.
+//
+// The root keeps `view-doc` so the document view's header, note and refusal
+// styling applies — an archive manifest is the same kind of object, read at a
+// different scale, and a second palette for it would be a second thing to keep
+// in sync.
+
+const ARCH_CHIP = { read: "chip-ok", ocr: "chip-phi", refused: "chip-bad", skipped: "chip-bad" };
+const ARCH_LABEL = { read: "read", ocr: "OCR", refused: "refused", skipped: "not decoded" };
+
+V.archive_manifest = (d) => {
+  const root = node("div", "toolview view-doc view-archive");
+
+  const head = node("div", "doc-head");
+  head.append(node("span", "doc-name", d.filename || "(unnamed archive)"));
+  head.append(node("span", "doc-kind", "archive"));
+  head.append(node("span", "doc-size", `${Number(d.total || 0)} entry(s)`));
+  root.append(head);
+
+  // A run in flight is marked before anything else on the panel. The counts
+  // below are true of what has been processed so far and of nothing more, and
+  // a half-finished manifest read as a finished one is how a missing file gets
+  // signed off on.
+  if (d.status === "processing") {
+    root.append(
+      node("div", "banner", "Still extracting. These rows are what has been processed so far — entries may still be added, and no count below is final."),
+    );
+  } else if (d.status === "failed") {
+    const box = node("div", "doc-refusal");
+    box.append(node("div", "doc-refusal-h", "Archive failed"));
+    box.append(node("p", null, "Processing stopped before the archive was finished. Whatever is listed below is partial."));
+    root.append(box);
+  }
+
+  const meta = node("div", "doc-meta");
+  meta.append(node("span", null, `${Number(d.read || 0)} read`));
+  meta.append(node("span", null, `${Number(d.ocr || 0)} OCR`));
+  meta.append(node("span", null, `${Number(d.refused || 0)} refused`));
+  // Shown at zero as well: an absent "0 not decoded" is the line that would let
+  // the other three add up to something that looks complete.
+  meta.append(node("span", null, `${Number(d.skipped || 0)} not decoded`));
+  root.append(meta);
+
+  const table = node("table", "lines");
+  const thead = node("thead");
+  const hr = node("tr");
+  for (const h of ["File", "Type", "Status", "Chars", "Identifiers", "Routed to / why"]) hr.append(node("th", null, h));
+  thead.append(hr);
+  table.append(thead);
+
+  const tbody = node("tbody");
+  for (const r of d.rows ?? []) {
+    const tr = node("tr", `arch-${r.status}`);
+
+    tr.append(node("td", "code", r.filename || "(unnamed)"));
+    tr.append(node("td", null, r.kind || "—"));
+
+    const st = node("td");
+    const chip = node("span", `chip ${ARCH_CHIP[r.status] || ""}`);
+    chip.append(node("span", "chip-name", ARCH_LABEL[r.status] || r.status || "—"));
+    st.append(chip);
+    tr.append(st);
+
+    // An entry that was refused has no character count to report, and a 0
+    // there reads as "read it, found nothing in it".
+    tr.append(node("td", "num", r.status === "read" || r.status === "ocr" ? Number(r.characters || 0).toLocaleString("en-US") : "—"));
+
+    // Kinds only. The server sends no values and no counts, so there is
+    // nothing here to leak even by accident.
+    tr.append(node("td", null, (r.phi || []).join(", ") || "—"));
+
+    const last = node("td");
+    if (r.routeTo) last.append(node("code", null, r.routeTo));
+    if (r.classification) last.append(node("span", "doc-size", r.classification));
+    // The refusal reason, verbatim from the reader. It is the only thing on the
+    // row that tells the operator what to do next.
+    if (r.detail) last.append(node("span", "arch-detail", r.detail));
+    if (!last.childNodes.length) last.append(node("span", null, "—"));
+    tr.append(last);
+
+    tbody.append(tr);
+  }
+  table.append(tbody);
+  root.append(table);
+
+  // The cap is stated, never silent. "and 214 more" is a smaller table than the
+  // archive; a table that just stops is a wrong one.
+  if (Number(d.truncated || 0) > 0) {
+    root.append(
+      node("p", "doc-note", `${d.truncated} further entry(s) are not listed — the table shows the first ${(d.rows ?? []).length}, worst first, so nothing needing a person was cut before a file that read cleanly.`),
+    );
+  }
+  for (const n of d.notes || []) root.append(node("p", "doc-note", n));
+
+  return root;
+};
+
 /** Render a view payload, or null when nothing knows how. */
 function renderView(view) {
   if (!view || !V[view.kind]) return null;

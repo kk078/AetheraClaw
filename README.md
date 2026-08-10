@@ -6,6 +6,35 @@ A self-hosted AI assistant for **US healthcare Revenue Cycle Management (RCM) an
 >
 > **One deliberate exception, and it is the operator's to make.** Document upload reads a file, flags identifier-shaped text in it, and **stores the extracted text** — it does not refuse or redact. That is a configured posture rather than an oversight: an EOB without a member id is not an EOB, and a reader that rejects every real one is a reader nobody uses. What follows from it is built rather than assumed — every read and delete lands in `phi_access_log` anchored to the audit chain, the console shows retention at the moment of upload rather than afterwards, and `aetheraclaw documents purge` empties the table. If your deployment should not hold document content, do not use the upload path; nothing else in the system writes to that table.
 
+## Archives and scanned documents
+
+Drop a **`.zip` of mixed documents** on the console and every entry is extracted,
+stored, classified and shown as a per-file table. A month of EOBs arrives as one
+archive; unzipping and dropping forty files by hand was the alternative.
+
+Everything the reader already handles is allowed inside — PDF, DOCX, XLSX, CSV,
+text, X12 — because a real batch is mixed. An entry that cannot be read is a
+**row with a reason**, not a silent omission: the ZIP reader used to skip a
+member compressed with an unsupported method without a trace, which in a
+forty-file archive is a file the operator believes was processed.
+
+**Scanned pages go through OCR.** A PDF with no text layer, or a photograph of a
+remittance, was previously refused honestly and uselessly — that is much of what
+actually arrives. OCR now runs at the door, and what it recovers is marked as
+recovered: the note on the document says the text was **guessed from pixels**,
+with the engine and the confidence, because a coder reading an OCR'd allowed
+amount needs to know a machine read the digits.
+
+It is an `optionalDependency`, the same posture as `better-sqlite3`: absent, a
+scan is still refused and the message names the install command. It never
+returns empty text as though the document were blank.
+
+> **A posture change worth naming.** A photo of an EOB used to store nothing.
+> With OCR it stores the recovered text and the identifiers found in it, under
+> the same rule as any other upload. An archive writes **one `phi_access_log`
+> entry per file** — a fifty-file archive reads as fifty disclosures, which is
+> what an access review needs to see, not one.
+
 ## Architecture
 
 ```
