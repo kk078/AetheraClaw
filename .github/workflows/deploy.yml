@@ -145,13 +145,42 @@ jobs:
       # A deploy that reports success while the origin is down is worse than a
       # failed one, because nobody looks. Containers take a few minutes to
       # provision on first deploy, so this retries rather than checking once.
-      - name: Verify the deployment answers
+      # ── Did the edge actually start serving this hostname? ─────────────────
+      # A 302 counts as success, and that is the whole correction here. The
+      # first real deploy polled thirty times, got HTTP 302 every time, and
+      # reported "never became healthy" over a deployment that was working
+      # perfectly: Cloudflare Access sits IN FRONT of the Worker and redirects
+      # an unauthenticated request to its login page, so /healthz — which is
+      # deliberately unauthenticated inside the gateway — is never reached by a
+      # probe that has no Access session. There is no credential this step
+      # could hold that would change that.
+      #
+      # So the question this step can honestly answer is not "is the container
+      # healthy" but "is this hostname being served by our Worker at all",
+      # which is what distinguishes a deploy that landed from one that did not.
+      # 302 and 200 both answer yes; 000 (DNS or TLS never resolved) and 5xx
+      # answer no.
+      #
+      # Claiming more than that would be worse than claiming less: a green tick
+      # on "healthy" that only ever meant "Access answered" is the kind of
+      # check people trust once and then stop reading.
+      - name: Verify the hostname is being served
         run: |
           for i in $(seq 1 30); do
             code=$(curl -s -o /dev/null -w "%{http_code}" https://orion.aetheraonline.com/healthz || true)
-            if [ "$code" = "200" ]; then echo "healthy after ${i} attempt(s)"; exit 0; fi
-            echo "attempt $i: HTTP $code"
+            case "$code" in
+              200)
+                echo "Serving, and reachable without an Access session (attempt $i)."
+                exit 0 ;;
+              301|302|303|307|308)
+                echo "Serving — Access redirected the probe to its login page (HTTP $code, attempt $i)."
+                echo "That is the expected answer for a hostname protected by Access."
+                exit 0 ;;
+              *)
+                echo "attempt $i: HTTP $code" ;;
+            esac
             sleep 10
           done
-          echo "Never became healthy. The Worker deployed; the container may still be provisioning."
+          echo "The hostname never answered. The Worker may have deployed while the"
+          echo "container is still provisioning, or the route/DNS has not propagated."
           exit 1
