@@ -3,6 +3,8 @@ import { newId } from "../shared/ids.js";
 import { recordAccess } from "../tenancy/store.js";
 import type { Extraction, ExtractionSection } from "./extract.js";
 import type { PhiSignal } from "../channels/email/classify.js";
+import { decryptField, encryptField, resolveEncryptionKey } from "../compliance/encryption.js";
+import { readEnv } from "../config/legacy.js";
 
 // ── Where uploaded document text lives ───────────────────────────────────────
 // The deployment chose to persist extracted text rather than hold it for the
@@ -14,6 +16,21 @@ import type { PhiSignal } from "../channels/email/classify.js";
 // record they had no business reading, which leaves no trace at all in a
 // mutation log. A store of EOB text with no read trail is that incident with
 // the evidence removed.
+
+// ── The encryption key ───────────────────────────────────────────────────────
+// Resolved ONCE. Re-reading the environment per row would let a long-running
+// process start writing under a different key halfway through, producing a
+// database whose rows need two keys and no record of which is which.
+//
+// Read through a function rather than a top-level constant so a test can point
+// it somewhere: a module-level read happens at import time, before any test has
+// had a chance to set anything.
+let cachedKey: { raw: string; key: Buffer | null } | null = null;
+function documentKey(): Buffer | null {
+  const raw = readEnv("ENCRYPTION_KEY") ?? "";
+  if (!cachedKey || cachedKey.raw !== raw) cachedKey = { raw, key: resolveEncryptionKey(raw).key };
+  return cachedKey.key;
+}
 
 export interface StoredDocument {
   id: string;
@@ -90,8 +107,12 @@ export function saveDocument(
       e.kind,
       e.sizeBytes,
       e.sha256,
-      e.text,
-      JSON.stringify(e.sections),
+      // Encrypted together, or not at all. sections_json carries the SAME
+      // content split by page: encrypting `text` and leaving the sections in
+      // the clear would be a feature that reads as protection and provides
+      // none.
+      encryptIfConfigured(e.text),
+      encryptIfConfigured(JSON.stringify(e.sections)),
       e.readable ? 1 : 0,
       e.refusal ?? "",
       e.confidence,
@@ -121,6 +142,11 @@ export function saveDocument(
   return loadDocument(store, id, { log: false })!;
 }
 
+function encryptIfConfigured(value: string): string {
+  const key = documentKey();
+  return key ? encryptField(value, key) : value;
+}
+
 function rowToDocument(r: Record<string, unknown>): StoredDocument {
   const parse = <T>(s: unknown, fallback: T): T => {
     try {
@@ -129,6 +155,17 @@ function rowToDocument(r: Record<string, unknown>): StoredDocument {
       return fallback;
     }
   };
+  const key = documentKey();
+  // A row written before encryption was turned on has no marker and comes back
+  // unchanged, which is what makes enabling it a non-event for an existing
+  // install.
+  const body = decryptField(String(r.text), key);
+  const sectionsRaw = decryptField(String(r.sections_json), key);
+  // An unreadable document does not pretend to be an empty one. The refusal
+  // text carries the reason, so a coder looking at it is sent to the key rather
+  // than to the file they uploaded.
+  const notes = parse<string[]>(r.notes_json, []);
+  if (!body.ok) notes.unshift(body.why);
   return {
     id: String(r.id),
     sessionId: String(r.session_id),
@@ -136,13 +173,13 @@ function rowToDocument(r: Record<string, unknown>): StoredDocument {
     kind: String(r.kind),
     sizeBytes: Number(r.size_bytes),
     sha256: String(r.sha256),
-    text: String(r.text),
-    sections: parse<ExtractionSection[]>(r.sections_json, []),
-    readable: Number(r.readable) === 1,
-    refusal: String(r.refusal),
+    text: body.text,
+    sections: sectionsRaw.ok ? parse<ExtractionSection[]>(sectionsRaw.text, []) : [],
+    readable: Number(r.readable) === 1 && body.ok,
+    refusal: body.ok ? String(r.refusal) : body.why,
     confidence: Number(r.confidence),
     phi: parse<PhiSignal[]>(r.phi_json, []),
-    notes: parse<string[]>(r.notes_json, []),
+    notes,
     createdAt: Number(r.created_at),
   };
 }

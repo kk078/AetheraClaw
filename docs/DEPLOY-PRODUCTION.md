@@ -134,16 +134,54 @@ least one FATAL. Use it in a deploy pipeline before cutting traffic over.
 
 ---
 
+## Encryption at rest
+
+`ORION_ENCRYPTION_KEY` encrypts the extracted **text** of uploaded documents and
+its per-page **sections**, with AES-256-GCM. Both, or neither — sections carry
+the same content split by page, so encrypting one and not the other would be a
+feature that reads as protection and provides none.
+
+```
+openssl rand -hex 32     # 64 hex characters, used directly
+```
+
+Any other value is treated as a passphrase and stretched with scrypt. That works
+and is only as strong as the passphrase; a passphrase is not refused, because
+refusing one pushes people towards turning encryption off entirely.
+
+**What it protects, stated narrowly so nobody over-trusts it:**
+
+| | |
+|---|---|
+| Protects | Document text and sections, against anyone who obtains a **copy** — the SQLite file, or an R2 snapshot — without also obtaining the key |
+| Does **not** protect | Anything else in the database. Claim numbers, amounts, payer names, worklist items, session transcripts and the audit chain are all in the clear |
+| Does **not** protect | A running process. The key is in memory and the gateway decrypts on every read — it has to, or nobody can see the document they uploaded |
+
+So it is defence against a **stolen copy**, not against a compromised host. It
+is worth having because a snapshot in object storage is exactly the kind of copy
+that travels. **It is not a substitute for encrypting the volume.**
+
+**Turning it on is a non-event.** Rows written before it carry no marker and are
+returned unchanged; new rows are encrypted. There is no migration step and no
+downtime.
+
+**Turning it off, or losing the key, is not.** A document stored under a key you
+no longer have cannot be read. It does not come back as an empty document —
+`readable` becomes false and the refusal text says the key is wrong or the bytes
+were altered, so a coder is sent to the key rather than to the file they
+uploaded. Rotating the key without re-encrypting existing rows leaves those rows
+unreadable; there is no automatic re-encryption yet.
+
+**Tampering is detected, not decrypted.** GCM's authentication tag means an
+attacker who can write to the database cannot alter a stored clinical document
+into a different one that still reads — it becomes a decryption failure instead.
+
+---
+
 ## What Phase 1 does NOT cover
 
 Stated because a checklist that omits its own gaps is worse than no checklist.
 
-- **Encryption at rest is not implemented.** `ORION_ENCRYPTION_KEY` is checked
-  for and warned about; nothing encrypts `documents.text` yet. The SQLite file
-  is unencrypted regardless — if the disk underneath is not encrypted, the
-  database is readable by anything that can read the volume. Deferred rather
-  than half-built: a partly-tested encryption layer over PHI is worse than a
-  documented absence.
 - **Per-file upload acknowledgment is not implemented.** Uploads are still
   screened by the ingress posture, which refuses identifier-bearing documents
   outright while `ORION_PHI=blocked`. The production-mode acknowledgment flow is

@@ -123,9 +123,10 @@ export function checkProduction(input: ProductionInput): ProductionReport {
       id: "encryption",
       level: "warn",
       message:
-        "ORION_ENCRYPTION_KEY is not set, so extracted document text is stored in the clear. The SQLite " +
-        "file itself is unencrypted either way — this only covers the column that holds document " +
-        "content. Set it if the disk underneath is not already encrypted.",
+        "ORION_ENCRYPTION_KEY is not set, so extracted document text is stored in the clear. Setting it " +
+        "encrypts document text and its per-page sections with AES-256-GCM, which protects a STOLEN " +
+        "COPY — a database file or an R2 snapshot — and nothing else: the rest of the database, and the " +
+        "file itself, remain unencrypted. Generate one with `openssl rand -hex 32`.",
     });
   }
 

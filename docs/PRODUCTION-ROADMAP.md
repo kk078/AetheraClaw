@@ -217,10 +217,10 @@ does not mean "mostly done".
         system-prompt variant, `docs/DEPLOY-PRODUCTION.md`
   - [x] Gateway refuses to **start** when exposed without a token;
         `orion serve --check-production`; two config combinations refused
-  - [ ] Encryption at rest — `ORION_ENCRYPTION_KEY` is checked for and warned
-        about; nothing encrypts `documents.text` yet. Deferred rather than
-        half-built: a partly-tested encryption layer over PHI is worse than a
-        documented absence
+  - [x] Encryption at rest — AES-256-GCM over document text **and** its
+        per-page sections; plaintext rows stay readable; a wrong key refuses
+        rather than returning an empty document; tampering is a decryption
+        failure rather than a silent alteration
   - [ ] Per-file upload acknowledgment, retention enforcement, and shell/fs
         confirmation over credential and document paths in PHI mode
 - [ ] **Phase 2** — `ClearinghouseConnector` + one real implementation, credential storage, submission audit trail, `docs/CLEARINGHOUSE-SETUP.md`
