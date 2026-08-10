@@ -102,7 +102,17 @@ export async function runTurn(deps: RunnerDeps, sessionId: string, userText: str
       const messages = truncateToBudget(loadHistory(store, sessionId), config.contextTokenBudget);
       // Chosen per provider: OpenAI rejects more than 128 tools outright, and
       // nobody but Anthropic caches the definition block.
-      const selection = selectTools(registry.specs(), config.toolProfile, provider.name, config.toolLimits[provider.name]);
+      // The user's message is the hint. Which tools overflow the provider's cap
+      // is now decided by what was ASKED rather than by registration order — a
+      // model that was not given denial_explain does not say so, it answers
+      // from memory, which is the failure this whole codebase exists to stop.
+      const selection = selectTools(
+        registry.specs(),
+        config.toolProfile,
+        provider.name,
+        config.toolLimits[provider.name],
+        { hint: userText },
+      );
       const toolSpecs = selection.specs;
       // Logged rather than emitted as errors: these are notes about how the
       // turn is configured, and surfacing them as errors makes every start of

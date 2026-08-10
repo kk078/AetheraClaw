@@ -1,5 +1,6 @@
 import type { ToolSpec } from "../providers/types.js";
 import { META_NAMES } from "./meta.js";
+import { routeTools } from "../agent/tool-router.js";
 
 // ── Tool profiles ────────────────────────────────────────────────────────────
 // The registry holds ~173 tools. Sending all of them on every request is fine on
@@ -204,7 +205,25 @@ export interface Selection {
  * `claim_scrub` will confidently do without it, and the transcript will look
  * like it decided not to scrub the claim rather than like it could not.
  */
-export function selectTools(all: ToolSpec[], profileName: string, provider: string, limitOverride?: number): Selection {
+export interface SelectOptions {
+  /**
+   * The message this turn is about. When present, the tools that overflow the
+   * provider's cap are chosen FOR THE QUESTION rather than by registration
+   * order — see src/agent/tool-router.ts for why that matters more than it
+   * sounds.
+   */
+  hint?: string;
+  /** Tool names this session pinned. Loaded ahead of everything scored. */
+  pinned?: string[];
+}
+
+export function selectTools(
+  all: ToolSpec[],
+  profileName: string,
+  provider: string,
+  limitOverride?: number,
+  opts: SelectOptions = {},
+): Selection {
   const profile = profileByName(profileName);
   const notes: string[] = [];
 
@@ -226,13 +245,28 @@ export function selectTools(all: ToolSpec[], profileName: string, provider: stri
     const base = matched.filter((s) => BASE.includes(s.name) || META_NAMES.has(s.name));
     const rest = matched.filter((s) => !BASE.includes(s.name) && !META_NAMES.has(s.name));
     const room = Math.max(0, limit - base.length);
-    specs = [...base, ...rest.slice(0, room)];
+
+    // ── Which tools fill the remaining room ────────────────────────────────
+    // Without a hint this is registration order, which is what it always was.
+    // With one, the tools that answer THIS question come first. The model
+    // cannot ask for a tool it was not given and will not say it is missing
+    // one — it answers from memory instead, which is the single failure this
+    // whole codebase is built to prevent.
+    const routed = opts.hint || opts.pinned?.length
+      ? routeTools(rest, { message: opts.hint ?? "", pinned: opts.pinned, take: room })
+      : [];
+    const priority = new Map(routed.map((n, i) => [n, i]));
+    const ordered = routed.length
+      ? [...rest].sort((a, b) => (priority.get(a.name) ?? Infinity) - (priority.get(b.name) ?? Infinity))
+      : rest;
+    specs = [...base, ...ordered.slice(0, room)];
+    const rest2 = ordered;
 
     // With the catalogue tools loaded, the overflow is DEFERRED rather than
     // dropped: every one of them is still reachable through tool_search and
     // tool_invoke. Without them there is no route back, so it is a real loss and
     // gets named as one.
-    const overflow = rest.slice(room).map((s) => s.name);
+    const overflow = rest2.slice(room).map((s) => s.name);
     const catalogueLoaded = all.some((s) => META_NAMES.has(s.name));
     if (catalogueLoaded) {
       deferred.push(...overflow);
