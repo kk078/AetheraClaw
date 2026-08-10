@@ -752,7 +752,22 @@ text.ring-txt { fill: var(--ink); font-size: 15px; font-family: var(--mono); fon
 
 /* Canvas — the right column. One artifact at a time; a stack of every view is
    the log stream again, one column over. */
-#view-console { display: flex; min-height: 0; }
+/* ── `.active`, and why it is not optional here ──────────────────────────────
+   This was `#view-console { display: flex }`. An id selector outranks the
+   `.view { display: none }` that hides every inactive panel, so the console was
+   ALWAYS displayed — `.active` did nothing to it. Switching to any other screen
+   set the classes correctly and changed nothing anyone could see: the console,
+   being full height, simply carried on covering the panel underneath.
+
+   That is why "Providers & keys" appeared to do nothing. The panel was there,
+   marked active, fully rendered, with all four provider rows in it — behind the
+   console. Every check that asserted on class names passed; the screen was
+   still unusable, which is the failure mode of testing state instead of what is
+   on the screen.
+
+   Scoping the rule to `.active` restores the one invariant the whole navigation
+   depends on: exactly one `.view` is visible at a time. */
+#view-console.active { display: flex; min-height: 0; }
 #view-console .console { flex: 1 1 auto; min-width: 0; }
 .canvas {
   flex: 0 0 clamp(360px, 42%, 620px);
@@ -773,7 +788,7 @@ text.ring-txt { fill: var(--ink); font-size: 15px; font-family: var(--mono); fon
 
 @media (max-width: 1100px) {
   /* Below this the two columns fight; the canvas goes under the feed. */
-  #view-console { flex-direction: column; }
+  #view-console.active { flex-direction: column; }
   .canvas { flex: 0 0 auto; max-height: 46vh; border-left: 0; border-top: 1px solid var(--line); }
 }
 
