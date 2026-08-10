@@ -62,6 +62,16 @@ import {
   type WorklistSession,
 } from "../speech/worklist-mode.js";
 import { icd10Table, loadDataJson } from "../tools/healthcare/datasets.js";
+import {
+  DEFAULT_LIMIT,
+  costOf,
+  newBucket,
+  renderMetrics,
+  securityHeaders,
+  spend,
+  type Bucket,
+  type MetricSample,
+} from "./hardening.js";
 
 /**
  * Above this many rows, the overview does not compute KPIs.
@@ -160,7 +170,50 @@ export async function buildServer(opts: {
   // unless the deployment explicitly asked — see src/gateway/auth.ts for what
   // it gives away.
   const publicAccess = isPublicAccess(readEnv("PUBLIC"));
+  // ── Response headers, on everything ────────────────────────────────────────
+  // Set in onSend so they land on static files and error responses too. A CSP
+  // that covers the routes and not index.html covers nothing.
+  const headers = securityHeaders(exposure);
+  app.addHook("onSend", async (_req, reply, payload) => {
+    for (const [k, v] of Object.entries(headers)) reply.header(k, v);
+    return payload;
+  });
+
+  // ── Rate limiting ──────────────────────────────────────────────────────────
+  // Per identity where there is one, per address otherwise: per address alone
+  // would let one authenticated user behind a NAT exhaust the budget for a whole
+  // practice. Static assets and /healthz cost nothing — throttling a health
+  // check makes a monitoring system look like an attack.
+  const buckets = new Map<string, Bucket>();
+  let rateLimited = 0;
+
   app.addHook("onRequest", async (req, reply) => {
+    const cost = costOf(req.method, req.url);
+    if (cost > 0) {
+      const identity = (req as { identity?: { name?: string } }).identity?.name;
+      const key = identity || req.ip || "anonymous";
+      const now = Date.now();
+      const decision = spend(buckets.get(key) ?? newBucket(DEFAULT_LIMIT, now), DEFAULT_LIMIT, cost, now);
+      buckets.set(key, decision.bucket);
+      if (!decision.allowed) {
+        rateLimited++;
+        await reply
+          .code(429)
+          .header("retry-after", String(decision.retryAfterSeconds))
+          .send({ error: decision.reason });
+        return;
+      }
+      // Bounded, so a long-running gateway does not accumulate a bucket per
+      // address seen. Evicting full buckets only: a full bucket carries no
+      // state worth keeping, and evicting a depleted one would hand a caller a
+      // fresh budget for free.
+      if (buckets.size > 5000) {
+        for (const [k, b] of buckets) {
+          if (b.tokens >= DEFAULT_LIMIT.burst) buckets.delete(k);
+          if (buckets.size <= 2500) break;
+        }
+      }
+    }
     if (isUnauthenticatedPath(req.url)) return;
     const decision = authorizeRequest({ exposure, headers: req.headers, expectedToken: gatewayToken, publicAccess });
     if (decision.ok) {
@@ -195,6 +248,63 @@ export async function buildServer(opts: {
   await app.register(fastifyStatic, { root: findWebRoot(), prefix: "/" });
 
   app.get("/healthz", async () => ({ ok: true, name: "orion" }));
+
+  /**
+   * Prometheus metrics.
+   *
+   * COUNTS AND DURATIONS ONLY. No claim number, no member id, no session id, no
+   * filename. A metrics endpoint is scraped by systems with a different
+   * retention policy and a different access list from the database, and it is
+   * the easiest place in a product to leak PHI without anybody noticing — a
+   * label is just a string, and claim_id="CLM-1042" looks perfectly ordinary in
+   * a dashboard. renderMetrics drops identifier-shaped label values rather than
+   * trusting the caller.
+   */
+  app.get("/metrics", async (_req, reply) => {
+    const count = (table: string): number => {
+      try {
+        return (store.db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as { c: number }).c;
+      } catch {
+        return 0;
+      }
+    };
+    const samples: MetricSample[] = [
+      { name: "orion_up", value: 1, help: "The gateway is serving.", type: "gauge" },
+      { name: "orion_sessions_total", value: count("sessions"), help: "Conversations stored.", type: "gauge" },
+      { name: "orion_claims_total", value: count("claims"), help: "Claims stored.", type: "gauge" },
+      { name: "orion_remittances_total", value: count("remittances"), help: "Remittance batches stored.", type: "gauge" },
+      { name: "orion_worklist_open", value: count("worklist_items"), help: "Worklist items.", type: "gauge" },
+      { name: "orion_rate_limited_total", value: rateLimited, help: "Requests refused by the rate limiter since start.", type: "counter" },
+      {
+        name: "orion_mail_held",
+        value: (() => {
+          try {
+            return (store.db.prepare("SELECT COUNT(*) AS c FROM inbound_mail WHERE quarantined = 1 AND status = 'new'").get() as { c: number }).c;
+          } catch {
+            return 0;
+          }
+        })(),
+        // Worth a metric precisely because held mail is invisible to every
+        // other surface. A number that climbs and never falls is a queue
+        // nobody is working.
+        help: "Messages held at the PHI boundary and not yet resolved.",
+        type: "gauge",
+      },
+      {
+        name: "orion_jobs_dead",
+        value: (() => {
+          try {
+            return (store.db.prepare("SELECT COUNT(*) AS c FROM jobs WHERE status = 'dead'").get() as { c: number }).c;
+          } catch {
+            return 0;
+          }
+        })(),
+        help: "Dead-lettered jobs awaiting a human decision. A claim_submit here means a claim's fate is unknown.",
+        type: "gauge",
+      },
+    ];
+    return reply.type("text/plain; version=0.0.4").send(renderMetrics(samples));
+  });
 
   app.get("/api/sessions", async () => store.listSessions());
 
