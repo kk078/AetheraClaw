@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.2 — 2026-08-10
+
+- fix: make the voice interface and the provider-key screen reachable (#10)
+
+
 ## v0.2.1 — 2026-08-10
 
 - fix: finish the ORION rename in the part people actually look at (#9)
