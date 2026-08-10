@@ -290,3 +290,42 @@ describe("summariseEligibility — the 'Inactive' trap", () => {
     expect(s).toMatch(/Active coverage confirmed/i);
   });
 });
+
+describe("a REAL successful 271 — the other half of the contract", () => {
+  // Captured live from Stedi's sandbox: UnitedHealthcare, member UHC123456,
+  // Jane Doe, 01/01/1971. Thirty-eight benefit lines and no AAA segment.
+  //
+  // Without this fixture the parser was only ever proved against rejections,
+  // and a mapping that handles every failure and mangles the success is a
+  // perfectly ordinary bug.
+  const active = () => fixture("271-active-coverage.json");
+
+  it("reads it as identified, with no rejections", () => {
+    const out = parseStediEligibility(active(), "sandbox");
+    expect(out.identified).toBe(true);
+    expect(out.rejections).toEqual([]);
+    expect(out.payerName).toMatch(/UNITEDHEALTHCARE/i);
+  });
+
+  it("says active coverage is confirmed", () => {
+    expect(parseStediEligibility(active(), "sandbox").summary).toMatch(/Active coverage confirmed/i);
+  });
+
+  it("carries the cost-share lines a biller needs", () => {
+    const out = parseStediEligibility(active(), "sandbox");
+    const names = out.benefits.map((b) => b.name);
+    expect(names).toContain("Active Coverage");
+    expect(names.some((n) => /deductible/i.test(n))).toBe(true);
+    expect(names.some((n) => /out of pocket/i.test(n))).toBe(true);
+    // Amounts must survive the mapping — they are what the patient is told at
+    // the desk.
+    expect(out.benefits.some((b) => b.amount !== "")).toBe(true);
+  });
+
+  it("keeps every benefit line rather than collapsing the plan", () => {
+    // A 271 carries one line per service type and coverage level. Deduplicating
+    // or flattening them loses the distinction between an individual and a
+    // family deductible, which is the number people get wrong.
+    expect(parseStediEligibility(active(), "sandbox").benefits.length).toBeGreaterThan(10);
+  });
+});
