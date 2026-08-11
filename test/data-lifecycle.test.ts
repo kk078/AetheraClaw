@@ -129,10 +129,53 @@ describe("assessReadiness", () => {
     expect(r.warn).toBe(false);
   });
 
-  it("requires nothing on the profiles that do no clinical checking", () => {
-    for (const p of ["ops", "all"]) {
-      expect(assessReadiness(lifecycles([["ncci-ptp.json", false]]), p).warn).toBe(false);
+  it("requires nothing on the profile that does no clinical checking", () => {
+    // "ops" only. This assertion USED TO INCLUDE "all", which is how the bug
+    // below survived: the two were grouped as "profiles with no particular
+    // needs", when "all" is the one profile that has every need there is.
+    expect(assessReadiness(lifecycles([["ncci-ptp.json", false]]), "ops").warn).toBe(false);
+  });
+
+  // ── The default profile reported an empty install as healthy ──────────────
+  // config.ts sets toolProfile to "all", and "all" required nothing. So the
+  // DEFAULT install answered `orion data status` with "Nothing missing, nothing
+  // provably stale" while holding no reference data at all — and the same
+  // directory on the claims profile said "REQUIRED and missing: ncci-ptp.json,
+  // mue.json, icd10.json".
+  //
+  // Found running step 1 of docs/FIRST-LIVE-SUBMISSION.md, which is that exact
+  // command expecting that exact sentence before a real claim goes to a real
+  // payer.
+
+  it('DEMANDS on "all" what every other profile demands', () => {
+    const r = assessReadiness(lifecycles([["ncci-ptp.json", false], ["icd10.json", false]]), "all");
+    expect(r.warn).toBe(true);
+    expect(r.missingRequired.map((l) => l.file)).toEqual(expect.arrayContaining(["ncci-ptp.json", "icd10.json"]));
+  });
+
+  it('gives "all" the union of the specific profiles, derived not typed', () => {
+    // Derived, so a required file added to any profile cannot be forgotten here.
+    const all = PROFILE_DATA_NEEDS.find((p) => p.profile === "all");
+    for (const need of PROFILE_DATA_NEEDS) {
+      if (need.profile === "all") continue;
+      for (const file of need.required) expect(all?.required).toContain(file);
     }
+  });
+
+  it("treats an UNRECOGNISED profile as all, not as nothing", () => {
+    // A typo in a config file must not be a way to switch the warning off.
+    const r = assessReadiness(lifecycles([["ncci-ptp.json", false]]), "claimz");
+    expect(r.warn).toBe(true);
+  });
+
+  it('never says "nothing missing" while something is missing', () => {
+    // gpci.json is optional everywhere, so this does not warn — but the summary
+    // must not round "no REQUIRED file is absent" up to "nothing is absent".
+    // That sentence is what gets quoted back as the reason somebody carried on.
+    const ls = lifecycles([["mpfs.json", true], ["mpfs-cf.json", true], ["gpci.json", false]]);
+    const out = renderReadiness(assessReadiness(ls, "revenue"), ls);
+    expect(out).not.toContain("Nothing missing, nothing provably stale.");
+    expect(out).toContain("gpci.json");
   });
 
   it("gives every profile that requires data a reason a reader can act on", () => {

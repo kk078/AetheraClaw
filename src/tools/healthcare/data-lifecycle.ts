@@ -157,7 +157,7 @@ export interface ProfileDataNeed {
   because: string;
 }
 
-export const PROFILE_DATA_NEEDS: ProfileDataNeed[] = [
+const SPECIFIC_DATA_NEEDS: ProfileDataNeed[] = [
   {
     profile: "coding",
     required: ["icd10.json"],
@@ -189,8 +189,42 @@ export const PROFILE_DATA_NEEDS: ProfileDataNeed[] = [
       "returns a refusal instead of a number.",
   },
   { profile: "operations", required: [], optional: ["icd10.json", "ncci-ptp.json"], because: "" },
+  // Genuinely nothing: the ops profile loads no tool that reads a code set.
   { profile: "ops", required: [], optional: [], because: "" },
-  { profile: "all", required: [], optional: [], because: "" },
+];
+
+const union = (pick: (n: ProfileDataNeed) => string[]): string[] =>
+  [...new Set(SPECIFIC_DATA_NEEDS.flatMap(pick))].sort();
+
+export const PROFILE_DATA_NEEDS: ProfileDataNeed[] = [
+  ...SPECIFIC_DATA_NEEDS,
+  // ── "all" needs everything, and used to need nothing ─────────────────────
+  // It was written as `required: []`, which read as "no particular profile, so
+  // no particular needs". What it actually meant is that the DEFAULT profile —
+  // config.ts sets toolProfile to "all" — reported "Nothing missing, nothing
+  // provably stale" on an install with no reference data whatsoever.
+  //
+  // The same empty install on the claims profile says "REQUIRED and missing:
+  // ncci-ptp.json, mue.json, icd10.json". Two verdicts, one directory, and the
+  // reassuring one is the default.
+  //
+  // It matters here more than anywhere: step 1 of docs/FIRST-LIVE-SUBMISSION.md
+  // is `orion data status`, expecting exactly that sentence, and steps 3 and 4
+  // rest on a clean scrub. A scrubber with no NCCI table reports "no bundling
+  // edit found" identically whether it checked and found nothing or could not
+  // check at all — and on this path that sentence goes out attached to a real
+  // claim at a real payer.
+  //
+  // Derived rather than typed out, so a required file added to any profile
+  // cannot be forgotten here.
+  {
+    profile: "all",
+    required: union((n) => n.required),
+    optional: union((n) => n.optional).filter((f) => !union((n) => n.required).includes(f)),
+    because:
+      'The "all" profile loads every tool, so it needs what every profile needs. Anything absent here is a tool that ' +
+      "will answer from a table it does not have.",
+  },
 ];
 
 export interface ReadinessReport {
@@ -210,7 +244,11 @@ export function assessReadiness(
   lifecycles: DatasetLifecycle[],
   profile: string,
 ): ReadinessReport {
-  const need = PROFILE_DATA_NEEDS.find((p) => p.profile === profile);
+  // An unrecognised profile falls back to "all" rather than to no requirements.
+  // A typo in a config file must not be a way to switch the warning off, and
+  // the safe direction for a name nobody anticipated is to demand more.
+  const need =
+    PROFILE_DATA_NEEDS.find((p) => p.profile === profile) ?? PROFILE_DATA_NEEDS.find((p) => p.profile === "all");
   const required = new Set(need?.required ?? []);
   const missingRequired = lifecycles.filter((l) => required.has(l.file) && !l.installed);
   const stale = lifecycles.filter((l) => l.verdict === "stale");
@@ -270,6 +308,17 @@ export function renderReadiness(report: ReadinessReport, lifecycles: DatasetLife
         "statement of safety.",
     );
   }
-  if (!report.warn && report.unknownEdition.length === 0) lines.push("Nothing missing, nothing provably stale.");
+  // "Nothing missing" has to mean nothing is missing. Saying it while files are
+  // absent — even ones this profile only calls optional — is the sentence an
+  // operator quotes back as the reason they carried on.
+  const absent = lifecycles.filter((l) => !l.installed);
+  if (!report.warn && absent.length > 0) {
+    lines.push(
+      `Nothing REQUIRED for the "${report.profile}" profile is missing, but ${absent.length} file(s) are not installed: ` +
+        `${absent.map((l) => l.file).join(", ")}. Tools that read them degrade rather than refuse.`,
+    );
+  } else if (!report.warn && report.unknownEdition.length === 0) {
+    lines.push("Nothing missing, nothing provably stale.");
+  }
   return lines.join("\n");
 }
