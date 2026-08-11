@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.7 — 2026-08-11
+
+- Fold the WAL in before the snapshot copy, or refuse to send one (#22)
+
+
 ## v0.3.6 — 2026-08-11
 
 - Answer "is this deployment persisting?" from outside the container (#21)
