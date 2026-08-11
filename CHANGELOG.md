@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.6 — 2026-08-11
+
+- Answer "is this deployment persisting?" from outside the container (#21)
+
+
 ## v0.3.5 — 2026-08-11
 
 - Sweep empty sessions at startup (#20)
