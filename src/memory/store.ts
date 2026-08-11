@@ -177,6 +177,46 @@ export class MemoryStore {
   }
 
   /**
+   * Delete sessions that contain no messages.
+   *
+   * NARROW ON PURPOSE, and the narrowness is the safety property. It can only
+   * remove a session with ZERO messages, so it cannot destroy a conversation
+   * however it is invoked or mis-invoked — the worst it can do is remove an
+   * empty shell somebody was about to type into.
+   *
+   * There is deliberately no general session delete, and no HTTP route for
+   * this. On a console served publicly, a delete endpoint is a way for anyone
+   * to remove anyone's work; an operator with shell access is a different
+   * threat model. This is a maintenance command, not a feature.
+   *
+   * Empty sessions accumulate from health checks, probes and abandoned tabs.
+   * They are noise in the list and they inflate the session count on the
+   * dashboard, which is the only reason to remove them at all.
+   */
+  purgeEmptySessions(opts: { olderThanMs?: number; dryRun?: boolean } = {}): Array<{ id: string; title: string; createdAt: number }> {
+    const cutoff = opts.olderThanMs ?? 0;
+    const rows = this.db
+      .prepare(
+        `SELECT s.id, s.title, s.created_at FROM sessions s
+         WHERE NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.id)
+           AND s.created_at <= ?
+         ORDER BY s.created_at ASC`,
+      )
+      .all(Date.now() - cutoff) as Array<{ id: string; title: string; created_at: number }>;
+
+    if (!opts.dryRun && rows.length > 0) {
+      // One statement per row rather than an IN list: the count is small by
+      // construction, and a parameterised loop cannot be tripped by an id that
+      // looks like SQL.
+      const del = this.db.prepare("DELETE FROM sessions WHERE id = ?");
+      this.db.transaction(() => {
+        for (const r of rows) del.run(r.id);
+      })();
+    }
+    return rows.map((r) => ({ id: r.id, title: r.title, createdAt: r.created_at }));
+  }
+
+  /**
    * Record one compaction of a session's history.
    *
    * Append-only. An earlier summary is never rewritten by a later one, because

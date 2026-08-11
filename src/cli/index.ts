@@ -427,6 +427,31 @@ program
   });
 
 program
+  .command("sessions-purge")
+  .description("Delete sessions that contain NO messages. Cannot remove a conversation — only empty shells left by probes, health checks and abandoned tabs")
+  .option("--older-than <hours>", "only those created at least this many hours ago", "0")
+  .option("--apply", "actually delete; without this it only lists what would go")
+  .action((opts: { olderThan?: string; apply?: boolean }) => {
+    const store = new MemoryStore(resolveDbFile(configDir()));
+    const olderThanMs = Number(opts.olderThan ?? 0) * 3_600_000;
+    // Dry run is the DEFAULT. A command that deletes on its bare invocation is
+    // one somebody runs while reading its help text.
+    const rows = store.purgeEmptySessions({ olderThanMs, dryRun: !opts.apply });
+    if (rows.length === 0) {
+      console.log("No empty sessions.");
+      return;
+    }
+    for (const r of rows) {
+      console.log(`${r.id}  ${new Date(r.createdAt).toISOString()}  ${r.title || "(untitled)"}`);
+    }
+    console.log(
+      opts.apply
+        ? `\nDeleted ${rows.length} empty session(s). Nothing with a message in it was touched.`
+        : `\n${rows.length} empty session(s) would be deleted. Re-run with --apply.`,
+    );
+  });
+
+program
   .command("tenants")
   .description("Manage tenants (multi-tenant installs). Each tenant is an isolated database file.")
   .argument("<action>", "list | create | suspend | activate")
