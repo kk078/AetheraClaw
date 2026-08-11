@@ -4,7 +4,7 @@ import fastifyWebsocket from "@fastify/websocket";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { Config } from "../config/config.js";
+import { configDir, type Config } from "../config/config.js";
 import type { MemoryStore } from "../memory/store.js";
 import { SessionManager } from "./session-manager.js";
 import { ClientMessageSchema } from "./ws-protocol.js";
@@ -52,6 +52,7 @@ import {
   type Identity,
 } from "./auth.js";
 import { readEnv } from "../config/legacy.js";
+import { assessSnapshot, readSnapshotStatus } from "../ops/snapshot-status.js";
 import { resolvePosture, screenIngress } from "../config/posture.js";
 import { uploadGate } from "../compliance/upload-gate.js";
 import {
@@ -264,6 +265,29 @@ export async function buildServer(opts: {
   app.get("/healthz", async () => ({ ok: true, name: "orion" }));
 
   /**
+   * Is this deployment persisting?
+   *
+   * A question the console could not answer. On 2026-08-11 rows written half an
+   * hour before a restart were gone afterwards and the same day-old database
+   * came back twice, while /healthz said "ok", the deploy was green and every
+   * page rendered — the evidence was in a container log unreachable without a
+   * Cloudflare session. A DEPLOYMENT THAT SILENTLY STOPS PERSISTING LOOKS
+   * EXACTLY LIKE A HEALTHY ONE, so health has to be asked about the checkpoint
+   * itself rather than inferred from the process being up.
+   *
+   * Times and byte counts only, so it is safe on a public hostname: it says
+   * whether bytes reached R2, never what was in them.
+   */
+  app.get("/api/ops/snapshot", async (_req, reply) => {
+    const assessment = assessSnapshot(readSnapshotStatus(configDir()), Date.now());
+    // 200 even when the verdict is bad. This endpoint reports a state; a 5xx
+    // would make a monitoring system treat "persistence is broken" as "the
+    // status check is broken", which is the same confusion the endpoint exists
+    // to remove.
+    return reply.send(assessment);
+  });
+
+  /**
    * Prometheus metrics.
    *
    * COUNTS AND DURATIONS ONLY. No claim number, no member id, no session id, no
@@ -317,6 +341,43 @@ export async function buildServer(opts: {
         type: "gauge",
       },
     ];
+
+    // ── Persistence ──────────────────────────────────────────────────────────
+    // The gauge to alert on. orion_up says the process is serving, which was
+    // true throughout the day this deployment was quietly losing every write.
+    const snap = assessSnapshot(readSnapshotStatus(configDir()), Date.now());
+    samples.push(
+      {
+        name: "orion_snapshot_persisting",
+        value: snap.persisting ? 1 : 0,
+        // 0 covers stale, failing, disabled and unmeasured alike. An operator
+        // does not need the distinction to know something is wrong, and
+        // collapsing them means no verdict is accidentally left un-alerted.
+        help: "1 when a checkpoint has recently landed in R2. 0 means a restart would lose data.",
+        type: "gauge",
+      },
+      {
+        name: "orion_snapshot_age_seconds",
+        // -1, not 0, when nothing has ever landed. Zero is the value of a
+        // checkpoint that just succeeded — the best possible state — and using
+        // it for "never" would make the worst state look like the best.
+        value: snap.ageSeconds ?? -1,
+        help: "Seconds since the last checkpoint R2 accepted. -1 when there has never been one.",
+        type: "gauge",
+      },
+      {
+        name: "orion_snapshot_bytes",
+        value: snap.lastBytes,
+        help: "Size of the last accepted checkpoint.",
+        type: "gauge",
+      },
+      {
+        name: "orion_snapshot_failures",
+        value: snap.consecutiveFailures,
+        help: "Checkpoint failures since the last success.",
+        type: "gauge",
+      },
+    );
     return reply.type("text/plain; version=0.0.4").send(renderMetrics(samples));
   });
 
