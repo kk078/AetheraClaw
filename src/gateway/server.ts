@@ -67,7 +67,9 @@ import {
   costOf,
   newBucket,
   renderMetrics,
+  rateLimitKey,
   securityHeaders,
+  shouldTrustForwardedFor,
   spend,
   type Bucket,
   type MetricSample,
@@ -190,8 +192,20 @@ export async function buildServer(opts: {
   app.addHook("onRequest", async (req, reply) => {
     const cost = costOf(req.method, req.url);
     if (cost > 0) {
-      const identity = (req as { identity?: { name?: string } }).identity?.name;
-      const key = identity || req.ip || "anonymous";
+      // NOT req.ip. Behind Cloudflare that is the edge, not the caller, and
+      // keying on it meant the limiter refused nothing in production while
+      // passing every local test. See rateLimitKey for why a forwarded header
+      // is trusted only when something in front overwrites it.
+      const key = rateLimitKey({
+        identity: (req as { identity?: { name?: string } }).identity?.name,
+        headers: req.headers as Record<string, string | string[] | undefined>,
+        socketIp: req.ip,
+        trustForwardedFor: shouldTrustForwardedFor(
+          readEnv("TRUST_PROXY") ?? "",
+          exposure,
+          req.headers as Record<string, string | string[] | undefined>,
+        ),
+      });
       const now = Date.now();
       const decision = spend(buckets.get(key) ?? newBucket(DEFAULT_LIMIT, now), DEFAULT_LIMIT, cost, now);
       buckets.set(key, decision.bucket);

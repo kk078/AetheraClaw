@@ -207,3 +207,96 @@ export function renderMetrics(samples: MetricSample[]): string {
 export function looksLikeIdentifier(value: string): boolean {
   return identifierShaped(value);
 }
+
+// ── Who is being limited ─────────────────────────────────────────────────────
+//
+// FOUND IN PRODUCTION, not in a test. The limiter was verified against
+// 127.0.0.1, where `req.ip` IS the caller, and reported as working. Behind
+// Cloudflare it is not: 25 rapid session-creates all returned 200 and
+// orion_rate_limited_total stayed at 0, because `req.ip` was the edge rather
+// than the client and the buckets did not correspond to callers at all.
+//
+// THE TRAP IN THE OBVIOUS FIX. Reading `x-forwarded-for` unconditionally is
+// WORSE than the bug: a client can set that header itself, so a caller who
+// wants past the limit sends a different value every request and gets a fresh
+// bucket each time. That converts an accidentally ineffective limiter into one
+// that is trivially and deliberately defeated.
+//
+// So a forwarded header is trusted ONLY when the deployment says it sits behind
+// an edge that overwrites it. Cloudflare sets `cf-connecting-ip` and strips any
+// client-supplied copy, which is what makes it trustworthy — and only there.
+//
+// The default is NOT to trust, and the failure direction is deliberate: an
+// untrusted deployment behind a proxy puts every caller in one bucket, which is
+// too strict rather than too loose. Refusing too much is visible in a minute;
+// refusing nothing is invisible for a month, which is exactly what happened.
+
+export interface KeyInput {
+  /** From authorizeRequest, when the caller has an identity. The best signal there is. */
+  identity?: string;
+  headers: Record<string, string | string[] | undefined>;
+  /** Fastify's socket peer. Behind a proxy this is the proxy. */
+  socketIp?: string;
+  /**
+   * Whether a forwarded-for header may be believed.
+   *
+   * True ONLY when something in front overwrites it. See above — this is the
+   * difference between a working limiter and an evadable one.
+   */
+  trustForwardedFor: boolean;
+}
+
+function firstHeader(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) return (value[0] ?? "").trim();
+  return (value ?? "").trim();
+}
+
+/**
+ * The bucket key for one request.
+ *
+ * Identity first where there is one: a signed-in caller is the same caller from
+ * two addresses, and limiting them per-address would let one person spend the
+ * budget several times over.
+ */
+export function rateLimitKey(input: KeyInput): string {
+  const identity = (input.identity ?? "").trim();
+  if (identity !== "") return `id:${identity}`;
+
+  if (input.trustForwardedFor) {
+    // Cloudflare's header first — it is a single address and cannot be
+    // client-supplied through the edge. x-forwarded-for is the fallback and its
+    // FIRST hop is the original client; later hops are proxies.
+    const cf = firstHeader(input.headers["cf-connecting-ip"]);
+    if (cf !== "") return `ip:${cf}`;
+    const xff = firstHeader(input.headers["x-forwarded-for"]).split(",")[0].trim();
+    if (xff !== "") return `ip:${xff}`;
+    // Trusted but absent. Falling through to the socket rather than inventing a
+    // key: an empty header is not an identity, and treating it as one would give
+    // every header-less request its own budget.
+  }
+
+  const socket = (input.socketIp ?? "").trim();
+  return socket !== "" ? `ip:${socket}` : "anonymous";
+}
+
+/**
+ * Should this deployment believe a forwarded-for header?
+ *
+ * Explicit opt-in via ORION_TRUST_PROXY, and additionally inferred when the
+ * request carries `cf-connecting-ip` AND the deployment is exposed — because
+ * that header is set by Cloudflare and stripped from client input, so its
+ * presence on an exposed deployment means the edge is in front.
+ *
+ * The inference is deliberately narrow. It does NOT extend to x-forwarded-for,
+ * which anyone can send.
+ */
+export function shouldTrustForwardedFor(
+  explicit: string,
+  exposure: "loopback" | "exposed",
+  headers: Record<string, string | string[] | undefined>,
+): boolean {
+  const flag = explicit.trim().toLowerCase();
+  if (flag === "1" || flag === "true" || flag === "yes") return true;
+  if (flag === "0" || flag === "false" || flag === "no") return false;
+  return exposure === "exposed" && firstHeader(headers["cf-connecting-ip"]) !== "";
+}

@@ -6,7 +6,9 @@ import {
   costOf,
   looksLikeIdentifier,
   newBucket,
+  rateLimitKey,
   renderMetrics,
+  shouldTrustForwardedFor,
   securityHeaders,
   spend,
 } from "../src/gateway/hardening.js";
@@ -152,5 +154,100 @@ describe("metrics, and the PHI rule for them", () => {
     // A warning line in a metrics body is itself a line a scraper stores.
     const out = renderMetrics([{ name: "x", value: 1, help: "h", type: "gauge", labels: { c: "CLM-9999" } }]);
     expect(out).not.toMatch(/dropped|redact|warn/i);
+  });
+});
+
+// ── The bug this section exists for ─────────────────────────────────────────
+// The limiter was verified against 127.0.0.1, where req.ip IS the caller, and
+// reported as working. In production behind Cloudflare it refused nothing: 25
+// rapid writes all returned 200 and orion_rate_limited_total stayed at 0.
+// These tests are written against the deployment shape rather than the local
+// one, which is what the earlier verification failed to do.
+
+describe("the rate-limit key", () => {
+  const cf = (ip: string) => ({ "cf-connecting-ip": ip });
+
+  it("uses the identity when there is one", () => {
+    // A signed-in caller is the same caller from two addresses; limiting per
+    // address would let one person spend the budget several times over.
+    const key = rateLimitKey({ identity: "kim", headers: cf("1.1.1.1"), socketIp: "10.0.0.1", trustForwardedFor: true });
+    expect(key).toBe("id:kim");
+  });
+
+  it("distinguishes callers behind a trusted edge", () => {
+    // The actual production bug: without this, every caller shared the edge's
+    // address and nothing ever accumulated.
+    const a = rateLimitKey({ headers: cf("203.0.113.7"), socketIp: "10.0.0.1", trustForwardedFor: true });
+    const b = rateLimitKey({ headers: cf("203.0.113.8"), socketIp: "10.0.0.1", trustForwardedFor: true });
+    expect(a).not.toBe(b);
+  });
+
+  it("IGNORES a forwarded header when the deployment does not trust one", () => {
+    // The trap in the obvious fix. Reading x-forwarded-for unconditionally is
+    // WORSE than the bug: a caller sends a different value every request and
+    // gets a fresh bucket each time, turning an ineffective limiter into an
+    // evadable one.
+    const spoofed = rateLimitKey({
+      headers: { "x-forwarded-for": "9.9.9.9" },
+      socketIp: "10.0.0.1",
+      trustForwardedFor: false,
+    });
+    const other = rateLimitKey({
+      headers: { "x-forwarded-for": "9.9.9.10" },
+      socketIp: "10.0.0.1",
+      trustForwardedFor: false,
+    });
+    expect(spoofed).toBe(other);
+    expect(spoofed).toBe("ip:10.0.0.1");
+  });
+
+  it("takes the FIRST x-forwarded-for hop, which is the client", () => {
+    const key = rateLimitKey({
+      headers: { "x-forwarded-for": "203.0.113.7, 10.0.0.5, 10.0.0.6" },
+      socketIp: "10.0.0.1",
+      trustForwardedFor: true,
+    });
+    expect(key).toBe("ip:203.0.113.7");
+  });
+
+  it("prefers cf-connecting-ip over x-forwarded-for", () => {
+    // Cloudflare's header is a single address and cannot be client-supplied
+    // through the edge; x-forwarded-for can carry anything the client prepended.
+    const key = rateLimitKey({
+      headers: { "cf-connecting-ip": "203.0.113.7", "x-forwarded-for": "9.9.9.9" },
+      socketIp: "10.0.0.1",
+      trustForwardedFor: true,
+    });
+    expect(key).toBe("ip:203.0.113.7");
+  });
+
+  it("falls back to the socket when a trusted header is absent", () => {
+    // An empty header is not an identity. Treating it as one would give every
+    // header-less request its own budget — the original bug, reintroduced.
+    expect(rateLimitKey({ headers: {}, socketIp: "10.0.0.1", trustForwardedFor: true })).toBe("ip:10.0.0.1");
+  });
+
+  it("never returns an empty key", () => {
+    expect(rateLimitKey({ headers: {}, trustForwardedFor: false })).toBe("anonymous");
+  });
+});
+
+describe("deciding whether to trust a forwarded header", () => {
+  it("obeys an explicit setting either way", () => {
+    expect(shouldTrustForwardedFor("true", "loopback", {})).toBe(true);
+    expect(shouldTrustForwardedFor("false", "exposed", { "cf-connecting-ip": "1.1.1.1" })).toBe(false);
+  });
+
+  it("infers trust from cf-connecting-ip on an EXPOSED deployment", () => {
+    expect(shouldTrustForwardedFor("", "exposed", { "cf-connecting-ip": "203.0.113.7" })).toBe(true);
+  });
+
+  it("does NOT infer trust from x-forwarded-for, which anyone can send", () => {
+    // The whole inference rests on the header being one the edge overwrites.
+    expect(shouldTrustForwardedFor("", "exposed", { "x-forwarded-for": "9.9.9.9" })).toBe(false);
+  });
+
+  it("does not trust anything on loopback by default", () => {
+    expect(shouldTrustForwardedFor("", "loopback", { "cf-connecting-ip": "1.1.1.1" })).toBe(false);
   });
 });
