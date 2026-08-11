@@ -401,6 +401,31 @@ program
       console.log(`Sessions: removed ${emptied.length} empty session(s) older than 24h. Nothing with a message was touched.`);
     }
 
+    // ── The same sweep, once, for shells younger than the window ─────────────
+    // The window above is right for an unattended sweep and wrong when someone
+    // is standing there asking for a deployment to be tidied NOW: a console
+    // carrying fifty shells from an afternoon of probing keeps reporting fifty
+    // sessions for another day.
+    //
+    // ORION_PURGE_EMPTY_SESSIONS holds a TOKEN, not a boolean, and the token is
+    // recorded in the database once the work is done. That is what makes it
+    // safe to leave set in the deployment config: a switch meaning "purge on
+    // every boot" would have to be removed in a second deploy, and until it
+    // was, any unattended restart would repeat a deletion nobody was watching.
+    // Asking for it again is a matter of naming a new token.
+    //
+    // FIVE MINUTES is still subtracted. A tab that opened while the container
+    // was restarting has an empty session and a person in front of it, and the
+    // difference between that and an abandoned shell is only ever time.
+    const purgeToken = (process.env.ORION_PURGE_EMPTY_SESSIONS ?? "").trim();
+    if (purgeToken !== "" && store.markOnce(`purge-empty-sessions:${purgeToken}`, "operator-requested")) {
+      const swept = store.purgeEmptySessions({ olderThanMs: 5 * 60_000 });
+      console.log(
+        `Sessions: one-shot purge "${purgeToken}" removed ${swept.length} empty session(s) older than 5 minutes.` +
+          ` Nothing with a message was touched; this will not run again for this token.`,
+      );
+    }
+
     const pruned = store.pruneToolCalls(retentionPlan(Date.now()));
     if (pruned > 0) console.log(`Tool log: pruned ${pruned} row(s) past retention`);
     const views = store.pruneToolViews(viewRetentionPlan(Date.now()));

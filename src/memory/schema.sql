@@ -1111,3 +1111,19 @@ CREATE TABLE IF NOT EXISTS live_submissions (
   created_at    INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_live_submissions ON live_submissions(created_at DESC);
+
+-- ── One-shot maintenance ─────────────────────────────────────────────────────
+-- A record that a named, manually-triggered cleanup has already run against
+-- THIS database. It exists so a maintenance switch can be left in the
+-- deployment config permanently and still act exactly once: the operator sets
+-- a token, the next boot does the work and writes the token here, and every
+-- boot after that finds the row and does nothing.
+--
+-- The alternative — a switch that means "do it every boot" — has to be removed
+-- again in a second deploy, and the window between the two is one where an
+-- unattended restart repeats a destructive action nobody is watching.
+CREATE TABLE IF NOT EXISTS maintenance_marks (
+  id         TEXT PRIMARY KEY,
+  note       TEXT NOT NULL DEFAULT '',
+  applied_at INTEGER NOT NULL
+);

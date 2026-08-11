@@ -142,6 +142,25 @@ async function restore() {
   }
 }
 
+// ── OPEN QUESTION: is this actually reaching R2? ─────────────────────────────
+// Observed on orion.aetheraonline.com on 2026-08-11, across the v0.3.4 and
+// v0.3.5 deploys: about fifty session rows written during rate-limiter testing
+// were absent after each restart, and what came back both times was a database
+// whose newest session was created 2026-08-10 05:50Z. The in-memory rate-limit
+// counter had reset, so the container had certainly restarted.
+//
+// Rows written at 02:20 should have been in the 02:52 checkpoint at a 60s
+// cadence. They were not. The candidate explanations are that the PUT below is
+// failing (the Worker answering 401/403/404 lands in `checkpoint failed`, which
+// only appears in the container log), or that restore is reading a key nothing
+// writes.
+//
+// This matters far more than it looks: if it is real, everything typed into the
+// console since 2026-08-10 05:50 — provider keys included — is lost at every
+// deploy, and the deployment silently rolls back to the same old snapshot each
+// time. NOT CONFIRMED. Confirming it needs the container's boot log, and the
+// fix for the diagnosis gap is an ops route reporting last-checkpoint time and
+// byte count so this question can be answered from the console.
 let checkpointing = false;
 async function checkpoint(reason) {
   if (snapshotsDisabled || BUCKET_BINDING_URL === "" || !fs.existsSync(DB_PATH)) return;
