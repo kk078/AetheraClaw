@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.5 — 2026-08-11
+
+- Sweep empty sessions at startup (#20)
+
+
 ## v0.3.4 — 2026-08-11
 
 - Fix the rate limiter key, and a narrow purge for empty sessions (#19)
