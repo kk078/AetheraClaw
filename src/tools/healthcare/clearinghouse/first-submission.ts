@@ -177,15 +177,26 @@ export function evaluateFirstSubmission(input: FirstSubmissionInput): FirstSubmi
   }
 
   if (input.checksNotRun.length > 0) {
-    // Reported at the top of the gate's own output for the same reason
-    // evaluateGate does it: a "clear" that silently skipped the NCCI check is
-    // worse than no check, because it converts an absence of information into a
-    // statement of safety.
+    // BLOCKS, and it did not always. A "clear" that silently skipped the NCCI
+    // check is worse than no check, because it converts an absence of
+    // information into a statement of safety — and the check immediately above
+    // has just printed "The scrubber found nothing", which is the sentence a
+    // person carries into the decision.
+    //
+    // A warning was the wrong level for THIS gate specifically. Everywhere else
+    // in the product, missing reference data degrades an answer somebody can
+    // weigh. Here the next step files a claim at a payer, and the doc's own
+    // criterion for a first claim is a scrub with no errors AND NO WARNINGS —
+    // so a warning that is routinely present is one that gets read as scenery.
+    //
+    // It is also the cheapest block on this list to clear: `orion data refresh`
+    // fetches public CMS files. Nothing about it asks anyone to accept risk.
     add(
       "blind-spots",
-      "warn",
-      `${input.checksNotRun.join(", ")} could not run, so those checks did NOT pass — they did not happen.`,
-      "Run `orion data status` and install what is missing before the first live claim, not after.",
+      "block",
+      `${input.checksNotRun.join(", ")} could not run, so those checks did NOT pass — they did not happen. ` +
+        "The scrub above is clean only in the sense that nothing looked.",
+      "Run `orion data refresh` and re-check. These are public CMS files, and this is the last moment installing them is free.",
     );
   }
 
