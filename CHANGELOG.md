@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.4 — 2026-08-11
+
+- Fix the rate limiter key, and a narrow purge for empty sessions (#19)
+
+
 ## v0.3.3 — 2026-08-10
 
 - The supervised first live submission — gate, dry run, and a cap that is code (#18)
