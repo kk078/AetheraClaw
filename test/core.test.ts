@@ -266,3 +266,48 @@ describe("purging empty sessions", () => {
     expect(store.purgeEmptySessions()).toEqual([]);
   });
 });
+
+describe("the startup sweep's window", () => {
+  let dir: string;
+  let store: MemoryStore;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "orion-sweep-"));
+    store = new MemoryStore(path.join(dir, "t.db"));
+  });
+  afterEach(() => {
+    store?.close?.();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const DAY = 24 * 3_600_000;
+
+  it("spares an empty session a browser tab might still be holding", () => {
+    // Deleting a session a tab still holds makes its next message fail with
+    // "unknown session". The window has to be longer than any plausible pause,
+    // which is why it is a day and not an hour.
+    store.createSession("");
+    expect(store.purgeEmptySessions({ olderThanMs: DAY, dryRun: true })).toEqual([]);
+  });
+
+  it("removes one nobody has typed into for a day", () => {
+    const old = store.createSession("");
+    // Age it by hand rather than waiting.
+    (store as unknown as { db: { prepare: (q: string) => { run: (...a: unknown[]) => unknown } } }).db
+      .prepare("UPDATE sessions SET created_at = ? WHERE id = ?")
+      .run(Date.now() - 2 * DAY, old.id);
+    expect(store.purgeEmptySessions({ olderThanMs: DAY, dryRun: true }).map((r) => r.id)).toEqual([old.id]);
+  });
+
+  it("still cannot touch an old session that has a message", () => {
+    // The sweep runs unattended at every boot, so this is the assertion that
+    // matters most: however wrong the window turns out to be, it cannot
+    // destroy a conversation.
+    const kept = store.createSession("real");
+    store.appendMessage(kept.id, "user", [{ type: "text", text: "hello" }]);
+    (store as unknown as { db: { prepare: (q: string) => { run: (...a: unknown[]) => unknown } } }).db
+      .prepare("UPDATE sessions SET created_at = ? WHERE id = ?")
+      .run(Date.now() - 400 * DAY, kept.id);
+    expect(store.purgeEmptySessions({ olderThanMs: DAY })).toEqual([]);
+    expect(store.getSession(kept.id)).toBeDefined();
+  });
+});
