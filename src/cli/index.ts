@@ -380,6 +380,27 @@ program
       const line = retentionReport(purged.deleted, purged.charactersRemoved, config.healthcare.documentRetentionDays);
       if (line !== "") console.log(line);
     }
+    // ── Empty sessions ─────────────────────────────────────────────────────
+    // Rows with NO messages, left by health checks, uptime probes, crawlers and
+    // abandoned tabs. They are not data — they are the shell a conversation
+    // would have gone in — but they are counted on the dashboard and in
+    // /metrics, so a deployment that has been probed for a month reports
+    // hundreds of "sessions" nobody had.
+    //
+    // 24 HOURS, and the generosity is the point. Deleting a session a browser
+    // tab still holds makes that tab's next message fail with "unknown
+    // session", so the window has to be longer than any plausible pause. An
+    // empty tab nobody has typed into for a day is dead; an empty tab from ten
+    // minutes ago is somebody thinking.
+    //
+    // Only ever empty ones — purgeEmptySessions cannot touch a session with a
+    // message in it, so this sweep cannot destroy a conversation however wrong
+    // the window turns out to be.
+    const emptied = store.purgeEmptySessions({ olderThanMs: 24 * 3_600_000 });
+    if (emptied.length > 0) {
+      console.log(`Sessions: removed ${emptied.length} empty session(s) older than 24h. Nothing with a message was touched.`);
+    }
+
     const pruned = store.pruneToolCalls(retentionPlan(Date.now()));
     if (pruned > 0) console.log(`Tool log: pruned ${pruned} row(s) past retention`);
     const views = store.pruneToolViews(viewRetentionPlan(Date.now()));
