@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.8 — 2026-08-11
+
+- The default profile called an empty install healthy (#24)
+
+
 ## v0.3.7 — 2026-08-11
 
 - Fold the WAL in before the snapshot copy, or refuse to send one (#22)
