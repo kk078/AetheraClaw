@@ -217,6 +217,27 @@ export class MemoryStore {
   }
 
   /**
+   * Claim a one-shot maintenance action, returning whether this caller got it.
+   *
+   * True exactly once per id per database, and the write is what makes it so —
+   * `INSERT OR IGNORE` on a primary key is atomic, so two processes racing to
+   * claim the same id cannot both be told they won and both run the action.
+   *
+   * The id is expected to carry a token chosen by whoever asked for the work
+   * (`purge-empty-sessions:2026-08-11`), so asking for the same action again
+   * later is a matter of naming a new token rather than deleting a row.
+   */
+  markOnce(id: string, note = ""): boolean {
+    const res = this.db
+      .prepare("INSERT OR IGNORE INTO maintenance_marks (id, note, applied_at) VALUES (?, ?, ?)")
+      .run(id, note, Date.now());
+    // better-sqlite3 reports `changes`; node:sqlite reports `changes` too, as a
+    // number or a bigint depending on the build. Compare against 0 rather than
+    // truthiness so a bigint 0n is not read as "inserted".
+    return Number((res as { changes?: number | bigint }).changes ?? 0) > 0;
+  }
+
+  /**
    * Record one compaction of a session's history.
    *
    * Append-only. An earlier summary is never rewritten by a later one, because

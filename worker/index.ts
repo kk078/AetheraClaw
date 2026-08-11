@@ -49,6 +49,15 @@ export interface Env {
   SPEECH_ENGINE?: string;
   /** Origin the container posts its snapshot back to. Defaults to this hostname. */
   SNAPSHOT_URL?: string;
+  /**
+   * A token naming a one-shot cleanup of empty sessions.
+   *
+   * Not a boolean. The container records the token once it has done the work,
+   * so this can stay in wrangler.jsonc without repeating on every restart, and
+   * a later cleanup is requested by changing the value rather than by adding
+   * and then removing a switch.
+   */
+  PURGE_EMPTY_SESSIONS?: string;
 
   // ── Model provider keys ────────────────────────────────────────────────────
   // All optional, and whichever are set are forwarded to the container. Listed
@@ -182,6 +191,9 @@ export class OrionContainer extends Container<Env> {
       // back per-domain tenants — means giving each one its own key prefix
       // first, and this comment is the reminder that it is not optional.
       ORION_SNAPSHOT_URL: env.SNAPSHOT_URL || "https://orion.aetheraonline.com",
+      // Acts once per distinct value, because the container writes the token
+      // into its own database when it runs. Empty means nothing to do.
+      ORION_PURGE_EMPTY_SESSIONS: env.PURGE_EMPTY_SESSIONS || "",
       ...providerKeys,
     };
   }

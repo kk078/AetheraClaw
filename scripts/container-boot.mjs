@@ -59,6 +59,53 @@ const SIDECARS = [
 
 const log = (msg) => console.log(`[boot] ${msg}`);
 
+// ── The status file the gateway reads ────────────────────────────────────────
+// Written here because this process owns the R2 round trip and is the only
+// thing that knows whether the bytes landed. Read by src/ops/snapshot-status.ts
+// and served at /api/ops/snapshot, which is how the question "is this
+// deployment persisting?" gets answered from outside the container instead of
+// from a log nobody can reach.
+//
+// A file, not a callback into the gateway: the gateway is publicly served, and
+// an endpoint that accepts a status report is an endpoint anyone can lie to.
+// This has exactly one writer.
+const STATUS_PATH = path.join(HOME, "snapshot-status.json");
+const status = {
+  lastAttemptAt: 0,
+  lastSuccessAt: 0,
+  lastBytes: 0,
+  lastReason: "",
+  lastError: "",
+  consecutiveFailures: 0,
+  disabled: false,
+  disabledReason: "",
+  restoredAt: 0,
+  restoredBytes: 0,
+};
+
+/**
+ * Persist the status, atomically, and never at the cost of the thing it
+ * describes. A write-then-rename keeps a reader from seeing half a file, and
+ * the whole thing is wrapped because a status file that cannot be written is
+ * not a reason to stop checkpointing — reporting is subordinate to the work.
+ */
+function writeStatus() {
+  try {
+    fs.mkdirSync(HOME, { recursive: true });
+    const tmp = `${STATUS_PATH}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(status), { mode: 0o600 });
+    fs.renameSync(tmp, STATUS_PATH);
+  } catch (err) {
+    log(`could not write snapshot status: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function markDisabled(reason) {
+  status.disabled = true;
+  status.disabledReason = reason;
+  writeStatus();
+}
+
 const snapshotHeaders = (extra = {}) =>
   SNAPSHOT_TOKEN ? { "x-aethera-gateway-token": SNAPSHOT_TOKEN, ...extra } : { ...extra };
 
@@ -99,6 +146,7 @@ async function restore() {
     log("no snapshot URL configured — starting with whatever is on disk (ephemeral).");
     log("anything entered in the console, including provider keys, is lost when this instance stops.");
     snapshotsDisabled = true;
+    markDisabled("no ORION_SNAPSHOT_URL is configured, so nothing is sent anywhere");
     return;
   }
   if (SNAPSHOT_TOKEN === "") {
@@ -106,6 +154,7 @@ async function restore() {
     // problem thirty seconds later.
     log("SNAPSHOT DISABLED: a snapshot URL is set but ORION_GATEWAY_TOKEN is not, so the Worker would refuse every call.");
     snapshotsDisabled = true;
+    markDisabled("a snapshot URL is set but ORION_GATEWAY_TOKEN is not, so the Worker would refuse every call");
     return;
   }
   if (fs.existsSync(DB_PATH)) {
@@ -113,12 +162,16 @@ async function restore() {
     // rather than started cold. Overwriting it with an older snapshot would
     // roll back live work, so the local copy wins.
     log("database already present on disk — keeping it, not restoring.");
+    writeStatus();
     return;
   }
   try {
     const bytes = await restoreOne(SNAPSHOT_KEY, DB_PATH, 0o600);
     if (bytes === 0) log("no snapshot yet — first boot for this tenant.");
     else log(`restored ${bytes} bytes from snapshot.`);
+    status.restoredAt = Date.now();
+    status.restoredBytes = bytes;
+    writeStatus();
 
     // Sidecars are best-effort INDIVIDUALLY: a missing credentials.json is the
     // ordinary state of a deployment nobody has typed a key into, and it must
@@ -139,9 +192,29 @@ async function restore() {
     log("starting anyway with checkpointing DISABLED, so the existing snapshot cannot be overwritten.");
     log("fix ORION_SNAPSHOT_URL / ORION_GATEWAY_TOKEN and restart to resume persistence.");
     snapshotsDisabled = true;
+    markDisabled(`the restore failed (${err instanceof Error ? err.message : String(err)}), so the existing snapshot is not overwritten`);
   }
 }
 
+// ── OPEN QUESTION: is this actually reaching R2? ─────────────────────────────
+// Observed on orion.aetheraonline.com on 2026-08-11, across the v0.3.4 and
+// v0.3.5 deploys: about fifty session rows written during rate-limiter testing
+// were absent after each restart, and what came back both times was a database
+// whose newest session was created 2026-08-10 05:50Z. The in-memory rate-limit
+// counter had reset, so the container had certainly restarted.
+//
+// Rows written at 02:20 should have been in the 02:52 checkpoint at a 60s
+// cadence. They were not. The candidate explanations are that the PUT below is
+// failing (the Worker answering 401/403/404 lands in `checkpoint failed`, which
+// only appears in the container log), or that restore is reading a key nothing
+// writes.
+//
+// This matters far more than it looks: if it is real, everything typed into the
+// console since 2026-08-10 05:50 — provider keys included — is lost at every
+// deploy, and the deployment silently rolls back to the same old snapshot each
+// time. NOT CONFIRMED. Confirming it needs the container's boot log, and the
+// fix for the diagnosis gap is an ops route reporting last-checkpoint time and
+// byte count so this question can be answered from the console.
 let checkpointing = false;
 async function checkpoint(reason) {
   if (snapshotsDisabled || BUCKET_BINDING_URL === "" || !fs.existsSync(DB_PATH)) return;
@@ -150,6 +223,8 @@ async function checkpoint(reason) {
   // the one being skipped would have.
   if (checkpointing) return;
   checkpointing = true;
+  status.lastAttemptAt = Date.now();
+  status.lastReason = reason;
   try {
     // SQLite in WAL mode keeps recent writes in the -wal sibling, so copying
     // only the main file would ship a database missing its newest rows. The
@@ -163,6 +238,11 @@ async function checkpoint(reason) {
     });
     if (!res.ok) throw new Error(`snapshot PUT returned ${res.status}`);
     log(`checkpointed ${body.length} bytes (${reason}).`);
+    status.lastSuccessAt = Date.now();
+    status.lastBytes = body.length;
+    status.lastError = "";
+    status.consecutiveFailures = 0;
+    writeStatus();
 
     // The key and the provider choice, alongside the claims. Sent every time
     // rather than only on change: they are a few hundred bytes, and tracking
@@ -182,7 +262,14 @@ async function checkpoint(reason) {
       }
     }
   } catch (err) {
-    log(`checkpoint failed (${reason}): ${err instanceof Error ? err.message : String(err)}`);
+    // The failure is RECORDED as well as logged. A log line answers the
+    // question only for somebody already reading the log; this is what lets
+    // /api/ops/snapshot say "three checkpoints have failed" to somebody who
+    // has no way to reach it.
+    status.lastError = err instanceof Error ? err.message : String(err);
+    status.consecutiveFailures += 1;
+    writeStatus();
+    log(`checkpoint failed (${reason}): ${status.lastError}`);
   } finally {
     checkpointing = false;
   }

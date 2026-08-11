@@ -87,6 +87,16 @@
     // application (workflow: access-setup.yml). Both halves, or the state on
     // Cloudflare will not match this file.
     "PUBLIC_ACCESS": "1"
+
+    // PURGE_EMPTY_SESSIONS is deliberately NOT set here.
+    //
+    // It is a token naming a one-shot cleanup of empty session rows: set it,
+    // and the first container boot that sees a new value purges shells with no
+    // messages, records the token, and never repeats. Deliberately unset,
+    // because the rows it was written for turned out to be disappearing on
+    // their own — see the snapshot note in scripts/container-boot.mjs. Arming a
+    // deletion while writes may already be failing to persist would destroy the
+    // evidence of the more serious problem.
   },
 
   // GATEWAY_TOKEN is deliberately absent from this file. It is set with

@@ -310,4 +310,40 @@ describe("the startup sweep's window", () => {
     expect(store.purgeEmptySessions({ olderThanMs: DAY })).toEqual([]);
     expect(store.getSession(kept.id)).toBeDefined();
   });
+
+  // ── The operator-requested purge ──────────────────────────────────────────
+  // A token, not a switch, so it can be left in the deployment config. The
+  // whole safety argument rests on markOnce being true exactly once, because
+  // the alternative is a deletion that repeats on every unattended restart.
+
+  it("claims a one-shot action once and then refuses it", () => {
+    expect(store.markOnce("purge-empty-sessions:2026-08-11")).toBe(true);
+    expect(store.markOnce("purge-empty-sessions:2026-08-11")).toBe(false);
+    expect(store.markOnce("purge-empty-sessions:2026-08-11")).toBe(false);
+  });
+
+  it("treats a new token as a new request", () => {
+    // Asking for another cleanup later must not require deleting a row by hand.
+    expect(store.markOnce("purge-empty-sessions:2026-08-11")).toBe(true);
+    expect(store.markOnce("purge-empty-sessions:2026-09-01")).toBe(true);
+  });
+
+  it("takes a shell younger than the unattended window on the short one", () => {
+    // The reason the one-shot exists: a console carrying rows from an hour ago
+    // would otherwise report them for another day.
+    const recent = store.createSession("");
+    (store as unknown as { db: { prepare: (q: string) => { run: (...a: unknown[]) => unknown } } }).db
+      .prepare("UPDATE sessions SET created_at = ? WHERE id = ?")
+      .run(Date.now() - 3_600_000, recent.id);
+    expect(store.purgeEmptySessions({ olderThanMs: DAY, dryRun: true })).toEqual([]);
+    expect(store.purgeEmptySessions({ olderThanMs: 5 * 60_000 }).map((r) => r.id)).toEqual([recent.id]);
+  });
+
+  it("STILL spares a tab that opened during the restart", () => {
+    // Five minutes is subtracted even from the operator-requested purge. A tab
+    // that opened while the container was coming back up has an empty session
+    // and a person in front of it.
+    store.createSession("");
+    expect(store.purgeEmptySessions({ olderThanMs: 5 * 60_000, dryRun: true })).toEqual([]);
+  });
 });
