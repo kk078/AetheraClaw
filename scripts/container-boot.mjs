@@ -169,6 +169,22 @@ async function restore() {
     const bytes = await restoreOne(SNAPSHOT_KEY, DB_PATH, 0o600);
     if (bytes === 0) log("no snapshot yet — first boot for this tenant.");
     else log(`restored ${bytes} bytes from snapshot.`);
+    // A -wal or -shm left over from some earlier life belongs to a DIFFERENT
+    // database than the one just restored, and SQLite would try to apply it.
+    // The snapshot is a single complete file by construction, so anything
+    // beside it is stale by definition. Should not happen on a container's
+    // fresh disk; cheap to be certain, and the failure it prevents is
+    // corruption rather than an error message.
+    for (const sibling of [`${DB_PATH}-wal`, `${DB_PATH}-shm`]) {
+      try {
+        if (fs.existsSync(sibling)) {
+          fs.rmSync(sibling);
+          log(`removed a stale ${path.basename(sibling)} that did not belong to the restored database.`);
+        }
+      } catch (err) {
+        log(`could not remove ${sibling}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
     status.restoredAt = Date.now();
     status.restoredBytes = bytes;
     writeStatus();
@@ -215,6 +231,40 @@ async function restore() {
 // time. NOT CONFIRMED. Confirming it needs the container's boot log, and the
 // fix for the diagnosis gap is an ops route reporting last-checkpoint time and
 // byte count so this question can be answered from the console.
+// ── Folding the write-ahead log in before the copy ───────────────────────────
+// THE BUG THIS EXISTS FOR, and it cost a day of production writes.
+//
+// The comment below used to describe two safeguards — ask the gateway to
+// checkpoint the WAL, or send the -wal file alongside — and the code did
+// NEITHER. It read orion.db and nothing else. store.ts sets journal_mode=WAL,
+// so recent writes live in orion.db-wal until SQLite folds them in at its own
+// threshold (around 1000 pages). On a quiet instance that can be hours.
+//
+// So every checkpoint honestly succeeded while shipping a database missing
+// everything written since the last automatic fold. Nothing errored, the PUT
+// was real, the restore was valid — and the restored database was frozen at an
+// old moment. The tell was orion_snapshot_bytes standing at exactly 778240
+// through a minute of live writing: a main file that never changes size while
+// writes are happening is a file the writes are not reaching.
+//
+// Sending the -wal alongside was the other option and is REJECTED. A snapshot
+// then consists of two objects that must be paired, and restoring a -wal
+// against a main file it does not belong to is how a database gets corrupted
+// rather than merely rolled back. One complete file has no pairing to get
+// wrong.
+let foldWal = null;
+async function foldWalIntoMain() {
+  if (foldWal === null) {
+    // The compiled adapter, so this uses whichever driver the image actually
+    // has — better-sqlite3 when it built, node:sqlite otherwise — rather than a
+    // second guess about that here. It also puts the rule under the test suite,
+    // which a plain script in this directory is not.
+    const mod = await import(new URL("../dist/memory/sqlite.js", import.meta.url).href);
+    foldWal = mod.foldWal;
+  }
+  return foldWal(DB_PATH);
+}
+
 let checkpointing = false;
 async function checkpoint(reason) {
   if (snapshotsDisabled || BUCKET_BINDING_URL === "" || !fs.existsSync(DB_PATH)) return;
@@ -227,9 +277,13 @@ async function checkpoint(reason) {
   status.lastReason = reason;
   try {
     // SQLite in WAL mode keeps recent writes in the -wal sibling, so copying
-    // only the main file would ship a database missing its newest rows. The
-    // gateway is asked to checkpoint the WAL into the main file first via the
-    // ops route; if that is unavailable the -wal file is sent alongside.
+    // only the main file ships a database missing its newest rows. Fold them in
+    // FIRST, and treat a failure to do so as a failed checkpoint: a snapshot
+    // known to be incomplete must not be sent, because sending it is
+    // indistinguishable from success and that is the whole defect. The refusal
+    // is loud now — /api/ops/snapshot reports it as `failing` with this
+    // message, where the old behaviour reported `ok`.
+    await foldWalIntoMain();
     const body = fs.readFileSync(DB_PATH);
     const res = await fetch(`${BUCKET_BINDING_URL}/snapshot/${encodeURIComponent(SNAPSHOT_KEY)}`, {
       method: "PUT",
