@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.9 — 2026-08-11
+
+- A check that could not run now blocks the first live claim (#25)
+
+
 ## v0.3.8 — 2026-08-11
 
 - The default profile called an empty install healthy (#24)
