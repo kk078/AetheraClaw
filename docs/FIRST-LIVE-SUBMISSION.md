@@ -96,8 +96,17 @@ claim_first_submission_check
 ```
 
 It reports what would block: the cap, the environment, the approval policy, the
-scrub, the filing window, eligibility, whether anyone has read the 837, and
-whether a person is named as watching.
+scrub, **any check that could not run**, the filing window, eligibility, whether
+anyone has read the 837, and whether a person is named as watching.
+
+The "could not run" one blocks, and it is the one worth understanding. If the
+NCCI table is not installed, the scrub line above it still says *"The scrubber
+found nothing"* — truthfully, because nothing looked. Everywhere else in the
+product that degrades an answer somebody can weigh. Here the next step files a
+claim, so an absence of information must not read as a statement of safety.
+
+It is also the cheapest item on the list to clear: `orion data refresh` fetches
+public CMS files, and step 1 is where you find out.
 
 It also checks whether this exact claim has been sent before, which is the one
 thing the gate alone cannot know.

@@ -111,12 +111,29 @@ describe("what warns rather than blocks", () => {
     expect(r.checks.find((c) => c.id === "scrub")?.level).toBe("warn");
   });
 
-  it("warns that a skipped check did NOT pass — it did not happen", () => {
+  it("BLOCKS on a skipped check, because it did NOT pass — it did not happen", () => {
     // The same failure evaluateGate refuses to make: converting an absence of
-    // information into a statement of safety.
+    // information into a statement of safety. It was a warning until somebody
+    // ran the checklist and watched "The scrubber found nothing" print directly
+    // above "ncci-ptp.json, mue.json, icd10.json could not run".
     const r = evaluateFirstSubmission(ready({ checksNotRun: ["NCCI/MUE bundling"] }));
-    expect(r.checks.find((c) => c.id === "blind-spots")?.message).toMatch(/did NOT pass/);
+    const check = r.checks.find((c) => c.id === "blind-spots");
+    expect(check?.level).toBe("block");
+    expect(check?.message).toMatch(/did NOT pass/);
+    expect(r.blocked).toBe(true);
+  });
+
+  it("clears once the missing data is installed", () => {
+    // The block has to be one somebody can actually get past, or it becomes a
+    // reason to stop using the gate. `orion data refresh` fetches public files.
+    const r = evaluateFirstSubmission(ready({ checksNotRun: [] }));
+    expect(r.checks.find((c) => c.id === "blind-spots")).toBeUndefined();
     expect(r.blocked).toBe(false);
+  });
+
+  it("says how to clear it, not just that it is blocked", () => {
+    const r = evaluateFirstSubmission(ready({ checksNotRun: ["ncci-ptp.json"] }));
+    expect(r.checks.find((c) => c.id === "blind-spots")?.fix).toMatch(/orion data refresh/);
   });
 
   it("warns about a large first claim without forbidding it", () => {
