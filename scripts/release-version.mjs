@@ -33,11 +33,41 @@ const commits = log
   .map((c) => c.trim())
   .filter(Boolean);
 
-if (commits.length === 0) {
+// ── An explicit bump beats the commit log, INCLUDING when it is empty ────────
+// Read here rather than after the commit scan, because the empty-range exit
+// below used to return before this variable was ever looked at. The workflow
+// offers "Force a specific bump instead of reading the commits" and it did
+// nothing in the one situation somebody reaches for it: HEAD is usually the
+// `chore(release):` commit the last tag points at, so `vX.Y.Z..HEAD` is empty
+// and the run ended with released=false and no explanation naming the input.
+//
+// Nothing failed. The dispatch was accepted, the job went green, and no tag and
+// no deploy appeared — which is the shape of outage nobody notices, and the
+// exact failure mode the deploy handoff in release.yml was already written to
+// avoid once before.
+const forced = (process.env.FORCED_BUMP ?? "").trim();
+const VALID_BUMPS = ["major", "minor", "patch"];
+if (forced && !VALID_BUMPS.includes(forced)) {
+  // Refuse rather than fall through to reading the commits. A typo'd input that
+  // silently reverts to automatic behaviour is worse than an error: the operator
+  // believes they forced something and the log looks ordinary.
+  console.error(`FORCED_BUMP must be one of ${VALID_BUMPS.join(", ")} — got "${forced}".`);
+  process.exit(1);
+}
+
+if (commits.length === 0 && !forced) {
   out("released", "false");
   out("version", pkg.version);
   console.log("Nothing since the last tag.");
   process.exit(0);
+}
+
+if (commits.length === 0) {
+  // Deliberate: re-cutting a version on an unchanged tree. The image is rebuilt
+  // and redeployed, which is a legitimate thing to want — an environment change,
+  // a base-image rebuild, or forcing the container to restart. Said out loud so
+  // the run's log explains a release whose changelog entry is empty.
+  console.log(`Nothing since ${lastTag || "the beginning"}, but FORCED_BUMP=${forced} was given — releasing anyway.`);
 }
 
 // Conventional-commit prefixes, read leniently. This repository does not write
@@ -61,7 +91,6 @@ for (const commit of commits) {
   if (!NO_RELEASE.test(subject)) notable.push(subject);
 }
 
-const forced = (process.env.FORCED_BUMP ?? "").trim();
 if (forced) bump = forced;
 
 if (!bump) {
@@ -88,7 +117,11 @@ try {
 }
 
 const date = new Date().toISOString().slice(0, 10);
-const entry = [`## v${next} — ${date}`, "", ...notable.map((s) => `- ${s}`), ""].join("\n");
+// A forced release with nothing behind it would otherwise write a heading and
+// a blank space, and a changelog entry that lists no changes reads as a bug in
+// the changelog rather than as a deliberate redeploy. Say which it is.
+const lines = notable.length > 0 ? notable.map((s) => `- ${s}`) : ["- Re-released with no code changes (forced bump)."];
+const entry = [`## v${next} — ${date}`, "", ...lines, ""].join("\n");
 const existing = fs.existsSync("CHANGELOG.md") ? fs.readFileSync("CHANGELOG.md", "utf8") : "# Changelog\n";
 const [heading, ...rest] = existing.split("\n");
 fs.writeFileSync("CHANGELOG.md", [heading, "", entry, ...rest].join("\n"));
