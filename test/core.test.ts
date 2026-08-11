@@ -1,8 +1,9 @@
-import { describe, expect, it, beforeAll, afterAll } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
+import { MemoryStore } from "../src/memory/store.js";
 import { confinePath } from "../src/tools/path-guard.js";
 import { assessCommandRisk } from "../src/tools/shell.js";
 import { ToolRegistry, defineTool } from "../src/tools/registry.js";
@@ -218,5 +219,50 @@ describe("sqlite adapter", () => {
     db.transaction(() => { inner("a"); inner("b"); })();
     expect(db.prepare("SELECT COUNT(*) AS c FROM t").get()).toMatchObject({ c: 2 });
     db.close();
+  });
+});
+
+describe("purging empty sessions", () => {
+  let dir: string;
+  let store: MemoryStore;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "orion-purge-"));
+    store = new MemoryStore(path.join(dir, "t.db"));
+  });
+  afterEach(() => {
+    store?.close?.();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("NEVER removes a session that has a message", () => {
+    // The safety property the whole design rests on. However this is invoked or
+    // mis-invoked, the worst it can do is remove an empty shell.
+    const kept = store.createSession("real conversation");
+    store.appendMessage(kept.id, "user", [{ type: "text", text: "hello" }]);
+    const empty = store.createSession("");
+
+    const removed = store.purgeEmptySessions();
+    expect(removed.map((r) => r.id)).toEqual([empty.id]);
+    expect(store.getSession(kept.id)).toBeDefined();
+    expect(store.getSession(empty.id)).toBeUndefined();
+  });
+
+  it("lists without deleting on a dry run", () => {
+    // The CLI defaults to this, because a command that deletes on its bare
+    // invocation is one somebody runs while reading its help text.
+    const empty = store.createSession("");
+    expect(store.purgeEmptySessions({ dryRun: true }).map((r) => r.id)).toEqual([empty.id]);
+    expect(store.getSession(empty.id)).toBeDefined();
+  });
+
+  it("can spare recently created shells", () => {
+    // An empty session created a second ago is probably a tab somebody is about
+    // to type into.
+    store.createSession("");
+    expect(store.purgeEmptySessions({ olderThanMs: 3_600_000, dryRun: true })).toEqual([]);
+  });
+
+  it("says nothing happened when there is nothing to do", () => {
+    expect(store.purgeEmptySessions()).toEqual([]);
   });
 });
