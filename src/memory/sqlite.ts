@@ -164,3 +164,57 @@ export function openDatabase(file: string, opts: OpenOptions = {}): SqliteDb {
   if (readEnv("SQLITE") === "node") return openNodeSqlite(file, opts);
   return openBetterSqlite(file, opts) ?? openNodeSqlite(file, opts);
 }
+
+// ── Folding the write-ahead log into the database file ───────────────────────
+// Lives here rather than in the caller because it is a property of the storage
+// engine, and because the caller that needs it — scripts/container-boot.mjs —
+// is a plain script the test suite cannot reach. A rule nobody can test is a
+// rule that quietly stops being true, which is exactly the history of this one:
+// the boot script's comment claimed the WAL was folded in before each snapshot
+// and the code never did it, so every checkpoint shipped a database missing
+// whatever was still in orion.db-wal. On a quiet instance that was hours of
+// work, and the snapshot was VALID — just old — so nothing anywhere reported a
+// problem.
+
+export interface WalFoldResult {
+  /** 1 when another connection prevented the fold. Nothing was moved. */
+  busy: number;
+  /** Frames left in the WAL afterwards. 0 after a successful TRUNCATE. */
+  log: number;
+  /** Frames moved into the main file. */
+  checkpointed: number;
+}
+
+/**
+ * Fold every committed write out of `file`'s WAL and into `file` itself, so a
+ * byte-for-byte copy of that one file is a complete database.
+ *
+ * TRUNCATE rather than PASSIVE. PASSIVE moves what it can and reports success
+ * even when it moved nothing, which is indistinguishable from the bug this
+ * replaces. TRUNCATE also resets the WAL to zero bytes, so its size afterwards
+ * is an independent check on the claim rather than a second reading of it.
+ *
+ * THROWS when the fold cannot be done. That is deliberate and the caller must
+ * not swallow it: a snapshot known to be incomplete is worse than no snapshot,
+ * because it is indistinguishable from a good one at restore time.
+ */
+export function foldWal(file: string): WalFoldResult {
+  // A second connection to a database another process is using is exactly what
+  // WAL exists to permit; openDatabase sets a busy timeout so a concurrent
+  // writer is waited for rather than failed.
+  const db = openDatabase(file, {});
+  try {
+    const row = (db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get() ?? {}) as Partial<WalFoldResult>;
+    const result: WalFoldResult = {
+      busy: Number(row.busy ?? 0),
+      log: Number(row.log ?? 0),
+      checkpointed: Number(row.checkpointed ?? 0),
+    };
+    if (result.busy === 1) {
+      throw new Error("wal_checkpoint reported busy — another connection held the database, so nothing was folded in");
+    }
+    return result;
+  } finally {
+    db.close();
+  }
+}
