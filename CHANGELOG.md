@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.15 — 2026-08-12
+
+- Add the pending-question registry for agent-initiated clarifying questions (#31)
+
+
 ## v0.3.14 — 2026-08-12
 
 - Reskin the web console in Apple's macOS visual language (#30)
