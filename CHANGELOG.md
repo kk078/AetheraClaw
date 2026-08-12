@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.20 — 2026-08-12
+
+- Wire the clarify and dual-track-speech UI (voice.js + app.js) (#36)
+
+
 ## v0.3.19 — 2026-08-12
 
 - Wire the persona-paraphrased spoken reply, gated to voice-originated turns (#35)
