@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.10 — 2026-08-12
+
+- The WebSocket limit was refusing upgrades a browser cannot read (#26)
+
+
 ## v0.3.9 — 2026-08-11
 
 - A check that could not run now blocks the first live claim (#25)
