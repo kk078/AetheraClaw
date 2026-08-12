@@ -12,6 +12,10 @@ import {
   OLLAMA_LOCAL_URL,
   OllamaProvider,
   OpenAIProvider,
+  explainProviderError,
+  isOllamaCloudUrl,
+  looksLikeHtml,
+  normalizeOllamaBaseUrl,
   resolveOllamaBaseUrl,
   resolveOllamaTarget,
 } from "../src/providers/openai.js";
@@ -139,6 +143,79 @@ describe("ollama base url", () => {
   it("never overrides an explicit URL", () => {
     expect(resolveOllamaBaseUrl("http://gpu-box.lan:11434/v1", "sk-abc")).toBe("http://gpu-box.lan:11434/v1");
     expect(resolveOllamaBaseUrl("http://gpu-box.lan:11434/v1", undefined)).toBe("http://gpu-box.lan:11434/v1");
+  });
+
+  // ── The console printed a website ────────────────────────────────────────
+  // A user typed "hi" and got ollama.com's 404 page back as the reply, doctype
+  // and footer included. The base URL was `https://ollama.com` — the obvious
+  // thing to type, and the one value that cannot work, because the
+  // OpenAI-compatible API lives under /v1 and the bare host serves marketing.
+  //
+  //   https://ollama.com/v1/chat/completions -> 401 application/json
+  //   https://ollama.com/chat/completions    -> 404 text/html
+
+  it("puts the missing /v1 back on a host with no path", () => {
+    expect(normalizeOllamaBaseUrl("https://ollama.com")).toBe("https://ollama.com/v1");
+    expect(normalizeOllamaBaseUrl("https://ollama.com/")).toBe("https://ollama.com/v1");
+    expect(normalizeOllamaBaseUrl("http://localhost:11434")).toBe("http://localhost:11434/v1");
+  });
+
+  it("leaves a URL that already has a path alone", () => {
+    // A deployment pointing at a proxy on a subpath means it. Rewriting that
+    // would break a working setup in order to fix a broken one.
+    expect(normalizeOllamaBaseUrl("https://proxy.internal/ollama")).toBe("https://proxy.internal/ollama");
+    expect(normalizeOllamaBaseUrl("https://ollama.com/v1")).toBe("https://ollama.com/v1");
+  });
+
+  it("normalises through the resolver, which is where it actually matters", () => {
+    expect(resolveOllamaBaseUrl("https://ollama.com", "sk-abc")).toBe("https://ollama.com/v1");
+  });
+
+  it("recognises the cloud by HOST, so the model catalogue follows too", () => {
+    // Comparing full strings made `https://ollama.com` "not cloud", so it also
+    // picked `model` instead of `cloudModel` — one typo, two failures, and the
+    // second surfaces only as a model that does not exist.
+    expect(isOllamaCloudUrl("https://ollama.com")).toBe(true);
+    expect(isOllamaCloudUrl("https://ollama.com/v1")).toBe(true);
+    expect(isOllamaCloudUrl(OLLAMA_LOCAL_URL)).toBe(false);
+    expect(isOllamaCloudUrl("not a url")).toBe(false);
+  });
+
+  it("hands back something that is not a URL untouched", () => {
+    // The connection error then names what the operator typed, which is more
+    // use than a guess at what they meant.
+    expect(normalizeOllamaBaseUrl("localhost:11434")).toBe("localhost:11434");
+  });
+});
+
+describe("an endpoint that answers with a web page", () => {
+  it("recognises an HTML body", () => {
+    expect(looksLikeHtml("<!doctype html> <html><head><title>Ollama</title>")).toBe(true);
+    expect(looksLikeHtml('<html class="h-full">')).toBe(true);
+    expect(looksLikeHtml('{"error":{"message":"model not found"}}')).toBe(false);
+  });
+
+  it("replaces the page with the one fact that matters", () => {
+    const err = explainProviderError(
+      new Error('404 status code (no body)\n<!doctype html> <html><title>Ollama</title>...</html>'),
+      "https://ollama.com",
+    );
+    expect(err.message).toContain("HTML PAGE");
+    expect(err.message).toContain("https://ollama.com/v1");
+    // The page is NOT shown. It was several kilobytes of nav and footer, and it
+    // said nothing about the cause.
+    expect(err.message).not.toContain("doctype");
+  });
+
+  it("keeps the original reachable without putting it in front of a person", () => {
+    const original = new Error("<!doctype html><html></html>");
+    const err = explainProviderError(original, "https://ollama.com") as Error & { cause?: unknown };
+    expect(err.cause).toBe(original);
+  });
+
+  it("does not touch an ordinary API error", () => {
+    const original = new Error("429 rate limit exceeded");
+    expect(explainProviderError(original, "https://ollama.com/v1")).toBe(original);
   });
 });
 
