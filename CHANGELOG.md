@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.16 — 2026-08-12
+
+- Add ask_user, a tool for the agent to ask a clarifying question (#32)
+
+
 ## v0.3.15 — 2026-08-12
 
 - Add the pending-question registry for agent-initiated clarifying questions (#31)
