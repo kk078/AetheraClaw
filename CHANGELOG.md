@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.19 — 2026-08-12
+
+- Wire the persona-paraphrased spoken reply, gated to voice-originated turns (#35)
+
+
+## v0.3.18 — 2026-08-12
+
+- Add the spoken persona module (#34)
+
+
 ## v0.3.17 — 2026-08-12
 
 - Wire clarifying questions end-to-end: ask_user is now live (#33)
