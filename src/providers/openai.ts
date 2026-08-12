@@ -63,8 +63,12 @@ export class OpenAIProvider implements ModelProvider {
   /** Ollama's OpenAI-compatible endpoint reads max_tokens; OpenAI wants max_completion_tokens. */
   protected legacyMaxTokens = false;
 
+  /** Kept so an error can name the endpoint that produced it. */
+  protected readonly baseUrl: string;
+
   constructor(model: string, opts: { baseURL?: string; apiKey?: string } = {}) {
     this.model = model;
+    this.baseUrl = opts.baseURL ?? "https://api.openai.com/v1";
     const apiKey = opts.apiKey ?? process.env.OPENAI_API_KEY;
     if (!apiKey) {
       throw new Error(
@@ -75,7 +79,22 @@ export class OpenAIProvider implements ModelProvider {
   }
 
   async *streamTurn(req: TurnRequest): AsyncIterable<ProviderEvent> {
-    const stream = await this.client.chat.completions.create({
+    const stream = await this.createStream(req);
+    yield* this.consume(stream, req);
+  }
+
+  private async createStream(req: TurnRequest) {
+    try {
+      return await this.requestStream(req);
+    } catch (err) {
+      // A misconfigured base URL does not fail like an API — it succeeds as a
+      // WEBSITE, and the body is a page. See explainProviderError.
+      throw explainProviderError(err, this.baseUrl);
+    }
+  }
+
+  private async requestStream(req: TurnRequest) {
+    return await this.client.chat.completions.create({
       model: this.model,
       stream: true,
       messages: toOpenAIMessages(req.system, req.messages),
@@ -89,7 +108,12 @@ export class OpenAIProvider implements ModelProvider {
           }
         : {}),
     });
+  }
 
+  private async *consume(
+    stream: Awaited<ReturnType<OpenAIProvider["requestStream"]>>,
+    _req: TurnRequest,
+  ): AsyncIterable<ProviderEvent> {
     let text = "";
     const calls = new Map<number, { id: string; name: string; args: string }>();
     let finish: string | null = null;
@@ -146,9 +170,57 @@ export const OLLAMA_LOCAL_URL = "http://localhost:11434/v1";
  * URL means the cloud.
  */
 export function resolveOllamaBaseUrl(configured: string | undefined, apiKey: string | undefined): string {
-  if (configured && configured !== OLLAMA_LOCAL_URL) return configured;
+  if (configured && configured !== OLLAMA_LOCAL_URL) return normalizeOllamaBaseUrl(configured);
   if (apiKey) return OLLAMA_CLOUD_URL;
   return OLLAMA_LOCAL_URL;
+}
+
+/**
+ * Put the missing `/v1` back on a base URL that has no path.
+ *
+ * OBSERVED IN THE CONSOLE. A user typed "hi" and the assistant replied with
+ * ollama.com's marketing 404 page — the entire HTML document, doctype and
+ * footer included. The base URL was `https://ollama.com`, which is the obvious
+ * thing to type and the one value that cannot work: the OpenAI-compatible API
+ * lives under /v1, so the SDK appended /chat/completions to the WEBSITE and got
+ * a web page. Unauthenticated, the difference is stark and easy to check:
+ *
+ *   https://ollama.com/v1/chat/completions  ->  401  application/json
+ *   https://ollama.com/chat/completions     ->  404  text/html
+ *
+ * Only a URL with no path of its own is touched. A deployment pointing at a
+ * proxy on a subpath means it deliberately, and rewriting that would break a
+ * working setup to fix a broken one.
+ */
+export function normalizeOllamaBaseUrl(raw: string): string {
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  if (trimmed === "") return OLLAMA_LOCAL_URL;
+  try {
+    const url = new URL(trimmed);
+    if (url.pathname === "" || url.pathname === "/") return `${url.origin}/v1`;
+    return trimmed;
+  } catch {
+    // Not a URL at all. Hand it back untouched: the connection error names the
+    // value the operator typed, which is more use than a guess at what they
+    // meant.
+    return trimmed;
+  }
+}
+
+/**
+ * Whether a base URL is Ollama Cloud, by HOST rather than by exact string.
+ *
+ * `https://ollama.com` and `https://ollama.com/v1` are the same service, and
+ * comparing full strings made the first one "not cloud" — so it also picked
+ * `model` instead of `cloudModel`, and the two catalogues differ. One typo, two
+ * failures, and the second only shows up as a model that does not exist.
+ */
+export function isOllamaCloudUrl(baseUrl: string): boolean {
+  try {
+    return new URL(baseUrl).host === new URL(OLLAMA_CLOUD_URL).host;
+  } catch {
+    return false;
+  }
 }
 
 export interface OllamaTarget {
@@ -171,7 +243,7 @@ export function resolveOllamaTarget(
   apiKey: string | undefined,
 ): OllamaTarget {
   const baseUrl = resolveOllamaBaseUrl(configured.baseUrl, apiKey);
-  const cloud = baseUrl === OLLAMA_CLOUD_URL;
+  const cloud = isOllamaCloudUrl(baseUrl);
   return {
     baseUrl,
     model: cloud ? (configured.cloudModel || configured.model) : configured.model,
@@ -195,4 +267,40 @@ export class OllamaProvider extends OpenAIProvider {
     this.cloud = target.cloud;
     this.legacyMaxTokens = true;
   }
+}
+
+// ── When the endpoint answers with a web page ───────────────────────────────
+
+/** Does this body look like a rendered HTML page rather than an API response? */
+export function looksLikeHtml(body: string): boolean {
+  return /<!doctype\s+html|<html[\s>]/i.test(body);
+}
+
+/**
+ * Turn "here is a web page" into a sentence naming the cause.
+ *
+ * WHAT THIS FIXES, exactly as it was seen: the user typed "hi" and the console
+ * printed ollama.com's 404 page — doctype, nav, tailwind link, footer, the lot —
+ * as though the model had said it. The body of a non-2xx response goes into the
+ * SDK's error message, the agent surfaces that message, and a whole website
+ * lands in the transcript. Nothing in it says "your base URL is wrong", which is
+ * the only fact that matters.
+ *
+ * A misconfigured base URL is the ordinary cause and does not fail like an API:
+ * it SUCCEEDS as a website. So the shape of the body is the diagnosis, and the
+ * page itself is never worth showing.
+ */
+export function explainProviderError(err: unknown, baseUrl: string): Error {
+  const original = err instanceof Error ? err : new Error(String(err));
+  if (!looksLikeHtml(original.message)) return original;
+  const explained = new Error(
+    `${baseUrl} returned an HTML PAGE, not an API response — so this address is serving a website ` +
+      `rather than the OpenAI-compatible API. The usual cause is a base URL missing its path: ` +
+      `https://ollama.com serves the marketing site, and https://ollama.com/v1 serves the API. ` +
+      `Check the base URL for this provider. (The page itself is not shown; it said nothing useful.)`,
+  );
+  // Keep the original reachable for a log without putting it in front of a
+  // person. `cause` is exactly this: the machine keeps it, the reader does not.
+  (explained as Error & { cause?: unknown }).cause = original;
+  return explained;
 }
