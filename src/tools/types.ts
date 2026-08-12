@@ -9,6 +9,16 @@ export interface ToolContext {
   sessionId: string;
   approvalPolicy: "always" | "unsafe-only" | "never";
   requestApproval(details: { toolName: string; description: string; input: unknown }): Promise<boolean>;
+  /**
+   * Ask the user a clarifying question mid-tool-call and wait for an answer.
+   *
+   * Optional: a caller that has not wired a clarify channel (a test harness, an
+   * embedding without voice) simply cannot use ask_user — the tool degrades to
+   * an explanatory error rather than crashing. Mirrors requestApproval's shape
+   * on purpose, so a tool author who already knows one knows the other. Resolves
+   * to null when the question goes unanswered — "no answer", never a guess.
+   */
+  requestClarification?(details: { question: string; context?: string }): Promise<string | null>;
   signal?: AbortSignal;
   /**
    * Called once per tool execution, whatever the outcome.

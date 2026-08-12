@@ -37,6 +37,7 @@ export interface RunnerDeps {
   store: MemoryStore;
   config: Config;
   requestApproval: ToolContext["requestApproval"];
+  requestClarification?: ToolContext["requestClarification"];
   emit: (event: AgentEvent) => void;
   services?: Record<string, unknown>;
 }
@@ -81,6 +82,7 @@ export async function runTurn(deps: RunnerDeps, sessionId: string, userText: str
       sessionId,
       approvalPolicy: config.approvalPolicy,
       requestApproval: deps.requestApproval,
+      requestClarification: deps.requestClarification,
       services: deps.services ?? {},
       // Every tool call the agent makes lands in the log, so support_fmea_diagnose
       // can read real production failures instead of requiring someone to find and
