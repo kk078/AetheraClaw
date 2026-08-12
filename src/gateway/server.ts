@@ -1484,6 +1484,9 @@ export async function buildServer(opts: {
         case "approval_response":
           sessions.resolveApproval(parsed.approvalId, parsed.approved);
           break;
+        case "clarify_response":
+          sessions.resolveClarification(parsed.clarifyId, parsed.answer);
+          break;
         case "cancel":
           // v1: cancel is best-effort — surfaced but the in-flight provider call completes.
           sessions.broadcast(parsed.sessionId, {

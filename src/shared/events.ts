@@ -32,6 +32,14 @@ export type AgentEvent =
       input: unknown;
     }
   | { type: "approval_resolved"; sessionId: string; approvalId: string; approved: boolean }
+  | {
+      type: "clarify_request";
+      sessionId: string;
+      clarifyId: string;
+      question: string;
+      context?: string;
+    }
+  | { type: "clarify_resolved"; sessionId: string; clarifyId: string; answer: string | null }
   | { type: "turn_completed"; sessionId: string; stopReason: string }
   | { type: "refusal"; sessionId: string }
   | { type: "error"; sessionId: string; message: string };

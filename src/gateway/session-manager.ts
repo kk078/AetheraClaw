@@ -6,6 +6,7 @@ import type { AgentEvent } from "../shared/events.js";
 import { createProvider } from "../providers/index.js";
 import { runTurn } from "../agent/runner.js";
 import { ApprovalRegistry } from "./approvals.js";
+import { ClarifyRegistry } from "./clarify.js";
 import { phiVerdict, scanText } from "../compliance/phi-detect.js";
 import { recordAccess } from "../tenancy/store.js";
 
@@ -19,13 +20,24 @@ interface SessionState {
 export class SessionManager {
   private sessions = new Map<string, SessionState>();
   readonly approvals = new ApprovalRegistry();
+  // Built in the constructor body, not as a field initializer, because its
+  // timeout comes from config — and field initializers run before parameter
+  // properties are guaranteed assigned.
+  readonly clarifications: ClarifyRegistry;
 
   constructor(
     private store: MemoryStore,
     private registry: ToolRegistry,
     private config: Config,
     private services: Record<string, unknown> = {},
-  ) {}
+  ) {
+    // Optional chaining rather than a bare `config.clarify.timeoutMs`: a caller
+    // that constructs this loosely (test/gateway-cli.test.ts casts a partial
+    // object through `as never`) must not throw at construction time over a
+    // field it never touches. ClarifyRegistry's own default parameter takes
+    // over when this is undefined.
+    this.clarifications = new ClarifyRegistry(config?.clarify?.timeoutMs);
+  }
 
   private state(sessionId: string): SessionState {
     let s = this.sessions.get(sessionId);
@@ -60,6 +72,10 @@ export class SessionManager {
 
   resolveApproval(approvalId: string, approved: boolean): boolean {
     return this.approvals.resolve(approvalId, approved);
+  }
+
+  resolveClarification(clarifyId: string, answer: string): boolean {
+    return this.clarifications.resolve(clarifyId, answer);
   }
 
   // Inject a message into a session and run the agent. Used by WS clients, channels,
@@ -145,6 +161,16 @@ export class SessionManager {
             this.broadcast(sessionId, { type: "approval_resolved", sessionId, approvalId, approved });
             return approved;
           },
+          requestClarification: this.config.clarify?.enabled ?? true
+            ? async ({ question, context }) => {
+                const { clarifyId, answer } = this.clarifications.request((id) => {
+                  this.broadcast(sessionId, { type: "clarify_request", sessionId, clarifyId: id, question, context });
+                });
+                const resolved = await answer;
+                this.broadcast(sessionId, { type: "clarify_resolved", sessionId, clarifyId, answer: resolved });
+                return resolved;
+              }
+            : undefined,
         },
         sessionId,
         text,
