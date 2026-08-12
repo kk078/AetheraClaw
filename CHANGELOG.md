@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.11 — 2026-08-12
+
+- The console replied with ollama.com's 404 page (#27)
+
+
 ## v0.3.10 — 2026-08-12
 
 - The WebSocket limit was refusing upgrades a browser cannot read (#26)
