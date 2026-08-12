@@ -274,8 +274,19 @@ export class OllamaProvider extends OpenAIProvider {
   override readonly name = "ollama";
   readonly cloud: boolean;
 
-  constructor(configured: { model: string; cloudModel?: string; baseUrl?: string }) {
-    const key = process.env.OLLAMA_API_KEY;
+  constructor(configured: { model: string; cloudModel?: string; baseUrl?: string }, resolvedKey?: string) {
+    // ── The key the console stored was never read ────────────────────────────
+    // This line used to be `process.env.OLLAMA_API_KEY` and nothing else. A key
+    // typed into Providers & keys lands in credentials.json, not the
+    // environment, so `key` was undefined and the placeholder below went out as
+    // the credential: `Authorization: Bearer ollama`. Ollama Cloud answers a
+    // POST carrying that with 401 — the same status as a revoked key, which is
+    // where the hunt goes next and where it does not end.
+    //
+    // Worse than the other providers, which at least THROW "GEMINI_API_KEY is
+    // not set". This one had a plausible-looking fallback, so it failed quietly
+    // and looked like the key's fault.
+    const key = resolvedKey ?? process.env.OLLAMA_API_KEY;
     const target = resolveOllamaTarget(configured, key);
     // "ollama" is the placeholder a local server accepts; the SDK requires
     // something non-empty.

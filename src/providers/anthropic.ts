@@ -55,9 +55,13 @@ export class AnthropicProvider implements ModelProvider {
   readonly model: string;
   private client: Anthropic;
 
-  constructor(model: string, client?: Anthropic) {
+  constructor(model: string, client?: Anthropic, apiKey?: string) {
     this.model = model;
-    this.client = client ?? new Anthropic();
+    // An explicit key comes from createProvider, which reads the environment
+    // AND the credentials file. Without it the SDK reads only the environment,
+    // so a key typed into the console is stored, masked, displayed — and never
+    // used. See the note in src/providers/index.ts.
+    this.client = client ?? new Anthropic(apiKey ? { apiKey } : {});
   }
 
   async *streamTurn(req: TurnRequest): AsyncIterable<ProviderEvent> {

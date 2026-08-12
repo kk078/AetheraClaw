@@ -424,7 +424,7 @@ export async function buildServer(opts: {
         return 0;
       }
     };
-    const ollama = resolveOllamaTarget(config.providers.ollama, process.env.OLLAMA_API_KEY);
+    const ollama = resolveOllamaTarget(config.providers.ollama, resolveKey("ollama").key);
     return {
       provider: config.provider,
       model: config.provider === "ollama" ? ollama.model : config.providers[config.provider].model,
@@ -1263,7 +1263,7 @@ export async function buildServer(opts: {
         source: r.source,
         masked: r.key ? maskKey(r.key) : "",
         envVar: r.envVar,
-        model: name === "ollama" ? resolveOllamaTarget(config.providers.ollama, process.env.OLLAMA_API_KEY).model : config.providers[name].model,
+        model: name === "ollama" ? resolveOllamaTarget(config.providers.ollama, resolveKey("ollama").key).model : config.providers[name].model,
         active: config.provider === name,
         // Stated per provider because it is the one thing that genuinely differs
         // between them, and the UI should not imply otherwise.
