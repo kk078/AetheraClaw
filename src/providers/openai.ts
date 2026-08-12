@@ -197,8 +197,24 @@ export function normalizeOllamaBaseUrl(raw: string): string {
   if (trimmed === "") return OLLAMA_LOCAL_URL;
   try {
     const url = new URL(trimmed);
+    // ── A bearer token must not travel in the clear ──────────────────────────
+    // FOUND IN THE LIVE CONFIG: `http://ollama.com/`. Plain HTTP to Ollama
+    // Cloud, with the API key in an Authorization header on every turn. The
+    // site's redirect to HTTPS does not help — the redirect is the SECOND
+    // request, and the key was already sent in the clear on the first.
+    //
+    // ONLY the cloud host. The first version of this upgraded every non-
+    // loopback address, and two existing tests caught it: `http://gpu-box.lan`
+    // is somebody's own Ollama on their own LAN, those servers do not speak
+    // TLS, and https would fail to connect. That would have broken every
+    // self-hosted install to fix a hosted one — the tests were right and the
+    // rule was wrong.
+    //
+    // ollama.com is different in the way that matters: it is the one host here
+    // that definitely serves TLS and definitely receives a real credential.
+    if (url.protocol === "http:" && url.host === new URL(OLLAMA_CLOUD_URL).host) url.protocol = "https:";
     if (url.pathname === "" || url.pathname === "/") return `${url.origin}/v1`;
-    return trimmed;
+    return url.toString().replace(/\/+$/, "");
   } catch {
     // Not a URL at all. Hand it back untouched: the connection error names the
     // value the operator typed, which is more use than a guess at what they

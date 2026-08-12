@@ -181,6 +181,32 @@ describe("ollama base url", () => {
     expect(isOllamaCloudUrl("not a url")).toBe(false);
   });
 
+  // ── A bearer token must not travel in the clear ─────────────────────────
+  // Found in the LIVE config after the /v1 fix went out: `http://ollama.com/`.
+  // Plain HTTP to a remote host with OLLAMA_API_KEY in an Authorization header
+  // on every turn. The site's redirect to HTTPS does not help — the redirect is
+  // the second request, and the key went out in the clear on the first.
+
+  it("upgrades http to https for the CLOUD host, where the key goes", () => {
+    expect(normalizeOllamaBaseUrl("http://ollama.com/")).toBe("https://ollama.com/v1");
+    expect(normalizeOllamaBaseUrl("http://ollama.com/v1")).toBe("https://ollama.com/v1");
+  });
+
+  it("does NOT upgrade a self-hosted server, which would break it", () => {
+    // The first version of this upgraded every non-loopback address, and the
+    // two "never overrides an explicit URL" cases above caught it: a private
+    // Ollama does not speak TLS, so https fails to connect. Breaking every
+    // self-hosted install to fix a hosted one is the wrong trade, and the
+    // existing tests were the ones that said so.
+    expect(normalizeOllamaBaseUrl("http://gpu-box.lan:11434/v1")).toBe("http://gpu-box.lan:11434/v1");
+    expect(normalizeOllamaBaseUrl("http://localhost:11434")).toBe("http://localhost:11434/v1");
+    expect(normalizeOllamaBaseUrl("http://192.168.1.50:11434/v1")).toBe("http://192.168.1.50:11434/v1");
+  });
+
+  it("does not downgrade an https URL", () => {
+    expect(normalizeOllamaBaseUrl("https://gpu-box.lan/v1")).toBe("https://gpu-box.lan/v1");
+  });
+
   it("hands back something that is not a URL untouched", () => {
     // The connection error then names what the operator typed, which is more
     // use than a guess at what they meant.
