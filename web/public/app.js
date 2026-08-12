@@ -15,6 +15,12 @@ const state = {
   tools: [],
   turnRunning: false,
   pendingApproval: null,
+  // The clarifyId a clarify_request left open, or null. Set while the agent is
+  // paused mid-tool-call waiting on an answer — a state the turn can be in
+  // even though state.turnRunning is also still true, which is why send()
+  // checks this FIRST, ahead of the turnRunning guard that otherwise blocks
+  // sending anything while a turn is in flight.
+  awaitingClarify: null,
 };
 
 // ── Navigation ─────────────────────────────────────────────────────────
@@ -1012,6 +1018,24 @@ function connect(sessionId) {
       case "approval_request":
         askApproval(e);
         break;
+      case "clarify_request":
+        // Rendered as an assistant message, not a separate modal — a clarifying
+        // question reads the way the rest of the conversation does, and the
+        // answer is free text, which the composer already handles.
+        state.awaitingClarify = e.clarifyId;
+        addMessage("assistant", e.context ? `${e.question}\n\n*${e.context}*` : e.question);
+        break;
+      case "clarify_resolved":
+        // Resolved server-side — by another client, or the timeout — while
+        // this one was still waiting. Stop treating the next send() as an
+        // answer to a question that is no longer open.
+        if (state.awaitingClarify === e.clarifyId) state.awaitingClarify = null;
+        break;
+      case "persona_reply":
+        // Voice-only: consumed by voice.js's own aethera:event listener. The
+        // written transcript already has the full reply from text_delta above;
+        // this is a second, spoken-only track and never touches the chat log.
+        break;
       case "approval_resolved":
         // The server resolved this request — by another client, or by the 120s
         // auto-deny timer. Without handling it, a stale modal lingered: a click
@@ -1072,8 +1096,30 @@ input.addEventListener("keydown", (e) => {
 });
 $("#send").addEventListener("click", send);
 
+// Set by voice.js right before it calls send() with a freshly spoken
+// transcript, so SessionManager knows to follow up with a persona-paraphrased
+// spoken reply instead of leaving speech to read the written text verbatim.
+// One-shot: read and cleared by the very next send(), never left set for a
+// later, unrelated (typed) message.
+let nextMessageSource = null;
+window.aetheraMarkVoiceOrigin = () => {
+  nextMessageSource = "voice";
+};
+
 async function send() {
   const text = input.value.trim();
+  // A clarifying question takes priority over everything below, including the
+  // turnRunning guard: the turn IS running (paused mid-tool-call), and this is
+  // the answer it is waiting on, not a new request competing with it.
+  if (state.awaitingClarify) {
+    if (!text) return;
+    addMessage("user", text);
+    input.value = "";
+    input.style.height = "auto";
+    wsSend({ type: "clarify_response", clarifyId: state.awaitingClarify, answer: text });
+    state.awaitingClarify = null;
+    return;
+  }
   // An attachment on its own is a complete request — "here, read this" — so an
   // empty box with files pending still sends.
   if ((!text && pending.length === 0) || state.turnRunning) return;
@@ -1084,7 +1130,14 @@ async function send() {
   input.value = "";
   input.style.height = "auto";
   clearAttachments();
-  wsSend({ type: "user_message", sessionId: state.sessionId, text: note.forModel + text });
+  const source = nextMessageSource;
+  nextMessageSource = null;
+  wsSend({
+    type: "user_message",
+    sessionId: state.sessionId,
+    text: note.forModel + text,
+    ...(source ? { source } : {}),
+  });
 }
 
 // ── Attachments ────────────────────────────────────────────────────────────
