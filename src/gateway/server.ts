@@ -899,6 +899,7 @@ export async function buildServer(opts: {
       wakeWord: s.wakeWord,
       speakReplies: s.speakReplies,
       maxSpokenChars: s.maxSpokenChars,
+      personaEnabled: s.persona.enabled,
       requireAcknowledgement: s.consent.requireAcknowledgement,
       retainAudio: s.consent.retainAudio,
       status: speechStatus(s, process.env),
@@ -1479,7 +1480,7 @@ export async function buildServer(opts: {
           break;
         case "user_message":
           sessions.subscribe(parsed.sessionId, socket);
-          void sessions.handleUserMessage(parsed.sessionId, parsed.text);
+          void sessions.handleUserMessage(parsed.sessionId, parsed.text, { source: parsed.source });
           break;
         case "approval_response":
           sessions.resolveApproval(parsed.approvalId, parsed.approved);

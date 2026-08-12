@@ -277,6 +277,16 @@ export const ConfigSchema = z.object({
       mode: z.enum(["push-to-talk", "always-on"]).default("push-to-talk"),
       wakeWord: z.string().default("hey aethera").describe("Only used when mode is always-on"),
       speakReplies: z.boolean().default(true),
+      // A distinct, shorter spoken paraphrase for a voice-originated turn,
+      // instead of text-to-speech reading the written reply verbatim. See
+      // src/speech/persona.ts — the persona's content is a product decision
+      // (code); enabled/name here are the operator's to turn off or rename.
+      persona: z
+        .object({
+          enabled: z.boolean().default(true),
+          name: z.string().default("Ari"),
+        })
+        .default({}),
       /** Spoken replies are cut at a sentence boundary past this; a five-minute monologue is not an answer. */
       maxSpokenChars: z.number().int().positive().default(1200),
       // A spoken answer should be the verdict, not the essay. "brief" speaks the

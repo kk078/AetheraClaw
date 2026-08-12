@@ -7,6 +7,7 @@ import { createProvider } from "../providers/index.js";
 import { runTurn } from "../agent/runner.js";
 import { ApprovalRegistry } from "./approvals.js";
 import { ClarifyRegistry } from "./clarify.js";
+import { personaReply } from "../speech/persona-reply.js";
 import { phiVerdict, scanText } from "../compliance/phi-detect.js";
 import { recordAccess } from "../tenancy/store.js";
 
@@ -80,7 +81,7 @@ export class SessionManager {
 
   // Inject a message into a session and run the agent. Used by WS clients, channels,
   // and the scheduler alike.
-  async handleUserMessage(sessionId: string, text: string): Promise<void> {
+  async handleUserMessage(sessionId: string, text: string, opts: { source?: "voice" } = {}): Promise<void> {
     const state = this.state(sessionId);
     if (state.running) {
       this.broadcast(sessionId, { type: "error", sessionId, message: "a turn is already running in this session" });
@@ -136,6 +137,12 @@ export class SessionManager {
     }
 
     state.running = true;
+    // Accumulated only from the emit wrapper below, never re-derived from the
+    // stored transcript afterward: this is exactly the text that streamed to
+    // every subscriber as text_delta, so the persona paraphrase (fired below,
+    // once the turn is over) is guaranteed to be paraphrasing what was
+    // actually shown, not a slightly different read of the database.
+    let assistantText = "";
     try {
       const provider = createProvider(this.config, session.provider as Config["provider"]);
       await runTurn(
@@ -145,7 +152,10 @@ export class SessionManager {
           store: this.store,
           config: this.config,
           services: this.services,
-          emit: (event) => this.broadcast(sessionId, event),
+          emit: (event) => {
+            if (event.type === "text_delta") assistantText += event.text;
+            this.broadcast(sessionId, event);
+          },
           requestApproval: async ({ toolName, description, input }) => {
             const { approvalId, decision } = this.approvals.request((id) => {
               this.broadcast(sessionId, {
@@ -178,5 +188,21 @@ export class SessionManager {
     } finally {
       state.running = false;
     }
+
+    // Fire-and-forget, deliberately not inside the try/finally above: a new
+    // turn can start the moment this one's turn_completed fires, and the
+    // paraphrase (a second, independent model call) arrives 1-3s later as its
+    // own persona_reply event whenever it's ready. Only for a voice-originated
+    // turn — a typed message gets no persona call and no added latency.
+    if (opts.source === "voice") void this.speakPersonaReply(sessionId, assistantText).catch(() => {});
+  }
+
+  private async speakPersonaReply(sessionId: string, writtenReply: string): Promise<void> {
+    if (!this.config.speech?.enabled || !this.config.speech?.persona?.enabled) return;
+    if (!writtenReply.trim()) return;
+    const session = this.store.getSession(sessionId);
+    const provider = createProvider(this.config, session?.provider as Config["provider"]);
+    const text = await personaReply(provider, writtenReply);
+    if (text) this.broadcast(sessionId, { type: "persona_reply", sessionId, text });
   }
 }
