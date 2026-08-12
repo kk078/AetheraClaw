@@ -81,6 +81,26 @@ describe("what gets limited", () => {
     expect(costOf("POST", "/api/providers/anthropic")).toBe(REQUEST_COST.write);
   });
 
+  it("charges NOTHING at the HTTP layer for the WebSocket upgrade", () => {
+    // Not because the upgrade is free — the /ws handler charges the same bucket
+    // itself. Because refusing a handshake with 429 is a limit stated in a
+    // language the browser throws away: the WebSocket API surfaces a failed
+    // upgrade as a bare error with no status and no Retry-After, so a throttled
+    // tab looks like a broken server and reconnects immediately, which is the
+    // behaviour the limit exists to prevent.
+    //
+    // Measured against a running gateway: 200 rapid upgrades produced 139 HTTP
+    // 429s and 61 connections before this, and 0 upgrade failures after — with
+    // the same 139 refusals arriving as close code 1013 instead.
+    expect(costOf("GET", "/ws")).toBe(0);
+    expect(costOf("GET", "/ws?session=abc")).toBe(0);
+  });
+
+  it("does not exempt anything that merely starts with the upgrade path", () => {
+    // /wsomething is an ordinary route and must not inherit the exemption.
+    expect(costOf("GET", "/wsomething")).toBe(REQUEST_COST.read);
+  });
+
   it("treats an unknown route as the cheapest class", () => {
     // A new route must never be accidentally throttled hard by a rule nobody
     // remembered to update.

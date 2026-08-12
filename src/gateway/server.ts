@@ -65,6 +65,7 @@ import {
 import { icd10Table, loadDataJson } from "../tools/healthcare/datasets.js";
 import {
   DEFAULT_LIMIT,
+  REQUEST_COST,
   costOf,
   newBucket,
   renderMetrics,
@@ -1391,6 +1392,55 @@ export async function buildServer(opts: {
     socket.on("close", () => {
       openSockets--;
     });
+
+    // ── An error with nothing listening THROWS ────────────────────────────────
+    // Node's EventEmitter rethrows an "error" event that has no listener, and
+    // ws emits one on an abrupt disconnect — a killed tab, a dropped phone
+    // connection, a container being cycled. That is not an edge case under
+    // load, it is what load is MADE of, and a socket-level error was able to
+    // become an uncaught exception in the gateway process.
+    //
+    // There is nothing to do about it but notice: the connection is already
+    // gone. The listener exists so the failure stays local to the socket that
+    // had it, and the "close" above still runs, so the counter does not leak.
+    socket.on("error", () => {
+      /* the peer vanished; "close" follows and does the accounting */
+    });
+
+    // ── The limit, said in a language the browser can hear ────────────────────
+    // costOf returns 0 for this path, so the onRequest hook does NOT refuse an
+    // upgrade with 429 — a status the WebSocket API discards, leaving a
+    // throttled tab indistinguishable from a broken server and reconnecting
+    // immediately. The bucket is the SAME one, charged here, and a refusal
+    // arrives as 1013 "try again later": the code a client backs off on, and
+    // what the socket cap below already does.
+    const wsKey = rateLimitKey({
+      identity: (req as { identity?: { name?: string } }).identity?.name,
+      headers: req.headers as Record<string, string | string[] | undefined>,
+      socketIp: req.ip,
+      trustForwardedFor: shouldTrustForwardedFor(
+        readEnv("TRUST_PROXY") ?? "",
+        exposure,
+        req.headers as Record<string, string | string[] | undefined>,
+      ),
+    });
+    const wsNow = Date.now();
+    const wsDecision = spend(
+      buckets.get(wsKey) ?? newBucket(DEFAULT_LIMIT, wsNow),
+      DEFAULT_LIMIT,
+      REQUEST_COST.read,
+      wsNow,
+    );
+    buckets.set(wsKey, wsDecision.bucket);
+    if (!wsDecision.allowed) {
+      // Counted in the same metric as an HTTP refusal. A limiter whose
+      // WebSocket refusals are invisible to /metrics is one that looks idle
+      // during exactly the load it is shedding.
+      rateLimited++;
+      socket.close(1013, wsDecision.reason.slice(0, 120));
+      return;
+    }
+
     if (openSockets > MAX_SOCKETS) {
       // 1013 is "try again later" — the code a browser's WebSocket client is
       // meant to back off on. A cap that is stated is a limit; a cap that

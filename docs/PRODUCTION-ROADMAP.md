@@ -341,10 +341,29 @@ against the mock connector, which is the only rehearsal that exists.
 
 Two other things are honestly open and are named rather than buried:
 
-- **The WebSocket saturation is mitigated, not diagnosed.** The upgrade path can
-  no longer produce a 500 from this handler, and a busy server now says so with
-  a close code a client backs off on. Reproducing the original needs the load
-  the container was under.
+- **The WebSocket saturation is mitigated, and now testable — but the original
+  500 is still not reproduced.** There is a harness: `scripts/ws-load.mjs`
+  applies the load, and half its clients vanish with a TCP RST rather than a
+  close handshake, which is what a killed tab actually looks like to the server.
+
+  Running it found something else, which is the ordinary result of looking. The
+  rate limiter was refusing WebSocket upgrades with **HTTP 429** — 139 of 200
+  rapid connections — and a browser cannot read a status on a failed handshake,
+  so every one of those was a refusal the client could not act on and
+  immediately retried. The same file already argued this exact point about 500s
+  ("a cap that is stated is a limit; a cap that manifests as a 500 is a bug
+  report") and then shipped a second cap that manifested as a 429.
+
+  Fixed: `costOf` returns 0 for the upgrade, the `/ws` handler charges the same
+  bucket itself, and a refusal arrives as close code **1013** with the reason
+  and a retry hint. Measured after: 200 opened, 0 upgrade failures, the same 139
+  refusals delivered as 1013, `orion_rate_limited_total` still counting them.
+
+  Also fixed on that path: the handler registered no `error` listener, and
+  Node rethrows an `error` event that has nothing listening. `ws` emits one on
+  an abrupt disconnect, so a socket-level error could become an uncaught
+  exception in the gateway — a plausible route to the original 500, though not
+  a demonstrated one.
 - **The Phase 3 routing eval still needs a provider and a key**, so it cannot
   gate CI. The correctness eval was built to fill exactly that hole and does.
 

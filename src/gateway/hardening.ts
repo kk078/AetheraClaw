@@ -91,9 +91,28 @@ export function spend(bucket: Bucket, limit: RateLimit, cost: number, now: numbe
 }
 
 /** Which cost class a path falls into. Unknown paths are reads — the cheapest, so a new route is never accidentally throttled hard. */
+/**
+ * The console's WebSocket endpoint.
+ *
+ * Charged, but NOT here — see costOf below and the /ws handler in server.ts.
+ */
+export const WS_PATH = "/ws";
+
 export function costOf(method: string, url: string): number {
   const path = url.split("?")[0];
   if (path === "/healthz" || path === "/metrics") return 0;
+  // ── The upgrade is limited somewhere the client can hear it ───────────────
+  // Refusing an upgrade with 429 is a limit stated in a language the browser
+  // throws away: the WebSocket API surfaces a failed handshake as a bare error
+  // event with no status and no Retry-After, so a throttled tab is
+  // indistinguishable from a broken server. It reconnects immediately, which is
+  // the behaviour the limit exists to prevent.
+  //
+  // Zero here means the /ws handler charges the same bucket itself and answers
+  // a refusal by ACCEPTING the socket and closing it with 1013 "try again
+  // later" — the code a browser client backs off on, and the same mechanism the
+  // socket cap already uses. The limit is unchanged; only its audibility is.
+  if (path === WS_PATH) return 0;
   if (/\.(js|css|svg|html|png|ico|woff2?)$/.test(path)) return 0;
   if (path.startsWith("/api/upload")) return REQUEST_COST.upload;
   if (method === "POST" && /\/api\/sessions\/[^/]+\/(messages|turn)/.test(path)) return REQUEST_COST.turn;
