@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.14 — 2026-08-12
+
+- Reskin the web console in Apple's macOS visual language (#30)
+
+
+## v0.3.13 — 2026-08-12
+
+- The key typed into the console was never used (#29)
+
+
 ## v0.3.12 — 2026-08-12
 
 - The API key was going to Ollama Cloud over plain HTTP (#28)
