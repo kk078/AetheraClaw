@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.12 — 2026-08-12
+
+- The API key was going to Ollama Cloud over plain HTTP (#28)
+
+
 ## v0.3.11 — 2026-08-12
 
 - The console replied with ollama.com's 404 page (#27)
