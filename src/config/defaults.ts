@@ -115,6 +115,10 @@ export const DEFAULT_CONFIG_JSON5 = `{
     wakeWord: "hey aethera",
     speakReplies: true,
     maxSpokenChars: 1200,
+    // A voice-originated turn gets a distinct, shorter spoken paraphrase
+    // instead of the written reply read verbatim. name is display-only —
+    // the persona's actual voice/content lives in src/speech/persona.ts.
+    // persona: { enabled: true, name: "Ari" },
     // local: { whisperBin: 'whisper-cli', whisperModel: '/path/ggml-base.en.bin',
     //          piperBin: 'piper', piperVoice: '/path/en_US-amy-medium.onnx' },
     // cloud: { sttVendor: 'openai', ttsVendor: 'openai', ttsVoice: 'alloy',

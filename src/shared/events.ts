@@ -40,6 +40,14 @@ export type AgentEvent =
       context?: string;
     }
   | { type: "clarify_resolved"; sessionId: string; clarifyId: string; answer: string | null }
+  /**
+   * A distinct, persona-paraphrased spoken reply for a voice-originated turn.
+   * Fired after turn_completed, not through it — SessionManager broadcasts
+   * this once the second, independent persona-paraphrase call finishes, which
+   * is why it carries its own sessionId/text rather than riding on the
+   * turn's own event stream.
+   */
+  | { type: "persona_reply"; sessionId: string; text: string }
   | { type: "turn_completed"; sessionId: string; stopReason: string }
   | { type: "refusal"; sessionId: string }
   | { type: "error"; sessionId: string; message: string };
