@@ -53,6 +53,17 @@
     awaitingChallenge: false,
     pendingRisk: "",
     pendingTool: "",
+    // A clarifying question (clarify_request) currently open, or null.
+    awaitingClarify: null,
+    // Set by submitTranscript right before send(), for the CURRENT turn only —
+    // whether the in-flight turn started from a spoken utterance, and so
+    // whether its reply should be spoken via the persona-paraphrase track
+    // instead of the raw streamed text. Reset once that turn's speech is
+    // resolved (persona_reply, the fallback timer, or an error).
+    currentTurnIsVoice: false,
+    // True while waiting on persona_reply for the current turn.
+    awaitingPersonaReply: false,
+    personaFallbackTimer: null,
   };
 
   const $ = (sel) => document.querySelector(sel);
@@ -489,6 +500,14 @@
       tellMore();
       return;
     }
+    // A clarifying question the agent is waiting on, spoken back the same way
+    // a typed answer would be — same priority as the approval checks below,
+    // ahead of a normal send, because this utterance answers something already
+    // on screen rather than starting something new.
+    if (V.awaitingClarify) {
+      void answerClarify(text);
+      return;
+    }
     // Approval by voice: while a confirmation is on screen, an utterance is an
     // ANSWER to it, not a new request. Anything that is not clearly yes or no
     // falls through to the composer rather than being guessed — a misheard
@@ -514,7 +533,26 @@
       return;
     }
     preview(text);
+    // A fresh spoken utterance headed to the model — the only path through
+    // this function that reaches send() at all, every branch above it returns
+    // first. Marked here, read by app.js's send() the moment it runs.
+    V.currentTurnIsVoice = true;
+    if (typeof window.aetheraMarkVoiceOrigin === "function") window.aetheraMarkVoiceOrigin();
     if (typeof send === "function") send();
+  }
+
+  // ── Clarifying questions ────────────────────────────────────────────────────
+  // The agent-initiated counterpart to spoken approval: the question is spoken
+  // the moment it arrives (see the clarify_request case below), and the very
+  // next utterance is treated as the answer rather than a new request — the
+  // same pattern V.awaitingApproval already uses for yes/no.
+
+  async function answerClarify(text) {
+    const id = V.awaitingClarify;
+    V.awaitingClarify = null;
+    if (typeof wsSend === "function") {
+      wsSend({ type: "clarify_response", clarifyId: id, answer: text });
+    }
   }
 
   // ── Spoken authorization ───────────────────────────────────────────────────
@@ -1066,7 +1104,12 @@
       case "text_delta":
         V.reply += e.text;
         V.pending += e.text;
-        flushSpeech(false);
+        // A voice-originated turn stays quiet while the model streams — the
+        // persona-paraphrased reply (below) is what gets spoken instead, once
+        // it's ready. V.reply/V.pending still accumulate either way: tellMore()
+        // reads them, and they are the fallback text if no persona reply
+        // arrives in time.
+        if (!V.currentTurnIsVoice) flushSpeech(false);
         break;
       case "tool_call":
         // Plumbing is filtered server-side: narrating the tool-search machinery
@@ -1087,13 +1130,47 @@
       case "approval_resolved":
         V.awaitingApproval = null;
         break;
+      case "clarify_request":
+        // Same shape as approval_request: the dialog/composer note (app.js)
+        // stays the authority, speech is a second way to hear and answer it.
+        V.awaitingClarify = e.clarifyId;
+        enqueueSpeak(e.context ? `${e.question} — ${e.context}` : e.question, { urgent: true });
+        break;
+      case "clarify_resolved":
+        V.awaitingClarify = null;
+        break;
       case "turn_completed":
-        // Everything up to the last complete sentence has already been spoken
-        // while it streamed; this says whatever tail was still buffered.
-        flushSpeech(true);
+        if (!V.currentTurnIsVoice || !V.cfg?.personaEnabled) {
+          // Everything up to the last complete sentence has already been
+          // spoken while it streamed; this says whatever tail was buffered.
+          flushSpeech(true);
+        } else {
+          // Wait for the persona-paraphrased reply rather than speaking the
+          // raw streamed text. Bounded: a slow or failed persona call must
+          // never leave the room in silence, so a fallback fires at 6s and
+          // speaks the original reply exactly as the non-voice path would.
+          V.awaitingPersonaReply = true;
+          clearTimeout(V.personaFallbackTimer);
+          V.personaFallbackTimer = setTimeout(() => {
+            if (!V.awaitingPersonaReply) return;
+            V.awaitingPersonaReply = false;
+            flushSpeech(true);
+          }, 6000);
+        }
         if (V.brief && V.hasMore) note('Say "tell me more" for the rest.');
         break;
+      case "persona_reply":
+        if (V.awaitingPersonaReply) {
+          V.awaitingPersonaReply = false;
+          clearTimeout(V.personaFallbackTimer);
+          enqueueSpeak(e.text);
+        }
+        V.currentTurnIsVoice = false;
+        break;
       case "error":
+        V.currentTurnIsVoice = false;
+        V.awaitingPersonaReply = false;
+        clearTimeout(V.personaFallbackTimer);
         setPhase("idle");
         break;
     }
