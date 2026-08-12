@@ -20,6 +20,9 @@ import {
   resolveOllamaTarget,
 } from "../src/providers/openai.js";
 import type { ProviderEvent, ToolSpec } from "../src/providers/types.js";
+import { createProvider } from "../src/providers/index.js";
+import { resolveKey } from "../src/config/credentials.js";
+import { GeminiProvider } from "../src/providers/gemini.js";
 
 const spec = (name: string): ToolSpec => ({
   name,
@@ -553,5 +556,77 @@ describe("provider resolution", () => {
     expect(envVarFor("ollama")).toBe("OLLAMA_API_KEY");
     expect(envVarFor("gemini")).toBe("GEMINI_API_KEY");
     expect(envVarFor("openai")).toBe("OPENAI_API_KEY");
+  });
+});
+
+// ── The key the console stored was never used ───────────────────────────────
+// Providers & keys writes to credentials.json and shows the value back as
+// "stored on this machine". Every provider read its OWN environment variable
+// and nothing else, so that key was never used by anything.
+//
+// Three of the four failed loudly ("GEMINI_API_KEY is not set"). Ollama had a
+// plausible fallback to "ollama" — the placeholder a LOCAL server accepts — so
+// it sent `Authorization: Bearer ollama` to Ollama Cloud and got a 401. That is
+// the same status a revoked key produces, and it cost a long detour into
+// whether the key was still valid. It was.
+
+describe("a key stored in the console, with no environment variable", () => {
+  const cfg = (provider: string) =>
+    ({
+      provider,
+      providers: {
+        anthropic: { model: "claude-opus-5" },
+        openai: { model: "gpt-4.1" },
+        gemini: { model: "gemini-2.5-pro" },
+        ollama: { model: "gpt-oss:120b", cloudModel: "gpt-oss:120b", baseUrl: "http://ollama.com/" },
+      },
+    }) as unknown as Parameters<typeof createProvider>[0];
+
+  const withoutEnv = <T,>(fn: () => T): T => {
+    const saved = { ...process.env };
+    for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "OLLAMA_API_KEY"]) delete process.env[k];
+    try {
+      return fn();
+    } finally {
+      Object.assign(process.env, saved);
+    }
+  };
+
+  it("REACHES the ollama provider, instead of the placeholder", () => {
+    // The exact production shape: key in the file, nothing in the environment.
+    const store = { ollama: { key: "a-real-cloud-key" } } as never;
+    withoutEnv(() => {
+      const resolved = resolveKey("ollama", { store });
+      expect(resolved.source).toBe("file");
+      expect(resolved.key).toBe("a-real-cloud-key");
+      // And the provider must be built with THAT, not with "ollama".
+      const p = new OllamaProvider(cfg("ollama").providers.ollama, resolved.key);
+      expect((p as unknown as { client: { apiKey: string } }).client.apiKey).toBe("a-real-cloud-key");
+    });
+  });
+
+  it("still falls back to the placeholder when there is genuinely no key", () => {
+    // A local server takes any non-empty string, and demanding a key for
+    // localhost would break every offline install.
+    withoutEnv(() => {
+      const p = new OllamaProvider({ model: "qwen3", baseUrl: OLLAMA_LOCAL_URL });
+      expect((p as unknown as { client: { apiKey: string } }).client.apiKey).toBe("ollama");
+    });
+  });
+
+  it("passes a stored key to gemini rather than throwing", () => {
+    withoutEnv(() => {
+      expect(() => new GeminiProvider("gemini-2.5-pro", "a-stored-gemini-key")).not.toThrow();
+      // Without one it still names the environment variable, which is the right
+      // message when nothing is configured anywhere.
+      expect(() => new GeminiProvider("gemini-2.5-pro")).toThrow(/GEMINI_API_KEY/);
+    });
+  });
+
+  it("passes a stored key to openai rather than throwing", () => {
+    withoutEnv(() => {
+      expect(() => new OpenAIProvider("gpt-4.1", { apiKey: "a-stored-openai-key" })).not.toThrow();
+      expect(() => new OpenAIProvider("gpt-4.1")).toThrow(/OPENAI_API_KEY/);
+    });
   });
 });

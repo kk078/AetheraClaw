@@ -60,9 +60,12 @@ export class GeminiProvider implements ModelProvider {
   readonly model: string;
   private ai: GoogleGenAI;
 
-  constructor(model: string) {
+  constructor(model: string, key?: string) {
     this.model = model;
-    const apiKey = process.env.GEMINI_API_KEY;
+    // `key` is resolved by createProvider from the environment or the
+    // credentials file; the env fallback keeps a bare `new GeminiProvider()`
+    // working for tests and scripts.
+    const apiKey = key ?? process.env.GEMINI_API_KEY;
     if (!apiKey) {
       throw new Error(
         'GEMINI_API_KEY is not set. Export it, or switch provider with `provider: "anthropic" | "openai" | "ollama"` in ~/.orion/config.json5.',

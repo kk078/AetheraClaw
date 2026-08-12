@@ -153,7 +153,7 @@ import { resolvePosture } from "../config/posture.js";
 import { resolveEncryptionKey } from "../compliance/encryption.js";
 import { listDocuments, purgeDocuments } from "../ingest/store.js";
 import { ALL_PROVIDERS, evaluateSet, importFromEnv, promptHidden, renderList } from "./auth.js";
-import { credentialsPath, knownSecretValues, maskKey, removeCredential, setCredential } from "../config/credentials.js";
+import { credentialsPath, knownSecretValues, maskKey, removeCredential, resolveKey, setCredential } from "../config/credentials.js";
 import { redactSecrets } from "../config/secrets.js";
 import { discoverLocal, renderDiscovery } from "../providers/discover.js";
 import { writeLocalProvider } from "../config/write.js";
@@ -578,7 +578,7 @@ program
 /** What model each provider would actually use right now. */
 function modelFor(config: ReturnType<typeof loadConfig>, name: "anthropic" | "openai" | "gemini" | "ollama"): string {
   if (name !== "ollama") return config.providers[name].model;
-  const target = resolveOllamaTarget(config.providers.ollama, process.env.OLLAMA_API_KEY);
+  const target = resolveOllamaTarget(config.providers.ollama, resolveKey("ollama").key);
   return `${target.model} (${target.cloud ? "cloud" : "local"})`;
 }
 
