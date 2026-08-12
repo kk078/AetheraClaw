@@ -3,6 +3,7 @@ import type { Config } from "../config/config.js";
 import { MemoryStore } from "../memory/store.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { META_TOOLS } from "../tools/meta.js";
+import { askUserTool } from "../tools/ask-user.js";
 import { createShellTool } from "../tools/shell.js";
 import { listDirTool, readFileTool, writeFileTool } from "../tools/fs.js";
 import { webFetchTool, webSearchFallbackTool } from "../tools/web-fetch.js";
@@ -138,6 +139,7 @@ export function buildRegistry(config: Config, store: MemoryStore): ToolRegistry 
   registry.register(createShellTool({ ...config.shell, phiMode: config.healthcare.phiMode }));
   registry.registerAll([readFileTool, writeFileTool, listDirTool, webFetchTool]);
   registry.registerAll(META_TOOLS);
+  registry.register(askUserTool);
   if (config.provider !== "anthropic") registry.register(webSearchFallbackTool);
   // Research is registered for EVERY provider, unlike web_search above. It does
   // its own searching and fetching through the guarded fetcher rather than the
