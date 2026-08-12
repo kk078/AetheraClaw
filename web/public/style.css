@@ -154,8 +154,20 @@ a:hover { text-decoration: underline; }
   background: rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(30px) saturate(180%);
   -webkit-backdrop-filter: blur(30px) saturate(180%);
+  /* The ticker (below) already shrinks to nothing via min-width:0 + its own
+     overflow:hidden — that is the intended first casualty on a narrow window.
+     Below that, "Search tools" and the status pills must stay reachable rather
+     than clip: `body` is overflow:hidden (fixes the rail-under-the-fold bug),
+     so anything that overflowed the topbar without a scroll path of its own
+     would simply be gone, unreachable, the same failure the rail's own
+     overflow-y fix exists to prevent. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
 }
+.topbar::-webkit-scrollbar { display: none; }
 .topbar .spacer { flex: 1; }
+.topbar .pill, .topbar .sysbar { flex-shrink: 0; }
 
 .pill {
   display: inline-flex; align-items: center; gap: 7px;
