@@ -27,6 +27,12 @@ export const DEFAULT_CONFIG_JSON5 = `{
   // "never" = no approvals (NOT recommended).
   approvalPolicy: "unsafe-only",
 
+  // Whether the agent can pause a turn to ask a clarifying question (the
+  // ask_user tool) instead of guessing at an ambiguous request. An unanswered
+  // question times out after timeoutMs and the agent is told plainly, rather
+  // than left waiting.
+  // clarify: { enabled: true, timeoutMs: 120000 },
+
   gateway: { host: "127.0.0.1", port: 4180 },
 
   maxTokens: 64000,

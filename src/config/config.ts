@@ -52,6 +52,15 @@ export const ConfigSchema = z.object({
   toolLimits: z.record(z.number().int().positive()).default({}),
   workspaceRoot: z.string().default("~/orion-workspace"),
   approvalPolicy: z.enum(["always", "unsafe-only", "never"]).default("unsafe-only"),
+  // Whether the agent can pause a turn to ask the user a clarifying question
+  // (the ask_user tool). A core agent capability, not a voice-only one — same
+  // reasoning that keeps approvalPolicy un-nested rather than living under speech.
+  clarify: z
+    .object({
+      enabled: z.boolean().default(true),
+      timeoutMs: z.number().int().positive().default(120_000),
+    })
+    .default({}),
   gateway: z
     .object({
       host: z.string().default("127.0.0.1"),
