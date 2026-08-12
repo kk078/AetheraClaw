@@ -37,7 +37,7 @@ export interface Profile {
 // deal with payer behaviour rather than costing every profile a slot.
 const BASE = ["run_command", "read_file", "write_file", "list_dir", "web_fetch", "web_search",
   "tool_search", "tool_describe", "tool_invoke", "data_status", "tenant_current", "phi_access_record",
-  "research_deep", "briefing_daily"];
+  "research_deep", "briefing_daily", "ask_user"];
 
 export const PROFILES: Profile[] = [
   {
