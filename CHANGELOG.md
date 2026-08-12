@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.13 — 2026-08-12
+
+- The key typed into the console was never used (#29)
+
+
 ## v0.3.12 — 2026-08-12
 
 - The API key was going to Ollama Cloud over plain HTTP (#28)
