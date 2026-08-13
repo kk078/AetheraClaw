@@ -122,6 +122,28 @@ function openNodeSqlite(file: string, opts: OpenOptions): SqliteDb {
   };
 }
 
+/**
+ * Say out loud that the fast driver was wanted and the built-in was used.
+ *
+ * Once per process, not once per database file: tenancy opens one file per
+ * tenant and the reference tables open more, so a per-call line would bury the
+ * fact in noise. stderr rather than stdout, and never fatal — the fallback is a
+ * supported configuration, this is only a report of which one is running.
+ *
+ * One line, so `reason` is trimmed to the first line of the load error: a
+ * missing native module reports "Cannot find module …" followed by a multi-line
+ * require stack, and a warning that scrolls is a warning that gets skimmed.
+ */
+let announcedFallback = false;
+function announceFallback(reason: string): void {
+  if (announcedFallback) return;
+  announcedFallback = true;
+  console.error(
+    `[sqlite] wanted better-sqlite3, using node:sqlite — the optional native module did not load (${reason}). ` +
+      `Both drivers are supported; set ORION_SQLITE=node to choose this deliberately and silence this line.`,
+  );
+}
+
 function openBetterSqlite(file: string, opts: OpenOptions): SqliteDb | null {
   let Database: new (path: string, options?: { readonly?: boolean }) => {
     prepare(sql: string): SqliteStatement;
@@ -132,7 +154,11 @@ function openBetterSqlite(file: string, opts: OpenOptions): SqliteDb | null {
   };
   try {
     Database = require_("better-sqlite3") as never;
-  } catch {
+  } catch (err) {
+    // Only openDatabase consumes this null, and only to fall through to
+    // node:sqlite — so a failed load here IS the fallback, and saying so at the
+    // point the reason is still in hand keeps the reason in the message.
+    announceFallback((err instanceof Error ? err.message : String(err)).split("\n")[0] ?? "");
     return null;
   }
   const db = opts.readonly ? new Database(file, { readonly: true }) : new Database(file);
