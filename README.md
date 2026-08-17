@@ -71,8 +71,8 @@ falls back to Node's built-in `node:sqlite` automatically, which is why it is an
 *optional* dependency rather than a required one.
 
 ```bash
-git clone -b claude/openclaw-functionalities-xljw65 https://github.com/kk078/Orion.git
-cd Orion
+git clone -b claude/openclaw-functionalities-xljw65 https://github.com/kk078/AetheraClaw.git
+cd AetheraClaw
 npm start
 ```
 
@@ -863,8 +863,8 @@ the failure that rule exists for.
 It runs on your own machine — there is no hosted instance. `127.0.0.1:4180` only answers on the box where you started the gateway.
 
 ```bash
-git clone https://github.com/kk078/Orion.git
-cd Orion
+git clone https://github.com/kk078/AetheraClaw.git
+cd AetheraClaw
 npm install
 npm run build
 ```
